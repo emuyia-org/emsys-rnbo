@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 419.0, 102.0, 1061.0, 742.0 ],
+		"rect" : [ 1079.0, 336.0, 1061.0, 742.0 ],
 		"gridsize" : [ 15.0, 15.0 ],
 		"boxes" : [ 			{
 				"box" : 				{
@@ -164,7 +164,7 @@
 
 							}
  ],
-						"originid" : "pat-10"
+						"originid" : "pat-35"
 					}
 ,
 					"patching_rect" : [ 46.0, 199.0, 125.0, 22.0 ],
@@ -483,9 +483,9 @@
 									"outlettype" : [ "signal" ],
 									"patching_rect" : [ 71.0, 149.0, 33.0, 23.0 ],
 									"rnbo_classname" : "*~",
-									"rnbo_serial" : 1,
+									"rnbo_serial" : 2,
 									"rnbo_uniqueid" : "*~_obj-12",
-									"text" : "*~ 1."
+									"text" : "*~ 0."
 								}
 
 							}
@@ -741,7 +741,7 @@
 
 							}
  ],
-						"originid" : "pat-12"
+						"originid" : "pat-37"
 					}
 ,
 					"patching_rect" : [ 257.0, 84.0, 99.0, 22.0 ],
@@ -914,7 +914,7 @@
 
 			}
  ],
-		"originid" : "pat-8",
+		"originid" : "pat-33",
 		"parameters" : 		{
 			"obj-13" : [ "rnbo~[1]", "rnbo~[1]", 0 ],
 			"obj-2" : [ "rnbo~", "rnbo~", 0 ],
