@@ -2,7 +2,7 @@
 	"name" : "max",
 	"version" : 1,
 	"creationdate" : 3826370838,
-	"modificationdate" : 3826383899,
+	"modificationdate" : 3826448623,
 	"viewrect" : [ 76.0, 163.0, 300.0, 500.0 ],
 	"autoorganize" : 1,
 	"hideprojectwindow" : 0,
@@ -12,13 +12,13 @@
 		"patchers" : 		{
 			"rnbo-test.maxpat" : 			{
 				"kind" : "patcher",
-				"local" : 1,
-				"toplevel" : 1
+				"local" : 1
 			}
 ,
 			"main.maxpat" : 			{
 				"kind" : "patcher",
-				"local" : 1
+				"local" : 1,
+				"toplevel" : 1
 			}
 
 		}
