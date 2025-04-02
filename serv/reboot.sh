@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Allow use of this script for pisound button:
-# sudo ln -s /home/patch/repos/emsys/serv/reboot.sh /usr/local/pisound/scripts/pisound-btn/reboot.sh
+# sudo ln -s /home/pi/emsys-rnbo/serv/reboot.sh /usr/local/pisound/scripts/pisound-btn/reboot.sh
 
 . /usr/local/pisound/scripts/common/common.sh
 
