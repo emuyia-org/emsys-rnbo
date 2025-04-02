@@ -567,8 +567,8 @@
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 521.0, 220.0, 168.0, 23.0 ],
-					"text" : "print midi_debug @popup 1"
+					"patching_rect" : [ 521.0, 230.0, 135.0, 23.0 ],
+					"text" : "print midiin @popup 1"
 				}
 
 			}
@@ -581,7 +581,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "int" ],
-					"patching_rect" : [ 521.0, 176.0, 45.0, 23.0 ],
+					"patching_rect" : [ 521.0, 176.0, 42.0, 23.0 ],
 					"text" : "midiin"
 				}
 
