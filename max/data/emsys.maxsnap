@@ -23,11 +23,20 @@
 			}
 ,
 			"p_obj-6" : 			{
-				"__sps" : 				{
-					"simulated_midi_clock" : 					{
-
-					}
-
+				"Transport.Tempo" : 				{
+					"value" : 120.446096654275081
+				}
+,
+				"Transport.Continue" : 				{
+					"value" : 0.0
+				}
+,
+				"Transport.Stop" : 				{
+					"value" : 0.0
+				}
+,
+				"Transport.Prime" : 				{
+					"value" : 0.0
 				}
 
 			}
