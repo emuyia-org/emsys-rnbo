@@ -1,11 +1,11 @@
 {
-	"name" : "emsys-rnbo",
+	"name" : "src",
 	"version" : 1,
 	"creationdate" : 3826370838,
-	"modificationdate" : 3826534763,
+	"modificationdate" : 3826548446,
 	"viewrect" : [ 76.0, 163.0, 300.0, 500.0 ],
 	"autoorganize" : 1,
-	"hideprojectwindow" : 0,
+	"hideprojectwindow" : 1,
 	"showdependencies" : 1,
 	"autolocalize" : 0,
 	"contents" : 	{
