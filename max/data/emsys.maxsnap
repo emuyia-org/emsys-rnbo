@@ -23,16 +23,16 @@
 			}
 ,
 			"p_obj-6" : 			{
-				"Transport.Tempo" : 				{
-					"value" : 120.446096654275081
-				}
-,
 				"Transport.Continue" : 				{
 					"value" : 0.0
 				}
 ,
 				"Transport.Stop" : 				{
 					"value" : 0.0
+				}
+,
+				"Transport.Tempo" : 				{
+					"value" : 120.446096654275081
 				}
 ,
 				"Transport.Prime" : 				{
