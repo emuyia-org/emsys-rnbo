@@ -10,7 +10,8 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 1105.0, 357.0, 766.0, 624.0 ],
+		"rect" : [ -31958.0, -31915.0, 712.0, 596.0 ],
+		"openinpresentation" : 1,
 		"gridsize" : [ 15.0, 15.0 ],
 		"boxes" : [ 			{
 				"box" : 				{
@@ -86,7 +87,7 @@
 					"parameter_enable" : 1,
 					"patching_rect" : [ 441.0, 327.0, 126.0, 23.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 9.0, 7.0, 96.0, 23.0 ],
+					"presentation_rect" : [ 9.0, 34.0, 96.0, 23.0 ],
 					"saved_attribute_attributes" : 					{
 						"activebgcolor" : 						{
 							"expression" : ""
@@ -131,7 +132,7 @@
 					"parameter_enable" : 1,
 					"patching_rect" : [ 307.0, 287.0, 95.0, 28.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 9.0, 57.0, 96.0, 23.0 ],
+					"presentation_rect" : [ 9.0, 84.0, 96.0, 23.0 ],
 					"saved_attribute_attributes" : 					{
 						"activebgcolor" : 						{
 							"expression" : ""
@@ -167,7 +168,7 @@
 					"parameter_enable" : 1,
 					"patching_rect" : [ 205.0, 287.0, 72.0, 28.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 9.0, 82.0, 96.0, 23.0 ],
+					"presentation_rect" : [ 9.0, 109.0, 96.0, 23.0 ],
 					"saved_attribute_attributes" : 					{
 						"activebgcolor" : 						{
 							"expression" : ""
@@ -203,7 +204,7 @@
 					"parameter_enable" : 1,
 					"patching_rect" : [ 95.0, 287.0, 73.0, 28.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 9.0, 32.0, 96.0, 23.0 ],
+					"presentation_rect" : [ 9.0, 59.0, 96.0, 23.0 ],
 					"saved_attribute_attributes" : 					{
 						"activebgcolor" : 						{
 							"expression" : ""
@@ -567,7 +568,7 @@
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 521.0, 230.0, 135.0, 23.0 ],
+					"patching_rect" : [ 521.0, 215.0, 135.0, 23.0 ],
 					"text" : "print midiin @popup 1"
 				}
 
@@ -643,25 +644,47 @@
 						}
 ,
 						"classnamespace" : "rnbo",
-						"rect" : [ 455.0, 152.0, 692.0, 679.0 ],
+						"rect" : [ 850.0, 192.0, 692.0, 679.0 ],
 						"default_fontname" : "Lato",
 						"gridsize" : [ 15.0, 15.0 ],
 						"title" : "emsys",
 						"boxes" : [ 							{
+								"box" : 								{
+									"id" : "obj-15",
+									"maxclass" : "comment",
+									"numinlets" : 1,
+									"numoutlets" : 0,
+									"patching_rect" : [ 170.0, 71.0, 72.0, 21.0 ],
+									"text" : "initialisation"
+								}
+
+							}
+, 							{
+								"box" : 								{
+									"id" : "obj-13",
+									"maxclass" : "comment",
+									"numinlets" : 1,
+									"numoutlets" : 0,
+									"patching_rect" : [ 30.0, 71.0, 31.0, 21.0 ],
+									"text" : "core"
+								}
+
+							}
+, 							{
 								"box" : 								{
 									"id" : "obj-4",
 									"maxclass" : "newobj",
 									"numinlets" : 0,
 									"numoutlets" : 1,
 									"outlettype" : [ "signal" ],
-									"patching_rect" : [ 91.0, 245.0, 35.0, 23.0 ],
+									"patching_rect" : [ 66.0, 19.0, 35.0, 23.0 ],
 									"rnbo_classname" : "in~",
 									"rnbo_extra_attributes" : 									{
 										"comment" : "",
 										"meta" : ""
 									}
 ,
-									"rnbo_serial" : 3,
+									"rnbo_serial" : 1,
 									"rnbo_uniqueid" : "in~_obj-4",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -750,14 +773,14 @@
 									"numinlets" : 0,
 									"numoutlets" : 1,
 									"outlettype" : [ "signal" ],
-									"patching_rect" : [ 29.0, 245.0, 35.0, 23.0 ],
+									"patching_rect" : [ 30.0, 19.0, 35.0, 23.0 ],
 									"rnbo_classname" : "in~",
 									"rnbo_extra_attributes" : 									{
 										"comment" : "",
 										"meta" : ""
 									}
 ,
-									"rnbo_serial" : 1,
+									"rnbo_serial" : 2,
 									"rnbo_uniqueid" : "in~_obj-3",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -845,14 +868,14 @@
 									"maxclass" : "newobj",
 									"numinlets" : 1,
 									"numoutlets" : 0,
-									"patching_rect" : [ 91.0, 294.0, 43.0, 23.0 ],
+									"patching_rect" : [ 148.0, 19.0, 43.0, 23.0 ],
 									"rnbo_classname" : "out~",
 									"rnbo_extra_attributes" : 									{
 										"comment" : "",
 										"meta" : ""
 									}
 ,
-									"rnbo_serial" : 3,
+									"rnbo_serial" : 1,
 									"rnbo_uniqueid" : "out~_obj-2",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -941,14 +964,14 @@
 									"maxclass" : "newobj",
 									"numinlets" : 1,
 									"numoutlets" : 0,
-									"patching_rect" : [ 29.0, 294.0, 43.0, 23.0 ],
+									"patching_rect" : [ 103.0, 19.0, 43.0, 23.0 ],
 									"rnbo_classname" : "out~",
 									"rnbo_extra_attributes" : 									{
 										"comment" : "",
 										"meta" : ""
 									}
 ,
-									"rnbo_serial" : 1,
+									"rnbo_serial" : 2,
 									"rnbo_uniqueid" : "out~_obj-1",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -1037,18 +1060,18 @@
 									"maxclass" : "newobj",
 									"numinlets" : 1,
 									"numoutlets" : 0,
-									"patching_rect" : [ 29.0, 84.0, 106.0, 23.0 ],
+									"patching_rect" : [ 30.0, 131.0, 89.0, 23.0 ],
 									"rnbo_classname" : "p",
 									"rnbo_extra_attributes" : 									{
-										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
-										"exposevoiceparams" : 0,
+										"polyphony" : -1.0,
 										"notecontroller" : 0,
-										"voicecontrol" : "simple"
+										"voicecontrol" : "simple",
+										"exposevoiceparams" : 0
 									}
 ,
-									"rnbo_serial" : 1,
+									"rnbo_serial" : 2,
 									"rnbo_uniqueid" : "p_obj-10",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -1249,229 +1272,7 @@
 										"changesPatcherIO" : 0
 									}
 ,
-									"text" : "p @file set_service"
-								}
-
-							}
-, 							{
-								"box" : 								{
-									"id" : "obj-9",
-									"maxclass" : "newobj",
-									"numinlets" : 1,
-									"numoutlets" : 0,
-									"patching_rect" : [ 29.0, 53.0, 135.0, 23.0 ],
-									"rnbo_classname" : "p",
-									"rnbo_extra_attributes" : 									{
-										"polyphony" : -1.0,
-										"args" : [  ],
-										"receivemode" : "local",
-										"exposevoiceparams" : 0,
-										"notecontroller" : 0,
-										"voicecontrol" : "simple"
-									}
-,
-									"rnbo_serial" : 2,
-									"rnbo_uniqueid" : "p_obj-9",
-									"rnboinfo" : 									{
-										"needsInstanceInfo" : 1,
-										"argnames" : 										{
-											"target" : 											{
-												"attrOrProp" : 1,
-												"digest" : "target",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 0,
-												"attachable" : 1,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "number",
-												"defaultValue" : "0"
-											}
-,
-											"mute" : 											{
-												"attrOrProp" : 1,
-												"digest" : "mute",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"attachable" : 1,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "number"
-											}
-,
-											"dummy" : 											{
-												"attrOrProp" : 1,
-												"digest" : "Dummy inlet that lets you connect a set object to send mute messages.",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"inlet" : 1,
-												"type" : "number"
-											}
-,
-											"__probingout1" : 											{
-												"attrOrProp" : 1,
-												"digest" : "__probingout1",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "signal"
-											}
-,
-											"voicestatus" : 											{
-												"attrOrProp" : 1,
-												"digest" : "voicestatus",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"attachable" : 1,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "list"
-											}
-,
-											"activevoices" : 											{
-												"attrOrProp" : 1,
-												"digest" : "activevoices",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 0,
-												"attachable" : 1,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "number"
-											}
-,
-											"polyphony" : 											{
-												"attrOrProp" : 2,
-												"digest" : "Polyphony of the subpatcher.",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "number",
-												"defaultValue" : "-1"
-											}
-,
-											"exposevoiceparams" : 											{
-												"attrOrProp" : 2,
-												"digest" : "Expose per voice versions of the contained parameters (only valid in polyphonic subpatchers).",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "bool",
-												"defaultValue" : "false"
-											}
-,
-											"title" : 											{
-												"attrOrProp" : 2,
-												"digest" : "Title of the subpatcher",
-												"defaultarg" : 1,
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "symbol",
-												"doNotShowInMaxInspector" : 1
-											}
-,
-											"file" : 											{
-												"attrOrProp" : 2,
-												"digest" : "rnbo file to load",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "symbol",
-												"doNotShowInMaxInspector" : 1
-											}
-,
-											"voicecontrol" : 											{
-												"attrOrProp" : 2,
-												"digest" : "Chooses the way that polyphonic voices are controlled. 'simple' (or 'midi') will automatically allocate voices for \tincoming MIDI notes. Setting it to 'user' (or 'none') will switch off MIDI \tvoice allocation and start with all voices unmuted.",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"enum" : [ "simple", "user" ],
-												"type" : "enum",
-												"defaultValue" : "simple"
-											}
-,
-											"notecontroller" : 											{
-												"attrOrProp" : 2,
-												"digest" : "DEPRECATED. Use voicecontrol instead.",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "symbol",
-												"doNotShowInMaxInspector" : 1
-											}
-,
-											"receivemode" : 											{
-												"attrOrProp" : 2,
-												"digest" : "Do receive~ objects get the signal from a send~ inside the patcher directly (without latency), or compensated (with latency, aligned with all other voices).",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"enum" : [ "local", "compensated" ],
-												"type" : "enum",
-												"defaultValue" : "local"
-											}
-,
-											"args" : 											{
-												"attrOrProp" : 2,
-												"digest" : "Replacement args for the subpatcher, everything named #1, #2 etc. will be replaced with the according argument.",
-												"isalias" : 0,
-												"aliases" : [  ],
-												"settable" : 1,
-												"attachable" : 0,
-												"isparam" : 0,
-												"deprecated" : 0,
-												"type" : "symbol",
-												"doNotShowInMaxInspector" : 1
-											}
-
-										}
-,
-										"inputs" : [ 											{
-												"name" : "dummy",
-												"type" : "number",
-												"digest" : "Dummy inlet that lets you connect a set object to send mute messages.",
-												"hot" : 1,
-												"docked" : 0
-											}
- ],
-										"outputs" : [  ],
-										"helpname" : "patcher",
-										"aliasOf" : "rnbo",
-										"classname" : "p",
-										"operator" : 0,
-										"versionId" : 88895198,
-										"changesPatcherIO" : 0
-									}
-,
-									"text" : "p @file segment_service"
+									"text" : "p @file core.set"
 								}
 
 							}
@@ -1481,18 +1282,18 @@
 									"maxclass" : "newobj",
 									"numinlets" : 1,
 									"numoutlets" : 0,
-									"patching_rect" : [ 29.0, 115.0, 168.0, 23.0 ],
+									"patching_rect" : [ 170.0, 106.0, 151.0, 23.0 ],
 									"rnbo_classname" : "p",
 									"rnbo_extra_attributes" : 									{
-										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
-										"exposevoiceparams" : 0,
+										"polyphony" : -1.0,
 										"notecontroller" : 0,
-										"voicecontrol" : "simple"
+										"voicecontrol" : "simple",
+										"exposevoiceparams" : 0
 									}
 ,
-									"rnbo_serial" : 3,
+									"rnbo_serial" : 4,
 									"rnbo_uniqueid" : "p_obj-8",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -1693,7 +1494,7 @@
 										"changesPatcherIO" : 0
 									}
 ,
-									"text" : "p @file midi_control_mappings"
+									"text" : "p @file load.midi_mappings"
 								}
 
 							}
@@ -1703,18 +1504,18 @@
 									"maxclass" : "newobj",
 									"numinlets" : 1,
 									"numoutlets" : 0,
-									"patching_rect" : [ 29.0, 22.0, 139.0, 23.0 ],
+									"patching_rect" : [ 30.0, 106.0, 122.0, 23.0 ],
 									"rnbo_classname" : "p",
 									"rnbo_extra_attributes" : 									{
-										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
-										"exposevoiceparams" : 0,
+										"polyphony" : -1.0,
 										"notecontroller" : 0,
-										"voicecontrol" : "simple"
+										"voicecontrol" : "simple",
+										"exposevoiceparams" : 0
 									}
 ,
-									"rnbo_serial" : 4,
+									"rnbo_serial" : 5,
 									"rnbo_uniqueid" : "p_obj-6",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -3118,39 +2919,53 @@
 										"changesPatcherIO" : 0
 									}
 ,
-									"text" : "p @file transport_service"
+									"text" : "p @file core.transport"
 								}
 
 							}
  ],
 						"lines" : [  ],
-						"originid" : "pat-14"
+						"originid" : "pat-12"
 					}
 ,
 					"patching_rect" : [ 260.0, 484.0, 112.0, 22.0 ],
+					"presentation" : 1,
+					"presentation_rect" : [ 3.0, 1.0, 112.0, 22.0 ],
 					"rnboattrcache" : 					{
-						"p_obj-6/Transport.Continue" : 						{
-							"label" : "Transport.Continue",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
-						"p_obj-6/Transport.Stop" : 						{
-							"label" : "Transport.Stop",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
-						"p_obj-6/Transport.Prime" : 						{
-							"label" : "Transport.Prime",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
 						"p_obj-6/Transport.Tempo" : 						{
 							"label" : "Transport.Tempo",
 							"isEnum" : 0,
 							"parsestring" : ""
+						}
+,
+						"p_obj-10/mm_pgm" : 						{
+							"label" : "mm_pgm",
+							"isEnum" : 1,
+							"parsestring" : "\"A01\" \"A02\" \"A03\" \"A04\" \"A05\" \"A06\" \"A07\" \"A08\" \"A09\" \"A10\" \"A11\" \"A12\" \"A13\" \"A14\" \"A15\" \"A16\" \"B01\" \"B02\" \"B03\" \"B04\" \"B05\" \"B06\" \"B07\" \"B08\" \"B09\" \"B10\" \"B11\" \"B12\" \"B13\" \"B14\" \"B15\" \"B16\" \"C01\" \"C02\" \"C03\" \"C04\" \"C05\" \"C06\" \"C07\" \"C08\" \"C09\" \"C10\" \"C11\" \"C12\" \"C13\" \"C14\" \"C15\" \"C16\" \"D01\" \"D02\" \"D03\" \"D04\" \"D05\" \"D06\" \"D07\" \"D08\" \"D09\" \"D10\" \"D11\" \"D12\" \"D13\" \"D14\" \"D15\" \"D16\" \"E01\" \"E02\" \"E03\" \"E04\" \"E05\" \"E06\" \"E07\" \"E08\" \"E09\" \"E10\" \"E11\" \"E12\" \"E13\" \"E14\" \"E15\" \"E16\" \"F01\" \"F02\" \"F03\" \"F04\" \"F05\" \"F06\" \"F07\" \"F08\" \"F09\" \"F10\" \"F11\" \"F12\" \"F13\" \"F14\" \"F15\" \"F16\" \"G01\" \"G02\" \"G03\" \"G04\" \"G05\" \"G06\" \"G07\" \"G08\" \"G09\" \"G10\" \"G11\" \"G12\" \"G13\" \"G14\" \"G15\" \"G16\" \"H01\" \"H02\" \"H03\" \"H04\" \"H05\" \"H06\" \"H07\" \"H08\" \"H09\" \"H10\" \"H11\" \"H12\" \"H13\" \"H14\" \"H15\" \"H16\""
+						}
+,
+						"p_obj-10/md_pgm" : 						{
+							"label" : "md_pgm",
+							"isEnum" : 1,
+							"parsestring" : "\"A01\" \"A02\" \"A03\" \"A04\" \"A05\" \"A06\" \"A07\" \"A08\" \"A09\" \"A10\" \"A11\" \"A12\" \"A13\" \"A14\" \"A15\" \"A16\" \"B01\" \"B02\" \"B03\" \"B04\" \"B05\" \"B06\" \"B07\" \"B08\" \"B09\" \"B10\" \"B11\" \"B12\" \"B13\" \"B14\" \"B15\" \"B16\" \"C01\" \"C02\" \"C03\" \"C04\" \"C05\" \"C06\" \"C07\" \"C08\" \"C09\" \"C10\" \"C11\" \"C12\" \"C13\" \"C14\" \"C15\" \"C16\" \"D01\" \"D02\" \"D03\" \"D04\" \"D05\" \"D06\" \"D07\" \"D08\" \"D09\" \"D10\" \"D11\" \"D12\" \"D13\" \"D14\" \"D15\" \"D16\" \"E01\" \"E02\" \"E03\" \"E04\" \"E05\" \"E06\" \"E07\" \"E08\" \"E09\" \"E10\" \"E11\" \"E12\" \"E13\" \"E14\" \"E15\" \"E16\" \"F01\" \"F02\" \"F03\" \"F04\" \"F05\" \"F06\" \"F07\" \"F08\" \"F09\" \"F10\" \"F11\" \"F12\" \"F13\" \"F14\" \"F15\" \"F16\" \"G01\" \"G02\" \"G03\" \"G04\" \"G05\" \"G06\" \"G07\" \"G08\" \"G09\" \"G10\" \"G11\" \"G12\" \"G13\" \"G14\" \"G15\" \"G16\" \"H01\" \"H02\" \"H03\" \"H04\" \"H05\" \"H06\" \"H07\" \"H08\" \"H09\" \"H10\" \"H11\" \"H12\" \"H13\" \"H14\" \"H15\" \"H16\""
+						}
+,
+						"p_obj-6/Transport.Continue" : 						{
+							"label" : "Transport.Continue",
+							"isEnum" : 1,
+							"parsestring" : "\"X\""
+						}
+,
+						"p_obj-6/Transport.Stop" : 						{
+							"label" : "Transport.Stop",
+							"isEnum" : 1,
+							"parsestring" : "\"X\""
+						}
+,
+						"p_obj-6/Transport.Prime" : 						{
+							"label" : "Transport.Prime",
+							"isEnum" : 1,
+							"parsestring" : "\"X\""
 						}
 
 					}
@@ -3185,15 +3000,22 @@
 						"snapshot" : 						{
 							"__presetid" : "emsys",
 							"__sps" : 							{
-								"p_obj-9" : 								{
+								"p_obj-5" : 								{
 
 								}
 ,
 								"p_obj-10" : 								{
+									"mm_pgm" : 									{
+										"value" : 0.0
+									}
+,
+									"md_pgm" : 									{
+										"value" : 0.0
+									}
 
 								}
 ,
-								"p_obj-8" : 								{
+								"p_obj-9" : 								{
 
 								}
 ,
@@ -3215,6 +3037,10 @@
 									}
 
 								}
+,
+								"p_obj-8" : 								{
+
+								}
 
 							}
 
@@ -3230,19 +3056,26 @@
 									"origin" : "emsys",
 									"type" : "rnbo",
 									"subtype" : "",
-									"embed" : 0,
+									"embed" : 1,
 									"snapshot" : 									{
 										"__presetid" : "emsys",
 										"__sps" : 										{
-											"p_obj-9" : 											{
+											"p_obj-5" : 											{
 
 											}
 ,
 											"p_obj-10" : 											{
+												"mm_pgm" : 												{
+													"value" : 0.0
+												}
+,
+												"md_pgm" : 												{
+													"value" : 0.0
+												}
 
 											}
 ,
-											"p_obj-8" : 											{
+											"p_obj-9" : 											{
 
 											}
 ,
@@ -3264,6 +3097,10 @@
 												}
 
 											}
+,
+											"p_obj-8" : 											{
+
+											}
 
 										}
 
@@ -3271,10 +3108,10 @@
 ,
 									"fileref" : 									{
 										"name" : "emsys",
-										"filename" : "emsys.maxsnap",
-										"filepath" : "~/repos/emsys-rnbo/max/data",
+										"filename" : "emsys_20250403_1.maxsnap",
+										"filepath" : "~/repos/emsys-rnbo/src/data",
 										"filepos" : -1,
-										"snapshotfileid" : "c5d3270446420d4b8f3e524152b78d09"
+										"snapshotfileid" : "b12f793825d810d00decb4b36c57f0f3"
 									}
 
 								}
@@ -3324,7 +3161,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 16.0, 230.0, 68.0, 44.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 2.0, 1.0, 114.0, 114.0 ],
+					"presentation_rect" : [ 2.0, 28.0, 114.0, 114.0 ],
 					"proportion" : 0.5
 				}
 
@@ -3491,8 +3328,8 @@
 		}
 ,
 		"dependency_cache" : [ 			{
-				"name" : "emsys.maxsnap",
-				"bootpath" : "~/repos/emsys-rnbo/max/data",
+				"name" : "emsys_20250403_1.maxsnap",
+				"bootpath" : "~/repos/emsys-rnbo/src/data",
 				"patcherrelativepath" : "../data",
 				"type" : "mx@s",
 				"implicit" : 1

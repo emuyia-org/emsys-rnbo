@@ -10,10 +10,10 @@
 		}
 ,
 		"classnamespace" : "rnbo",
-		"rect" : [ 33.0, 237.0, 1000.0, 754.0 ],
+		"rect" : [ 487.0, 227.0, 1000.0, 754.0 ],
 		"default_fontname" : "Lato",
 		"gridsize" : [ 15.0, 15.0 ],
-		"title" : "transport_service",
+		"title" : "core.transport",
 		"boxes" : [ 			{
 				"box" : 				{
 					"id" : "obj-88",
@@ -183,22 +183,22 @@
 					"patching_rect" : [ 461.0, 606.0, 154.0, 37.0 ],
 					"rnbo_classname" : "param",
 					"rnbo_extra_attributes" : 					{
-						"unit" : "",
-						"tonormalized" : "",
-						"exponent" : 1.0,
-						"displayname" : "",
-						"preset" : 1,
-						"enum" : "",
-						"fromnormalized" : "",
-						"value" : 0.0,
 						"displayorder" : "-",
+						"fromnormalized" : "",
+						"tonormalized" : "",
+						"enum" : "X",
+						"unit" : "",
 						"order" : "0",
+						"preset" : 1,
+						"exponent" : 1.0,
+						"value" : 0.0,
 						"sendinit" : 1,
+						"meta" : "",
 						"ctlin" : 0.0,
-						"meta" : ""
+						"displayname" : "Transport.Prime"
 					}
 ,
-					"rnbo_serial" : 1,
+					"rnbo_serial" : 17,
 					"rnbo_uniqueid" : "Transport.Prime",
 					"rnboinfo" : 					{
 						"needsInstanceInfo" : 1,
@@ -631,22 +631,22 @@
 					"patching_rect" : [ 284.0, 606.0, 147.0, 37.0 ],
 					"rnbo_classname" : "param",
 					"rnbo_extra_attributes" : 					{
-						"unit" : "",
-						"tonormalized" : "",
-						"exponent" : 1.0,
-						"displayname" : "",
-						"preset" : 1,
-						"enum" : "",
-						"fromnormalized" : "",
-						"value" : 0.0,
 						"displayorder" : "-",
+						"fromnormalized" : "",
+						"tonormalized" : "",
+						"enum" : "X",
+						"unit" : "",
 						"order" : "0",
+						"preset" : 1,
+						"exponent" : 1.0,
+						"value" : 0.0,
 						"sendinit" : 1,
+						"meta" : "",
 						"ctlin" : 0.0,
-						"meta" : ""
+						"displayname" : "Transport.Stop"
 					}
 ,
-					"rnbo_serial" : 2,
+					"rnbo_serial" : 15,
 					"rnbo_uniqueid" : "Transport.Stop",
 					"rnboinfo" : 					{
 						"needsInstanceInfo" : 1,
@@ -1079,22 +1079,22 @@
 					"patching_rect" : [ 77.0, 606.0, 171.0, 37.0 ],
 					"rnbo_classname" : "param",
 					"rnbo_extra_attributes" : 					{
-						"unit" : "",
-						"tonormalized" : "",
-						"exponent" : 1.0,
-						"displayname" : "",
-						"preset" : 1,
-						"enum" : "",
-						"fromnormalized" : "",
-						"value" : 0.0,
 						"displayorder" : "-",
+						"fromnormalized" : "",
+						"tonormalized" : "",
+						"enum" : "X",
+						"unit" : "",
 						"order" : "0",
+						"preset" : 1,
+						"exponent" : 1.0,
+						"value" : 0.0,
 						"sendinit" : 1,
+						"meta" : "",
 						"ctlin" : 0.0,
-						"meta" : ""
+						"displayname" : "Transport.Continune"
 					}
 ,
-					"rnbo_serial" : 3,
+					"rnbo_serial" : 13,
 					"rnbo_uniqueid" : "Transport.Continue",
 					"rnboinfo" : 					{
 						"needsInstanceInfo" : 1,
@@ -1512,21 +1512,21 @@
 					"patching_rect" : [ 289.0, 261.0, 207.0, 37.0 ],
 					"rnbo_classname" : "param",
 					"rnbo_extra_attributes" : 					{
-						"unit" : "",
-						"tonormalized" : "",
-						"exponent" : 1.0,
-						"displayname" : "",
-						"preset" : 1,
-						"enum" : "",
-						"fromnormalized" : "",
 						"displayorder" : "-",
+						"fromnormalized" : "",
+						"tonormalized" : "",
+						"enum" : "",
+						"unit" : "bpm",
 						"order" : "0",
+						"preset" : 1,
+						"exponent" : 1.0,
 						"sendinit" : 1,
+						"meta" : "",
 						"ctlin" : 0.0,
-						"meta" : ""
+						"displayname" : "Transport.Tempo"
 					}
 ,
-					"rnbo_serial" : 4,
+					"rnbo_serial" : 19,
 					"rnbo_uniqueid" : "Transport.Tempo",
 					"rnboinfo" : 					{
 						"needsInstanceInfo" : 1,
@@ -2331,9 +2331,9 @@
 					"rnbo_extra_attributes" : 					{
 						"minimum" : "<none>",
 						"maximum" : "<none>",
-						"preset" : 0,
+						"initialFormat" : "float",
 						"order" : "",
-						"initialFormat" : "float"
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 1,
@@ -2352,8 +2352,8 @@
 					"patching_rect" : [ 235.0, 263.0, 24.0, 24.0 ],
 					"rnbo_classname" : "toggle",
 					"rnbo_extra_attributes" : 					{
-						"preset" : 0,
-						"order" : ""
+						"order" : "",
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 1,
@@ -2572,7 +2572,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 160.0, 263.5, 49.0, 23.0 ],
 					"rnbo_classname" : "midiout",
-					"rnbo_serial" : 2,
+					"rnbo_serial" : 1,
 					"rnbo_uniqueid" : "midiout_obj-127",
 					"text" : "midiout"
 				}
@@ -2607,9 +2607,9 @@
 					"rnbo_extra_attributes" : 					{
 						"minimum" : "<none>",
 						"maximum" : "<none>",
-						"preset" : 0,
+						"initialFormat" : "integer",
 						"order" : "",
-						"initialFormat" : "integer"
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 2,
@@ -2645,9 +2645,9 @@
 					"rnbo_extra_attributes" : 					{
 						"minimum" : "<none>",
 						"maximum" : "<none>",
-						"preset" : 0,
+						"initialFormat" : "integer",
 						"order" : "",
-						"initialFormat" : "integer"
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 3,
@@ -3037,9 +3037,9 @@
 					"rnbo_extra_attributes" : 					{
 						"minimum" : "<none>",
 						"maximum" : "<none>",
-						"preset" : 0,
+						"initialFormat" : "integer",
 						"order" : "",
-						"initialFormat" : "integer"
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 4,
@@ -3401,9 +3401,9 @@
 					"rnbo_extra_attributes" : 					{
 						"minimum" : "<none>",
 						"maximum" : "<none>",
-						"preset" : 0,
+						"initialFormat" : "integer",
 						"order" : "",
-						"initialFormat" : "integer"
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 5,
@@ -3892,9 +3892,9 @@
 					"rnbo_extra_attributes" : 					{
 						"minimum" : "<none>",
 						"maximum" : "<none>",
-						"preset" : 0,
+						"initialFormat" : "integer",
 						"order" : "",
-						"initialFormat" : "integer"
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 6,
@@ -4360,9 +4360,9 @@
 					"rnbo_extra_attributes" : 					{
 						"minimum" : "<none>",
 						"maximum" : "<none>",
-						"preset" : 0,
+						"initialFormat" : "integer",
 						"order" : "",
-						"initialFormat" : "integer"
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 7,

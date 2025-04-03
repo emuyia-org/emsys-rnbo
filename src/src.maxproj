@@ -1,8 +1,8 @@
 {
-	"name" : "max",
+	"name" : "emsys-rnbo",
 	"version" : 1,
 	"creationdate" : 3826370838,
-	"modificationdate" : 3826448623,
+	"modificationdate" : 3826534763,
 	"viewrect" : [ 76.0, 163.0, 300.0, 500.0 ],
 	"autoorganize" : 1,
 	"hideprojectwindow" : 0,
@@ -10,11 +10,6 @@
 	"autolocalize" : 0,
 	"contents" : 	{
 		"patchers" : 		{
-			"rnbo-test.maxpat" : 			{
-				"kind" : "patcher",
-				"local" : 1
-			}
-,
 			"main.maxpat" : 			{
 				"kind" : "patcher",
 				"local" : 1,

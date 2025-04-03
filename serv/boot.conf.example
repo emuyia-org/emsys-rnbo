@@ -1,9 +1,0 @@
-mset init.mset;
-ml3.midich 17;
-ml3.midich.pads 26;
-md.midich.pgm 30;
-md.midich.notes 26;
-mnm.midich.pgm 63;
-mnm.midich.notes 25;
-cc.tempo.tog 0;
-cc.midich 61;

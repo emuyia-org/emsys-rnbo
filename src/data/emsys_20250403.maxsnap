@@ -1,0 +1,52 @@
+{
+	"filetype" : "C74Snapshot",
+	"version" : 2,
+	"minorversion" : 0,
+	"name" : "emsys",
+	"origin" : "emsys",
+	"type" : "rnbo",
+	"subtype" : "",
+	"embed" : 1,
+	"snapshot" : 	{
+		"__presetid" : "emsys",
+		"__sps" : 		{
+			"p_obj-9" : 			{
+
+			}
+,
+			"p_obj-10" : 			{
+
+			}
+,
+			"p_obj-8" : 			{
+
+			}
+,
+			"p_obj-6" : 			{
+				"Transport.Continue" : 				{
+					"value" : 0.0
+				}
+,
+				"Transport.Stop" : 				{
+					"value" : 0.0
+				}
+,
+				"Transport.Tempo" : 				{
+					"value" : 120.446096654275081
+				}
+,
+				"Transport.Prime" : 				{
+					"value" : 0.0
+				}
+
+			}
+,
+			"p_obj-5" : 			{
+
+			}
+
+		}
+
+	}
+
+}

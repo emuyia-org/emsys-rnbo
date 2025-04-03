@@ -1,4 +1,0 @@
-mido==1.3.2
-packaging==23.2
-python-rtmidi==1.5.8
-alsa-midi==1.0.2
