@@ -10,16 +10,12 @@
 	"snapshot" : 	{
 		"__presetid" : "emsys",
 		"__sps" : 		{
-			"p_obj-5" : 			{
-
-			}
-,
 			"p_obj-10" : 			{
-				"mm_pgm" : 				{
+				"Set.PGM1" : 				{
 					"value" : 0.0
 				}
 ,
-				"md_pgm" : 				{
+				"Set.PGM2" : 				{
 					"value" : 0.0
 				}
 
@@ -38,11 +34,15 @@
 					"value" : 0.0
 				}
 ,
+				"Transport.Prime" : 				{
+					"value" : 0.0
+				}
+,
 				"Transport.Tempo" : 				{
 					"value" : 120.446096654275081
 				}
 ,
-				"Transport.Prime" : 				{
+				"Transport.TempoRamp" : 				{
 					"value" : 0.0
 				}
 

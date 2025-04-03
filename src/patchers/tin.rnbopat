@@ -1,0 +1,22 @@
+{
+	"patcher" : 	{
+		"fileversion" : 1,
+		"appversion" : 		{
+			"major" : 9,
+			"minor" : 0,
+			"revision" : 5,
+			"architecture" : "x64",
+			"modernui" : 1
+		}
+,
+		"classnamespace" : "rnbo",
+		"rect" : [ 59.0, 107.0, 640.0, 480.0 ],
+		"default_fontname" : "Lato",
+		"gridsize" : [ 15.0, 15.0 ],
+		"title" : "core.tin",
+		"boxes" : [  ],
+		"lines" : [  ],
+		"originid" : "pat-58"
+	}
+
+}
