@@ -47,6 +47,11 @@ echo ">>> Running as user: $USER_INVOKING_SUDO, Home directory: $HOME_DIR"
 # 1. System Package Management (APT)
 echo ">>> Updating package lists and upgrading system packages..."
 apt update
+
+sudo apt install -y timeshift
+timeshift --create --comments "Clean install"
+
+
 apt upgrade -y
 
 echo ">>> Installing essential packages (git, build tools, libraries)..."
@@ -69,7 +74,8 @@ apt install -y \
     libxmlsec1-dev \
     libffi-dev \
     liblzma-dev \
-    debconf-utils # Needed for debconf-set-selections
+    libsdl2-2.0-0 \
+    libsdl2-ttf-2.0-0
 
 # 2. Install Specific Software Packages & Basic Configs
 
@@ -85,6 +91,8 @@ dpkg -i "$FASTFETCH_DEB_FILE"
 # Attempt to fix any dependency issues from dpkg install
 apt-get install -f -y
 rm "$FASTFETCH_DEB_FILE" # Clean up downloaded file
+
+fastfetch
 
 echo ">>> Installing Pisound..."
 # Note: This script might require interaction or have its own dependencies.
@@ -163,126 +171,110 @@ add_to_bashrc 'eval "$(pyenv init - bash)"' "$BASHRC_FILE"
 
 # Note: FZF install --all should have already modified .bashrc
 
-# Ensure ownership of .bashrc is correct
-chown "$USER_INVOKING_SUDO":"$(id -gn "$USER_INVOKING_SUDO")" "$BASHRC_FILE"
+# 4. Setup Python using Pyenv AND Application Virtual Environment
 
-# --- Ensure .profile sources .bashrc for login shells ---
-PROFILE_FILE="$HOME_DIR/.profile"
-echo ">>> Ensuring login shells source .bashrc via $PROFILE_FILE..."
-
-# Standard logic to source .bashrc from .profile for interactive bash shells
-PROFILE_BASHRC_LOGIC=$(cat << 'EOF'
-# Source .bashrc if it exists and the shell is interactive bash
-if [ -n "$BASH_VERSION" ]; then
-    if [ -r "$HOME/.bashrc" ]; then
-        . "$HOME/.bashrc"
-    fi
-fi
-EOF
-)
-
-# Check if the sourcing logic marker is already in .profile
-# Using grep -Fq to search for a fixed string quietly. Using a unique part of the logic.
-if [ -f "$PROFILE_FILE" ] && grep -Fq 'if [ -r "$HOME/.bashrc" ]; then' "$PROFILE_FILE"; then
-    echo "    .bashrc sourcing logic already present in $PROFILE_FILE."
-else
-    echo "    Appending .bashrc sourcing logic to $PROFILE_FILE..."
-    # Append the logic
-    echo "$PROFILE_BASHRC_LOGIC" >> "$PROFILE_FILE"
-    # Ensure ownership is correct
-    chown "$USER_INVOKING_SUDO":"$(id -gn "$USER_INVOKING_SUDO")" "$PROFILE_FILE"
-    # Ensure basic permissions (readable/writable by user)
-    chmod u+rw "$PROFILE_FILE"
-fi
-# --- End .profile configuration ---
-
-
-# 4. Setup Python using Pyenv
-
-echo ">>> Setting up Python $PYTHON_VERSION using Pyenv..."
-# Need to run pyenv commands as the actual user
-# Source bashrc within the sudo -u context to get pyenv functions
-sudo -u "$USER_INVOKING_SUDO" bash -i << PYENV_SCRIPT
+echo ">>> Setting up Python $PYTHON_VERSION using Pyenv and application venv..."
+# Need to run pyenv commands AND venv setup as the actual user.
+# Source bashrc within the sudo -u context to get pyenv functions.
+# Use bash -i for an interactive shell to ensure .bashrc/.profile sourcing.
+sudo -u "$USER_INVOKING_SUDO" bash -i << PYENV_APP_SETUP_SCRIPT
 set -e # Exit inner script on error
-echo "    Sourcing .bashrc for pyenv commands..."
-# Try sourcing .profile first, then .bashrc, just in case for interactive setup
-[ -r "$HOME/.profile" ] && source "$HOME/.profile" || true
-[ -r "$HOME/.bashrc" ] && source "$HOME/.bashrc" || true
 
-echo "    Installing Python $PYTHON_VERSION (this may take a while)..."
+echo "   Sourcing shell configuration for pyenv commands..."
+# Ensure PYENV_ROOT is set if not already exported by .bashrc/.profile sourcing via 'bash -i'
+export PYENV_ROOT="\$HOME/.pyenv" # Use \$HOME for expansion within the subshell
+export PATH="\$PYENV_ROOT/bin:\$PATH"
+
+# Evaluate pyenv init. Needs to happen *after* PATH is potentially set.
+eval "\$(pyenv init --path)" # Handle PATH modification first
+eval "\$(pyenv init - bash)" # Then setup shims
+
+echo "   Ensuring Python $PYTHON_VERSION is installed..."
 if pyenv versions --bare | grep -q "^$PYTHON_VERSION$"; then
-  echo "    Python $PYTHON_VERSION already installed."
+  echo "   Python $PYTHON_VERSION already installed."
 else
+  echo "   Installing Python $PYTHON_VERSION (this may take a while)..."
   pyenv install "$PYTHON_VERSION"
 fi
 
-echo "    Setting global Python version to $PYTHON_VERSION..."
+echo "   Setting global Python version to $PYTHON_VERSION..."
 pyenv global "$PYTHON_VERSION"
 
-echo "    Verifying Python version:"
-pyenv version
-PYENV_SCRIPT
+echo "   Verifying Python version (pyenv):"
+pyenv version # Shows the active pyenv version
+echo "   Verifying Python version (executable):"
+python --version # Verify the actual python executable linked by pyenv shims
 
-# 5. Application Specific Setup (emsys-rnbo)
+# --- Application Specific Python Setup ---
+# Define directories relative to the user's HOME inside the subshell
+APP_DIR="\$HOME/emsys-rnbo" # Use \$HOME for expansion within the subshell
+VENV_DIR="\$APP_DIR/.venv"
+REQS_FILE="\$APP_DIR/requirements.txt"
 
-echo ">>> Cloning emsys-rnbo repository..."
-EMSYSRNBO_DIR="$HOME_DIR/emsys-rnbo"
-# Clone as the regular user
-if [ -d "$EMSYSRNBO_DIR" ]; then
-  echo "    emsys-rnbo directory already exists, skipping clone."
+echo "   Creating/updating virtual environment at \$VENV_DIR using pyenv Python..."
+# Create the venv using the now-active pyenv python
+# The 'python' command here should resolve to the pyenv shim for 3.11.11
+if python -m venv "\$VENV_DIR"; then
+    echo "   Virtual environment created/updated successfully."
 else
-  # cd "$HOME_DIR" # Already likely in home, but doesn't hurt
-  sudo -u "$USER_INVOKING_SUDO" git clone https://github.com/emuyia-org/emsys-rnbo.git "$EMSYSRNBO_DIR"
+    echo "!!! ERROR: Failed to create virtual environment at \$VENV_DIR" >&2
+    exit 1 # Exit the subshell script if venv creation fails
 fi
 
+echo "   Upgrading pip in the virtual environment..."
+# Directly call the pip from the virtual environment
+# Use quotes around the path to handle potential special characters
+if "\$VENV_DIR/bin/pip" install --upgrade pip; then
+    echo "   pip upgraded successfully."
+else
+    echo "!!! ERROR: Failed to upgrade pip in \$VENV_DIR" >&2
+    exit 1 # Exit the subshell script if pip upgrade fails
+fi
+
+echo "   Installing requirements from \$REQS_FILE..."
+if [ -f "\$REQS_FILE" ]; then
+    if "\$VENV_DIR/bin/pip" install -r "\$REQS_FILE"; then
+        echo "   Requirements installed successfully."
+    else
+        echo "!!! ERROR: Failed to install requirements from \$REQS_FILE" >&2
+        exit 1 # Exit the subshell script if requirements install fails
+    fi
+else
+    echo "   Warning: requirements.txt not found at \$REQS_FILE. Skipping pip install -r."
+fi
+
+echo "   Python and application venv setup complete for user \$(whoami)."
+
+PYENV_APP_SETUP_SCRIPT
+# End of the sudo -u block. Back to running as root.
+
+# 5. Application Specific Setup (emsys-rnbo - Non-Python parts like symlinks)
+
 echo ">>> Setting up emsys-rnbo reboot script symlink..."
+# This part still needs root privileges, so it stays outside the sudo -u block
+EMSYSRNBO_DIR="$HOME_DIR/emsys-rnbo" # Use the previously determined HOME_DIR
 PISOUND_BTN_SCRIPT_DIR="/usr/local/pisound/scripts/pisound-btn"
 REBOOT_SCRIPT_SRC="$EMSYSRNBO_DIR/scripts/reboot.sh"
 REBOOT_SCRIPT_DST="$PISOUND_BTN_SCRIPT_DIR/reboot.sh"
 
-if [ -d "$PISOUND_BTN_SCRIPT_DIR" ]; then
-  # Create symlink using sudo (needs root)
-  # Use -f to force overwrite if link exists, -s for symbolic
-  chmod +x "$REBOOT_SCRIPT_SRC"
-  ln -sf "$REBOOT_SCRIPT_SRC" "$REBOOT_SCRIPT_DST"
-  echo "    Symlink created: $REBOOT_SCRIPT_DST -> $REBOOT_SCRIPT_SRC"
+# Ensure the script exists and is executable *before* creating symlink
+if [ -f "$REBOOT_SCRIPT_SRC" ]; then
+    echo "   Making reboot script executable: $REBOOT_SCRIPT_SRC"
+    # Permissions might need to be set before or after symlinking depending on needs
+    # Setting them on the source file is generally correct.
+    chmod +x "$REBOOT_SCRIPT_SRC"
+
+    if [ -d "$PISOUND_BTN_SCRIPT_DIR" ]; then
+        echo "   Creating symlink: $REBOOT_SCRIPT_DST -> $REBOOT_SCRIPT_SRC"
+        # Use -f to force overwrite if link exists, -s for symbolic
+        ln -sf "$REBOOT_SCRIPT_SRC" "$REBOOT_SCRIPT_DST"
+    else
+        echo "   Warning: Target directory $PISOUND_BTN_SCRIPT_DIR not found. Skipping symlink creation."
+    fi
 else
-  echo "    Warning: Target directory $PISOUND_BTN_SCRIPT_DIR not found. Skipping symlink."
-fi
+    echo "   Warning: Source script $REBOOT_SCRIPT_SRC not found. Skipping chmod and symlink creation."
 
-# 6. Set Console Font (Terminus 16x32)
-
-echo ">>> Setting console font to Terminus 16x32..."
-
-# Pre-seed the debconf database with the desired answers
-debconf-set-selections <<EOF
-# Set encoding to UTF-8 (standard)
-console-setup console-setup/charmap select UTF-8
-# Set character set based on UTF-8 (using 'guess' often works well)
-console-setup console-setup/codeset select GUESTS
-# Set the desired font face
-console-setup console-setup/fontface select Terminus
-# Set the desired font size
-console-setup console-setup/fontsize-text select 16x32
-EOF
-
-# Check if debconf-set-selections succeeded
-if [ $? -ne 0 ]; then
-  echo "!!! ERROR setting debconf selections for console font." >&2
-  # Decide whether to exit or continue
-  # exit 1
-else
-  echo "    Applying console-setup configuration non-interactively..."
-  # Apply the settings by reconfiguring console-setup without interaction
-  dpkg-reconfigure -f noninteractive console-setup
-  if [ $? -ne 0 ]; then
-    echo "!!! ERROR applying console-setup configuration." >&2
-  else
-    echo "    Console font configuration updated successfully."
-  fi
-fi
-
-apt install -y python3-pip libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev
+# apt install -y python3-pip libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev
 
 # usermod -a -G audio pi
 
@@ -292,6 +284,9 @@ apt install -y python3-pip libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsd
 echo ">>> Cleaning up APT cache..."
 apt autoremove -y
 apt clean
+
+timeshift --create --comments "Post setup"
+timeshift --list
 
 echo "--- Setup Script Finished ---"
 echo ">>> System will reboot now. <<<"
