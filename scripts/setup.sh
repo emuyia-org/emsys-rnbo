@@ -281,6 +281,10 @@ else
   fi
 fi
 
+apt install -y python3-pip libsdl2-dev libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev libportmidi-dev
+
+# usermod -a -G audio pi
+
 
 # 7. Final Cleanup (Optional) and Reboot
 
