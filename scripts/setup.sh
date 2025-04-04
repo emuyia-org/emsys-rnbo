@@ -243,6 +243,7 @@ REBOOT_SCRIPT_DST="$PISOUND_BTN_SCRIPT_DIR/reboot.sh"
 if [ -d "$PISOUND_BTN_SCRIPT_DIR" ]; then
   # Create symlink using sudo (needs root)
   # Use -f to force overwrite if link exists, -s for symbolic
+  chmod +x "$REBOOT_SCRIPT_SRC"
   ln -sf "$REBOOT_SCRIPT_SRC" "$REBOOT_SCRIPT_DST"
   echo "    Symlink created: $REBOOT_SCRIPT_DST -> $REBOOT_SCRIPT_SRC"
 else

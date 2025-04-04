@@ -5,7 +5,7 @@ import os
 
 # --- Configuration ---
 # !! IMPORTANT: Replace this with the exact name from mido.get_input_names() !!
-MIDI_PORT_NAME = 'X-TOUCH MINI:X-TOUCH MINI MIDI 1 32:0' # <<< CHANGE THIS
+MIDI_PORT_NAME = 'X-TOUCH MINI:X-TOUCH MINI MIDI 1 20:0'
 
 # Choose a CC number to test (e.g., CC #1 is often the first fader/knob)
 TARGET_CC = 1
