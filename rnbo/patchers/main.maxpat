@@ -644,7 +644,7 @@
 						}
 ,
 						"classnamespace" : "rnbo",
-						"rect" : [ 850.0, 192.0, 692.0, 679.0 ],
+						"rect" : [ 61.0, 205.0, 692.0, 679.0 ],
 						"default_fontname" : "Lato",
 						"gridsize" : [ 15.0, 15.0 ],
 						"title" : "emsys",
@@ -657,15 +657,15 @@
 									"patching_rect" : [ 30.0, 156.0, 62.0, 23.0 ],
 									"rnbo_classname" : "p",
 									"rnbo_extra_attributes" : 									{
-										"receivemode" : "local",
 										"polyphony" : -1.0,
+										"receivemode" : "local",
 										"args" : [  ],
-										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"exposevoiceparams" : 0,
+										"notecontroller" : 0
 									}
 ,
-									"rnbo_serial" : 6,
+									"rnbo_serial" : 1,
 									"rnbo_uniqueid" : "p_obj-9",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -1285,15 +1285,15 @@
 									"patching_rect" : [ 30.0, 131.0, 70.0, 23.0 ],
 									"rnbo_classname" : "p",
 									"rnbo_extra_attributes" : 									{
-										"receivemode" : "local",
 										"polyphony" : -1.0,
+										"receivemode" : "local",
 										"args" : [  ],
-										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"exposevoiceparams" : 0,
+										"notecontroller" : 0
 									}
 ,
-									"rnbo_serial" : 3,
+									"rnbo_serial" : 2,
 									"rnbo_uniqueid" : "p_obj-10",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -1696,15 +1696,15 @@
 									"patching_rect" : [ 170.0, 106.0, 126.0, 23.0 ],
 									"rnbo_classname" : "p",
 									"rnbo_extra_attributes" : 									{
-										"receivemode" : "local",
 										"polyphony" : -1.0,
+										"receivemode" : "local",
 										"args" : [  ],
-										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"exposevoiceparams" : 0,
+										"notecontroller" : 0
 									}
 ,
-									"rnbo_serial" : 4,
+									"rnbo_serial" : 3,
 									"rnbo_uniqueid" : "p_obj-8",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -1918,15 +1918,15 @@
 									"patching_rect" : [ 30.0, 106.0, 96.0, 23.0 ],
 									"rnbo_classname" : "p",
 									"rnbo_extra_attributes" : 									{
-										"receivemode" : "local",
 										"polyphony" : -1.0,
+										"receivemode" : "local",
 										"args" : [  ],
-										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"exposevoiceparams" : 0,
+										"notecontroller" : 0
 									}
 ,
-									"rnbo_serial" : 7,
+									"rnbo_serial" : 4,
 									"rnbo_uniqueid" : "p_obj-6",
 									"rnboinfo" : 									{
 										"needsInstanceInfo" : 1,
@@ -3364,18 +3364,6 @@
 					"presentation" : 1,
 					"presentation_rect" : [ 3.0, 1.0, 112.0, 22.0 ],
 					"rnboattrcache" : 					{
-						"p_obj-6/Transport.Tempo" : 						{
-							"label" : "Transport.Tempo",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
-						"p_obj-6/Transport.TempoRamp" : 						{
-							"label" : "Transport.TempoRamp",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
 						"p_obj-10/Set.PGM1" : 						{
 							"label" : "Set.PGM1",
 							"isEnum" : 1,
@@ -3388,22 +3376,34 @@
 							"parsestring" : "\"A01\" \"A02\" \"A03\" \"A04\" \"A05\" \"A06\" \"A07\" \"A08\" \"A09\" \"A10\" \"A11\" \"A12\" \"A13\" \"A14\" \"A15\" \"A16\" \"B01\" \"B02\" \"B03\" \"B04\" \"B05\" \"B06\" \"B07\" \"B08\" \"B09\" \"B10\" \"B11\" \"B12\" \"B13\" \"B14\" \"B15\" \"B16\" \"C01\" \"C02\" \"C03\" \"C04\" \"C05\" \"C06\" \"C07\" \"C08\" \"C09\" \"C10\" \"C11\" \"C12\" \"C13\" \"C14\" \"C15\" \"C16\" \"D01\" \"D02\" \"D03\" \"D04\" \"D05\" \"D06\" \"D07\" \"D08\" \"D09\" \"D10\" \"D11\" \"D12\" \"D13\" \"D14\" \"D15\" \"D16\" \"E01\" \"E02\" \"E03\" \"E04\" \"E05\" \"E06\" \"E07\" \"E08\" \"E09\" \"E10\" \"E11\" \"E12\" \"E13\" \"E14\" \"E15\" \"E16\" \"F01\" \"F02\" \"F03\" \"F04\" \"F05\" \"F06\" \"F07\" \"F08\" \"F09\" \"F10\" \"F11\" \"F12\" \"F13\" \"F14\" \"F15\" \"F16\" \"G01\" \"G02\" \"G03\" \"G04\" \"G05\" \"G06\" \"G07\" \"G08\" \"G09\" \"G10\" \"G11\" \"G12\" \"G13\" \"G14\" \"G15\" \"G16\" \"H01\" \"H02\" \"H03\" \"H04\" \"H05\" \"H06\" \"H07\" \"H08\" \"H09\" \"H10\" \"H11\" \"H12\" \"H13\" \"H14\" \"H15\" \"H16\""
 						}
 ,
-						"p_obj-6/Transport.Continue" : 						{
+						"p_obj-6/transport/Transport.Continue" : 						{
 							"label" : "Transport.Continue",
 							"isEnum" : 1,
 							"parsestring" : "\"X\""
 						}
 ,
-						"p_obj-6/Transport.Stop" : 						{
+						"p_obj-6/transport/Transport.Stop" : 						{
 							"label" : "Transport.Stop",
 							"isEnum" : 1,
 							"parsestring" : "\"X\""
 						}
 ,
-						"p_obj-6/Transport.Prime" : 						{
+						"p_obj-6/transport/Transport.Prime" : 						{
 							"label" : "Transport.Prime",
 							"isEnum" : 1,
 							"parsestring" : "\"X\""
+						}
+,
+						"p_obj-6/tempo/Transport.Tempo" : 						{
+							"label" : "Transport.Tempo",
+							"isEnum" : 0,
+							"parsestring" : ""
+						}
+,
+						"p_obj-6/tempo/Transport.TempoRamp" : 						{
+							"label" : "Transport.TempoRamp",
+							"isEnum" : 0,
+							"parsestring" : ""
 						}
 
 					}
@@ -3454,24 +3454,37 @@
 								}
 ,
 								"p_obj-6" : 								{
-									"Transport.Continue" : 									{
-										"value" : 0.0
-									}
+									"__sps" : 									{
+										"transport" : 										{
+											"Transport.Continue" : 											{
+												"value" : 0.0
+											}
 ,
-									"Transport.Stop" : 									{
-										"value" : 0.0
-									}
+											"Transport.Stop" : 											{
+												"value" : 0.0
+											}
 ,
-									"Transport.Prime" : 									{
-										"value" : 0.0
-									}
+											"Transport.Prime" : 											{
+												"value" : 0.0
+											}
+
+										}
 ,
-									"Transport.Tempo" : 									{
-										"value" : 120.446096654275081
-									}
+										"clock" : 										{
+
+										}
 ,
-									"Transport.TempoRamp" : 									{
-										"value" : 0.0
+										"tempo" : 										{
+											"Transport.Tempo" : 											{
+												"value" : 120.446096654275081
+											}
+,
+											"Transport.TempoRamp" : 											{
+												"value" : 0.0
+											}
+
+										}
+
 									}
 
 								}
@@ -3514,24 +3527,37 @@
 											}
 ,
 											"p_obj-6" : 											{
-												"Transport.Continue" : 												{
-													"value" : 0.0
-												}
+												"__sps" : 												{
+													"transport" : 													{
+														"Transport.Continue" : 														{
+															"value" : 0.0
+														}
 ,
-												"Transport.Stop" : 												{
-													"value" : 0.0
-												}
+														"Transport.Stop" : 														{
+															"value" : 0.0
+														}
 ,
-												"Transport.Prime" : 												{
-													"value" : 0.0
-												}
+														"Transport.Prime" : 														{
+															"value" : 0.0
+														}
+
+													}
 ,
-												"Transport.Tempo" : 												{
-													"value" : 120.446096654275081
-												}
+													"clock" : 													{
+
+													}
 ,
-												"Transport.TempoRamp" : 												{
-													"value" : 0.0
+													"tempo" : 													{
+														"Transport.Tempo" : 														{
+															"value" : 120.446096654275081
+														}
+,
+														"Transport.TempoRamp" : 														{
+															"value" : 0.0
+														}
+
+													}
+
 												}
 
 											}
@@ -3542,14 +3568,6 @@
 
 										}
 
-									}
-,
-									"fileref" : 									{
-										"name" : "emsys",
-										"filename" : "emsys_20250403_1.maxsnap",
-										"filepath" : "~/repos/emsys-rnbo/src/data",
-										"filepos" : -1,
-										"snapshotfileid" : "b12f793825d810d00decb4b36c57f0f3"
 									}
 
 								}
@@ -3623,6 +3641,20 @@
 				"patchline" : 				{
 					"destination" : [ "obj-21", 1 ],
 					"source" : [ "obj-28", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-13", 0 ],
+					"source" : [ "obj-3", 2 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-14", 0 ],
+					"source" : [ "obj-3", 0 ]
 				}
 
 			}
@@ -3765,14 +3797,7 @@
 			"inherited_shortname" : 1
 		}
 ,
-		"dependency_cache" : [ 			{
-				"name" : "emsys_20250403_1.maxsnap",
-				"bootpath" : "~/repos/emsys-rnbo/src/data",
-				"patcherrelativepath" : "../data",
-				"type" : "mx@s",
-				"implicit" : 1
-			}
- ],
+		"dependency_cache" : [  ],
 		"autosave" : 0
 	}
 

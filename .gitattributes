@@ -2,6 +2,6 @@
 * text=auto
 *.pd linguist-language=Pure Data
 *.pd linguist-detectable=true
-*.sh linguist-detectable=false
-*.py linguist-detectable=false
+*.sh linguist-detectable=true
+*.py linguist-detectable=true
 *.vbs linguist-detectable=false
