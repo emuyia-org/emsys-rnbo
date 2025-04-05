@@ -1,0 +1,86 @@
+PYTHON_VERSION="3.11.11"
+FASTFETCH_VERSION="2.14.0"
+FASTFETCH_ARCH="armv7l"
+APP_DIR="/home/pi/emsys-rnbo"
+VENV_DIR="$APP_DIR/.venv"
+REQS_FILE="$APP_DIR/requirements.txt"
+REBOOT_SCRIPT_SRC="$APP_DIR/scripts/reboot.sh"
+PISOUND_BTN_SCRIPT_DIR="/usr/local/pisound/scripts/pisound-btn"
+REBOOT_SCRIPT_DST="$PISOUND_BTN_SCRIPT_DIR/reboot.sh"
+
+# git clone
+sudo apt update
+sudo apt install -y git
+git clone https://github.com/emuyia-org/emsys-rnbo.git
+
+# timeshift backup
+sudo apt install -y timeshift
+sudo timeshift --create --comments "Clean install" --yes
+
+# upgrade packages
+sudo apt upgrade -y
+sudo apt install -y \
+    wget gpg build-essential libssl-dev zlib1g-dev libbz2-dev \
+    libreadline-dev libsqlite3-dev curl libncursesw5-dev xz-utils \
+    tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
+    libsdl2-2.0-0 libsdl2-ttf-2.0-0 dos2unix
+
+# Fastfetch
+cd /tmp
+curl -fSL -o "fastfetch-linux-${FASTFETCH_ARCH}.deb" "https://github.com/fastfetch-cli/fastfetch/releases/download/${FASTFETCH_VERSION}/fastfetch-linux-${FASTFETCH_ARCH}.deb"
+sudo dpkg -i "fastfetch-linux-${FASTFETCH_ARCH}.deb"
+sudo apt-get install -f -y
+rm "fastfetch-linux-${FASTFETCH_ARCH}.deb"
+cd "$HOME"
+fastfetch
+
+# Pisound
+curl https://blokas.io/pisound/install.sh -o /tmp/pisound_install.sh
+chmod +x /tmp/pisound_install.sh
+sudo sh /tmp/pisound_install.sh
+rm /tmp/pisound_install.sh
+
+# Zoxide
+curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | bash
+
+# FZF
+git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
+~/.fzf/install --all # This modifies .bashrc
+
+# Pyenv
+curl -fsSL https://pyenv.run | bash
+
+# Disable MOTD
+touch ~/.hushlogin
+
+# bashrc
+echo '[[ -d "$HOME/.local/bin" ]] && export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+echo 'eval "$(zoxide init bash)"' >> ~/.bashrc
+echo 'alias cd="z"' >> ~/.bashrc
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
+echo '[[ -d "$PYENV_ROOT/bin" ]] && export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
+echo 'eval "$(pyenv init - bash)"' >> ~/.bashrc
+source ~/.bashrc
+
+# Python environment
+pyenv install "$PYTHON_VERSION" # May error if already installed
+pyenv global "$PYTHON_VERSION"
+pyenv version # Verify
+python --version # Verify
+mkdir -p "$APP_DIR"
+python -m venv "$VENV_DIR" # May error if venv dir exists
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install -r "$REQS_FILE"
+
+# Pisound button reboot script
+sudo chmod +x "$REBOOT_SCRIPT_SRC"
+sudo ln -sf "$REBOOT_SCRIPT_SRC" "$REBOOT_SCRIPT_DST"
+
+# cleanup
+sudo apt autoremove -y
+sudo apt clean
+sudo timeshift --create --comments "Post setup" --yes
+sudo timeshift --list
+
+# reboot
+sudo reboot
