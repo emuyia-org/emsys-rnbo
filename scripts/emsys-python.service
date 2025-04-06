@@ -1,0 +1,25 @@
+# sudo cp /home/pi/emsys-rnbo/scripts/emsys-python.service /etc/systemd/system/emsys-python.service
+# sudo systemctl daemon-reload
+# sudo systemctl enable emsys-python.service
+# sudo systemctl start emsys-python.service
+
+[Unit]
+Description=Emsys Python Division Service (UI, Sequencer, MIDI Handler)
+After=multi-user.target network.target
+
+[Service]
+# Use notify type so the script can signal when it's ready
+Type=notify
+
+User=pi
+# Group=audio # Uncomment if needed
+
+WorkingDirectory=/home/pi/emsys-rnbo
+ExecStart=/home/pi/emsys-rnbo/.venv/bin/python /home/pi/emsys-rnbo/main.py
+
+Environment="DISPLAY=:0"
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

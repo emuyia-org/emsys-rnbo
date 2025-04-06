@@ -76,6 +76,9 @@ python -m venv "$VENV_DIR" # May error if venv dir exists
 sudo chmod +x "$REBOOT_SCRIPT_SRC"
 sudo ln -sf "$REBOOT_SCRIPT_SRC" "$REBOOT_SCRIPT_DST"
 
+# Terminal font size setup
+sudo dpkg-reconfigure console-setup # UTF-8, Guess optimal, TerminusBold, 16x32
+
 # cleanup
 sudo apt autoremove -y
 sudo apt clean

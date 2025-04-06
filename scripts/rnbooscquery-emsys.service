@@ -1,0 +1,36 @@
+# sudo cp /home/pi/emsys-rnbo/scripts/rnbooscquery-emsys.service /lib/systemd/system/rnbooscquery-emsys.service
+# sudo systemctl daemon-reload
+# sudo systemctl enable rnbooscquery-emsys.service
+# sudo systemctl start rnbooscquery-emsys.service
+
+[Unit]
+Description=RNBO OSCQuery Service (emsys version)
+After=multi-user.target
+Wants=rnbo-update-service.service
+After=rnbo-update-service.service
+StartLimitIntervalSec=500
+StartLimitBurst=5
+StartLimitInterval=0
+
+# --- Added Dependencies ---
+# Require emsys-python.service to be running
+Requires=emsys-python.service
+# Start only after emsys-python.service has started
+After=emsys-python.service
+# --- End of Added Dependencies ---
+
+[Service]
+Type=idle
+ExecStart=/usr/bin/rnbooscquery
+KillSignal=SIGINT
+User=pi
+Group=audio
+LimitRTPRIO=infinity
+LimitMEMLOCK=infinity
+Environment="JACK_NO_AUDIO_RESERVATION=1"
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+
