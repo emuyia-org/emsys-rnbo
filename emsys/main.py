@@ -1,239 +1,213 @@
-import sdnotify
+# -*- coding: utf-8 -*-
+"""
+Main entry point for the Emsys Python Application.
+
+Initializes Pygame, services (MIDI, OSC), UI screens, and runs the main event loop.
+"""
+
 import pygame
-import mido
 import sys
-import os
+import sdnotify # For systemd readiness notification
 
-n = sdnotify.SystemdNotifier()
+# Import components from our emsys package (adjust paths as needed)
+# from .config import settings # Example: Load settings
+# from .services import midi_handler, osc_handler # Example: MIDI/OSC handlers
+# from .ui import main_menu_screen, song_edit_screen # Example: UI Screens
+# from .core import project_manager # Example: Song management
 
-# --- Configuration ---
-# Base name of the MIDI device to find
-# The script will search for any port containing this string
-DEVICE_BASE_NAME = 'X-TOUCH MINI'
-
-# Choose a CC number to test (e.g., CC #1 is often the first fader/knob)
-TARGET_CC = 1
-
-# Screen dimensions (common for 3.5" screens, adjust if needed)
+# --- Constants (Consider moving to config/settings.py later) ---
 SCREEN_WIDTH = 480
 SCREEN_HEIGHT = 320
+FPS = 30
 
-# Colors
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-BLUE = (0, 0, 255)
-GRAY = (100, 100, 100)
+# --- Main Application Class ---
 
-# --- Function to find MIDI Port ---
-def find_midi_port(base_name):
-    """
-    Searches for a MIDI input port containing the base_name.
+class App:
+    """Encapsulates the main application logic and state."""
 
-    Args:
-        base_name (str): The partial name of the MIDI device (e.g., 'X-TOUCH MINI').
+    def __init__(self):
+        """Initialize Pygame, services, and application state."""
+        print("Initializing App...")
 
-    Returns:
-        str: The full name of the found MIDI port, or None if not found.
-    """
-    print(f"Searching for MIDI input port containing: '{base_name}'")
-    available_ports = mido.get_input_names()
-    print("Available ports:", available_ports)
-    for port_name in available_ports:
-        if base_name in port_name:
-            print(f"Found matching port: '{port_name}'")
-            return port_name
-    print(f"No MIDI input port found containing '{base_name}'.")
-    return None
+        # Systemd Notifier
+        self.notifier = sdnotify.SystemdNotifier()
+        self.notify_status("Initializing Pygame...")
 
-# --- Initialization ---
-print("Initializing Pygame...")
-# Try to ensure Pygame uses the framebuffer if run headless
-# os.environ['SDL_VIDEODRIVER'] = 'fbcon' # Usually not needed now, but uncomment if display fails
-# os.environ['SDL_FBDEV'] = '/dev/fb0'   # Usually not needed now
-pygame.init()
-pygame.font.init() # Initialize font module
+        # Initialize Pygame
+        pygame.init()
+        pygame.font.init()
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption('Emsys Controller')
+        self.clock = pygame.time.Clock()
+        self.running = False
 
-# Set up display
-try:
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption('Pygame MIDI Auto-Detect Test')
-    print(f"Display initialized ({SCREEN_WIDTH}x{SCREEN_HEIGHT})")
-except pygame.error as e:
-    print(f"Error initializing display: {e}")
-    print("Make sure HDMI screen is connected and OS can see it.")
-    sys.exit(1)
+        # Load Configuration (Placeholder)
+        # self.settings = settings.load_settings()
+        print("Config loaded (Placeholder).")
 
-# Set up font
-try:
-    # Use a default font if available, or specify path to a .ttf file
-    main_font = pygame.font.SysFont(None, 36) # Try default system font
-    small_font = pygame.font.SysFont(None, 24)
-except Exception as e:
-    print(f"Error loading font: {e}. Using pygame default.")
-    main_font = pygame.font.Font(None, 36) # Pygame's default font
-    small_font = pygame.font.Font(None, 24)
-
-
-# --- MIDI Setup ---
-midi_port = None
-midi_port_name = None # Store the name of the port we actually open
-midi_error = None
-cc_value = 0 # Initial value
-
-# Find the MIDI port dynamically
-found_port_name = find_midi_port(DEVICE_BASE_NAME)
-
-if found_port_name:
-    midi_port_name = found_port_name # Store the found name
-    print(f"Attempting to open MIDI port: '{midi_port_name}'")
-    try:
-        midi_port = mido.open_input(midi_port_name)
-        print(f"Successfully opened MIDI port: {midi_port_name}")
-        n.notify("READY=1")
-        n.notify("STATUS=MIDI Port opened. Running main loop...")
-    except (IOError, ValueError, OSError) as e: # Added OSError for potential system errors
-        print(f"Error opening MIDI port '{midi_port_name}': {e}")
-        midi_error = f"MIDI Error: Could not open '{midi_port_name}'. Check permissions/connection."
-        midi_port_name = None # Reset name if opening failed
-        n.notify(f"STATUS=Failed to open MIDI port: {e}")
-else:
-    midi_error = f"MIDI Error: Device '{DEVICE_BASE_NAME}' not found. Check connection."
-    print("Available ports listed above.")
-    n.notify(f"STATUS=MIDI Device '{DEVICE_BASE_NAME}' not found.")
-
-
-# --- Main Loop ---
-running = True
-clock = pygame.time.Clock()
-
-print("Starting main loop... Press Ctrl+C in terminal or close window to exit.")
-
-try:
-    while running:
-        # --- Event Handling ---
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE: # Allow exit with ESC key
-                    running = False
-
-        # --- MIDI Input Handling ---
-        if midi_port:
-            try:
-                for msg in midi_port.iter_pending():
-                    # Optional: print all messages for debugging
-                    # print(f"MIDI Received: {msg}")
-                    if msg.type == 'control_change' and msg.control == TARGET_CC:
-                        cc_value = msg.value
-                        # print(f"Target CC {TARGET_CC} updated to: {cc_value}") # Debug print
-            except OSError as e:
-                # Handle potential disconnection errors during runtime
-                print(f"MIDI Read Error: {e}. Closing port.")
-                midi_error = f"MIDI Error: Connection lost to '{midi_port_name}'?"
-                midi_port.close()
-                midi_port = None # Stop trying to read
-        elif not midi_error: # If port is None but no error was set during init
-              midi_error = "MIDI port was not opened successfully."
-
-
-        # --- Drawing ---
-        screen.fill(BLACK) # Clear screen
-
-        # Display MIDI Port Status
-        if midi_port and midi_port_name:
-            status_text = f"Listening on: {midi_port_name}"
-            status_color = WHITE
-        else:
-            # Display the specific error encountered
-            status_text = midi_error or "MIDI Port not found or opened."
-            status_color = GRAY
-        status_surface = small_font.render(status_text, True, status_color)
-        # Handle potentially long error messages
-        status_rect = status_surface.get_rect(topleft=(10, 10))
-        if status_rect.width > SCREEN_WIDTH - 20: # Wrap text if too long
-             # Basic wrap (won't look perfect but prevents overflow)
-             # A more robust text wrapping function would be better for complex cases
-             words = status_text.split(' ')
-             lines = []
-             current_line = ""
-             for word in words:
-                 test_line = current_line + word + " "
-                 test_surface = small_font.render(test_line, True, status_color)
-                 if test_surface.get_width() < SCREEN_WIDTH - 20:
-                     current_line = test_line
-                 else:
-                     lines.append(current_line)
-                     current_line = word + " "
-             lines.append(current_line)
-
-             y_offset = 10
-             for line in lines:
-                 line_surface = small_font.render(line.strip(), True, status_color)
-                 screen.blit(line_surface, (10, y_offset))
-                 y_offset += small_font.get_linesize()
-
-        else: # Draw normally if it fits
-             screen.blit(status_surface, status_rect)
-
-
-        # Display Target CC Info
-        cc_info_text = f"Monitoring CC #{TARGET_CC}"
-        cc_info_surface = main_font.render(cc_info_text, True, WHITE)
-        screen.blit(cc_info_surface, (SCREEN_WIDTH // 2 - cc_info_surface.get_width() // 2, 80)) # Adjusted Y pos
-
-        # Display Current CC Value
-        value_text = f"Value: {cc_value}"
-        value_surface = main_font.render(value_text, True, WHITE)
-        screen.blit(value_surface, (SCREEN_WIDTH // 2 - value_surface.get_width() // 2, 120)) # Adjusted Y pos
-
-        # Draw a simple bar graph
-        bar_max_width = SCREEN_WIDTH - 40 # Max width of the bar
-        bar_height = 50
-        bar_x = 20
-        bar_y = 180 # Adjusted Y pos
-        # Ensure cc_value is within expected range 0-127 before calculating width
-        normalized_value = max(0, min(127, cc_value))
-        current_bar_width = int((normalized_value / 127.0) * bar_max_width)
-
-        # Draw bar background/outline
-        pygame.draw.rect(screen, GRAY, (bar_x, bar_y, bar_max_width, bar_height), 2)
-        # Draw filled part of the bar
-        if current_bar_width > 0:
-            pygame.draw.rect(screen, BLUE, (bar_x, bar_y, current_bar_width, bar_height))
-
-        # Display instructions
-        instr_text = "Move controller CC #{}. Press ESC or close window to exit.".format(TARGET_CC)
-        instr_surface = small_font.render(instr_text, True, GRAY)
-        screen.blit(instr_surface, (10, SCREEN_HEIGHT - 30))
-
-
-        # --- Update Display ---
-        pygame.display.flip()
-
-        # --- Control Framerate ---
-        clock.tick(30) # Limit to 30 FPS
-
-except KeyboardInterrupt:
-    print("\nExiting due to Ctrl+C")
-    running = False
-except Exception as e:
-    # Catch any other unexpected errors during the main loop
-    print(f"\nAn unexpected error occurred: {e}")
-    running = False
-
-
-finally:
-    # --- Cleanup ---
-    print("Cleaning up...")
-    n.notify("STOPPING=1")
-    if midi_port:
-        print(f"Closing MIDI port: {midi_port_name}")
+        # Initialize Services (Placeholders)
+        self.midi = None
+        self.osc = None
         try:
-            midi_port.close()
+            # self.midi = midi_handler.MidiHandler(self.settings['midi_port_name'])
+            # self.midi.start() # Start listening thread/callback
+            print("MIDI Handler initialized (Placeholder).")
+
+            # --- Notify systemd AFTER potentially blocking resources are acquired ---
+            self.notify_status("MIDI Initialized. Notifying systemd READY=1")
+            self.notifier.notify("READY=1")
+            # --- End systemd notification ---
+
+            # self.osc = osc_handler.OscHandler(self.settings['osc_send_ip'], ...)
+            # self.osc.start_server(...) # Start OSC server thread
+            print("OSC Handler initialized (Placeholder).")
+
         except Exception as e:
-            print(f"Error closing MIDI port: {e}") # Log error but continue cleanup
-    pygame.quit()
-    print("Exited.")
-    sys.exit(0) # Ensure clean exit code
+            print(f"Error initializing services: {e}")
+            self.notify_status(f"Error initializing services: {e}")
+            # Decide how to handle errors - exit? retry?
+            # For now, we might continue without MIDI/OSC for basic UI testing
+            # but send READY=1 anyway if basic UI should run
+            self.notifier.notify("READY=1") # Or exit?
+
+        # Initialize Core Logic (Placeholder)
+        # self.project_manager = project_manager.ProjectManager(self.settings['songs_dir'])
+        print("Project Manager initialized (Placeholder).")
+
+        # Initialize UI (Placeholder)
+        self.active_screen = None
+        self._initialize_ui()
+        print("UI Initialized.")
+        self.notify_status("Initialization complete. Running...")
+
+
+    def _initialize_ui(self):
+        """Sets up the initial UI screen."""
+        # Example: Start with the main menu
+        # self.active_screen = main_menu_screen.MainMenuScreen(self) # Pass app reference
+        # For now, just a placeholder message
+        self.main_font = pygame.font.SysFont(None, 50)
+        print("UI setup complete (Placeholder).")
+
+
+    def notify_status(self, status_message):
+        """Helper function to print status and notify systemd."""
+        print(f"Status: {status_message}")
+        self.notifier.notify(f"STATUS={status_message}")
+
+    def run(self):
+        """Main application loop."""
+        self.running = True
+        while self.running:
+            # --- Event Handling ---
+            events = pygame.event.get()
+            for event in events:
+                if event.type == pygame.QUIT:
+                    self.running = False
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.running = False
+                # Pass events to the active screen for handling
+                if self.active_screen:
+                    # self.active_screen.handle_event(event) # Placeholder
+                    pass # Replace with actual screen handling
+
+            # --- MIDI Handling ---
+            if self.midi:
+                # midi_messages = self.midi.get_messages() # Placeholder
+                # for msg in midi_messages:
+                #     self.handle_midi_message(msg) # Placeholder
+                pass # Replace with actual MIDI processing
+
+            # --- OSC Handling ---
+            if self.osc:
+                # osc_messages = self.osc.get_messages() # Placeholder
+                # for addr, args in osc_messages:
+                #      self.handle_osc_message(addr, args) # Placeholder
+                pass # Replace with actual OSC processing
+
+            # --- Update ---
+            # Update the active screen's state
+            if self.active_screen:
+                 # self.active_screen.update() # Placeholder
+                 pass # Replace with actual screen update logic
+
+            # --- Draw ---
+            self.screen.fill((0, 0, 0)) # Black background
+
+            # Draw the active screen
+            if self.active_screen:
+                # self.active_screen.draw(self.screen) # Placeholder
+                pass # Replace with actual screen drawing
+            else:
+                # Fallback if no screen is active yet
+                text_surf = self.main_font.render("Initializing...", True, (255, 255, 255))
+                text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+                self.screen.blit(text_surf, text_rect)
+
+
+            pygame.display.flip()
+
+            # --- Frame Rate Control ---
+            self.clock.tick(FPS)
+
+        # --- Exit ---
+        self.cleanup()
+
+    def handle_midi_message(self, msg):
+        """Process incoming MIDI messages based on Layer A/B."""
+        # Placeholder - Implement Layer A/B logic here
+        # Check msg.control, msg.value
+        # If Layer A -> self.osc.send(...)
+        # If Layer B -> Call relevant Python/UI function
+        print(f"MIDI Received (Handler Placeholder): {msg}")
+
+    def handle_osc_message(self, address, args):
+        """Process incoming OSC messages (e.g., feedback from RNBO)."""
+        # Placeholder - Update internal state based on OSC feedback
+        print(f"OSC Received (Handler Placeholder): {address} {args}")
+        # Update ui_state variables that the active screen reads
+
+    def change_screen(self, new_screen_instance):
+        """Changes the currently active UI screen."""
+        # Placeholder for screen management logic
+        print(f"Changing screen to {type(new_screen_instance).__name__} (Placeholder)")
+        self.active_screen = new_screen_instance
+
+
+    def cleanup(self):
+        """Clean up resources before exiting."""
+        self.notify_status("Cleaning up...")
+        print("Cleaning up...")
+        if self.midi:
+            # self.midi.close() # Placeholder
+            print("MIDI Handler closed (Placeholder).")
+        if self.osc:
+             # self.osc.close() # Placeholder
+             print("OSC Handler closed (Placeholder).")
+        pygame.quit()
+        print("Pygame quit.")
+        self.notify_status("Exited.")
+        self.notifier.notify("STOPPING=1") # Final notification for systemd
+
+
+# --- Script Entry Point ---
+if __name__ == '__main__':
+    try:
+        app = App()
+        app.run()
+    except Exception as e:
+        print(f"\n--- An unhandled error occurred ---")
+        # Attempt to notify systemd of the failure if possible
+        try:
+            n = sdnotify.SystemdNotifier()
+            n.notify("STATUS=Crashed unexpectedly.")
+            n.notify("STOPPING=1")
+        except Exception as sd_err:
+            print(f"(Could not notify systemd: {sd_err})")
+        # Log the full traceback
+        import traceback
+        traceback.print_exc()
+        pygame.quit() # Attempt to clean up pygame
+        sys.exit(1) # Exit with error code
 

@@ -15,7 +15,7 @@ User=pi
 # Group=audio # Uncomment if needed
 
 WorkingDirectory=/home/pi/emsys-rnbo
-ExecStart=/home/pi/emsys-rnbo/.venv/bin/python /home/pi/emsys-rnbo/main.py
+ExecStart=/home/pi/emsys-rnbo/.venv/bin/python /home/pi/emsys-rnbo/emsys/main.py
 
 Environment="DISPLAY=:0"
 Restart=on-failure
