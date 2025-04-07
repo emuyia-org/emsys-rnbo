@@ -16,3 +16,4 @@ boot.conf
 experiments/sets/*.mset
 experiments/sets/*.seq
 Desktop.ini
+__pycache__
