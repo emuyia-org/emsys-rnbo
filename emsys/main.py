@@ -17,12 +17,10 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-# Add debugging
 import config.settings as settings_module
-# Print out what's actually in the module
 print(f"Settings module contents: {dir(settings_module)}")
-# And use the module directly
-SCREEN_WIDTH = settings_module.SCREEN_WIDTH  # This should work if the constant exists
+
+SCREEN_WIDTH = settings_module.SCREEN_WIDTH
 SCREEN_HEIGHT = settings_module.SCREEN_HEIGHT
 FPS = settings_module.FPS
 BLACK = settings_module.BLACK
@@ -31,20 +29,18 @@ RED = settings_module.RED
 MIDI_DEVICE_NAME = settings_module.MIDI_DEVICE_NAME
 
 from config.mappings import EXIT_CC, NEXT_SCREEN_CC, PREV_SCREEN_CC
-from utils.midi import find_midi_port  # Updated import path
+from utils.midi import find_midi_port
 
-# --- UI Imports --- # MODIFIED: Grouped UI imports
+# UI Imports
 from ui.base_screen import BaseScreen
-from ui.main_menu_screen import MainMenuScreen # Keep for future use
-from ui.placeholder_screen import PlaceholderScreen # Move this line here
+from ui.main_menu_screen import MainMenuScreen
+from ui.placeholder_screen import PlaceholderScreen
 
-# --- ADDED IMPORTS ---
-# Ensure these files exist and contain the correct class definitions
+# Additional screen imports
 FileManageScreen = None
 SongEditScreen = None
 
 try:
-    # Import each module and check if it has the expected class
     import ui.file_manage_screen
     if hasattr(ui.file_manage_screen, 'FileManageScreen'):
         from ui.file_manage_screen import FileManageScreen
@@ -66,9 +62,9 @@ except ImportError as e:
 
 print(f"Available screens: FileManageScreen={'Available' if FileManageScreen else 'Not Available'}, "
       f"SongEditScreen={'Available' if SongEditScreen else 'Not Available'}")
-# --- END ADDED IMPORTS ---
 
-# --- Main Application Class ---
+
+# Main Application Class
 class App:
     """Encapsulates the main application logic and state."""
 
@@ -79,67 +75,50 @@ class App:
         self.notify_status("Initializing Pygame...")
 
         pygame.init()
-        pygame.font.init() # Ensure font module is initialized
+        pygame.font.init()
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption('Emsys Controller')
         self.clock = pygame.time.Clock()
-        pygame.mouse.set_visible(False) # Hide mouse cursor
+        pygame.mouse.set_visible(False)
         self.running = False
 
         self.midi_port = None
         self.midi_port_name = None
         self.active_screen = None
-        # self.main_font = pygame.font.SysFont(None, 36) # Using fonts from BaseScreen now
-
-        # --- ADDED: Attribute to store last MIDI message ---
         self.last_midi_message_str = None
-        # --- END ADDED ---
 
-        # Initialize MIDI Directly (like test.py)
         self._initialize_midi()
-
-        # Initialize UI - Create all screen instances
         self.initialize_screens()
 
     def initialize_screens(self):
         """Initialize all application screens."""
         print("Initializing Screens...")
-        # Create the screen instances
         self.placeholder_screen = PlaceholderScreen(self)
 
-        # --- MODIFIED: Check if classes were imported successfully ---
         if FileManageScreen:
             self.file_manage_screen = FileManageScreen(self)
         else:
-            self.file_manage_screen = None # Ensure it's None if import failed
+            self.file_manage_screen = None
 
         if SongEditScreen:
             self.song_edit_screen = SongEditScreen(self)
         else:
-            self.song_edit_screen = None # Ensure it's None if import failed
-        # --- END MODIFIED ---
-
-        # You can add other screens like MainMenuScreen here when ready
-        # self.main_menu_screen = MainMenuScreen(self)
+            self.song_edit_screen = None
 
         # Create a list of screens for navigation in the desired order
-        # Filter out None entries in case imports failed
         self.screens = [
             screen for screen in [
                 self.placeholder_screen,
                 self.file_manage_screen,
                 self.song_edit_screen,
-                # Add other screens here (e.g., self.main_menu_screen)
             ] if screen is not None
         ]
 
-        # Set the initial active screen (using the first one in the list)
         if self.screens:
              self.set_active_screen(self.screens[0])
         else:
              print("WARNING: No screens defined or successfully imported!")
-             # Create a minimal error screen or exit
-             self.active_screen = None # Will cause exit in run()
+             self.active_screen = None
 
         print("Screens initialized.")
 
@@ -153,21 +132,19 @@ class App:
             try:
                 self.midi_port = mido.open_input(self.midi_port_name)
                 print(f"Successfully opened MIDI port: {self.midi_port_name}")
-                # --- Notify systemd AFTER MIDI port is successfully opened ---
                 self.notify_status("MIDI Initialized. Notifying systemd READY=1")
                 self.notifier.notify("READY=1")
-                # --- End systemd notification ---
             except Exception as e:
                 error_info = f"Error opening MIDI port '{self.midi_port_name}': {e}"
                 print(error_info)
                 self.notify_status(f"FAIL: {error_info}")
-                self.notifier.notify("READY=1") # Notify ready even if MIDI fails for now
+                self.notifier.notify("READY=1")
                 self.midi_port = None
         else:
             error_info = f"MIDI Device '{MIDI_DEVICE_NAME}' not found."
             print(error_info)
             self.notify_status(f"FAIL: {error_info}")
-            self.notifier.notify("READY=1") # Notify ready even if MIDI fails for now
+            self.notifier.notify("READY=1")
 
     def notify_status(self, status_message):
         """Helper function to print status and notify systemd."""
@@ -189,7 +166,7 @@ class App:
         self.running = True
         self.notify_status(f"Running. Active Screen: {self.active_screen.__class__.__name__}")
         while self.running:
-            # --- Event Handling (Pygame) ---
+            # Event Handling (Pygame)
             events = pygame.event.get()
             for event in events:
                 if event.type == pygame.QUIT:
@@ -197,7 +174,7 @@ class App:
                 if self.active_screen:
                     self.active_screen.handle_event(event)
 
-            # --- MIDI Input Handling ---
+            # MIDI Input Handling
             if self.midi_port:
                 try:
                     for msg in self.midi_port.iter_pending():
@@ -210,35 +187,29 @@ class App:
                         except Exception as midi_err: 
                             print(f"Error closing MIDI port: {midi_err}")
                     self.midi_port = None
-                    # Try to re-open after a brief pause
                     print("Will attempt to reconnect MIDI in 5 seconds...")
                     self.notify_status("MIDI disconnected. Will retry in 5s")
 
-            # --- Update ---
+            # Update
             if self.active_screen:
                  self.active_screen.update()
 
-            # --- Draw ---
+            # Draw
             self.screen.fill(BLACK)
             if self.active_screen:
                 self.active_screen.draw(self.screen)
             pygame.display.flip()
 
-            # --- Frame Rate Control ---
+            # Frame Rate Control
             self.clock.tick(FPS)
 
-        # --- Exit ---
+        # Exit
         self.cleanup()
 
     def handle_midi_message(self, msg):
         """Process incoming MIDI messages."""
-        # --- DEBUGGING LINE (still useful) ---
         print(f"MIDI Received: {msg}")
-        # --- END DEBUGGING LINE ---
-
-        # --- ADDED: Store string representation of the message ---
         self.last_midi_message_str = str(msg)
-        # --- END ADDED ---
 
         if msg.type == 'control_change':
             if msg.control == EXIT_CC and msg.value == 127:
@@ -319,16 +290,13 @@ class App:
             print(f"Could not notify systemd on exit: {e}")
 
 
-# --- Script Entry Point ---
+# Script Entry Point
 if __name__ == '__main__':
-    # Added basic error handling for screen imports at the top
     app = None
     try:
         app = App()
-        # Check if app initialization failed to set an active screen
         if app.active_screen is None:
              print("App initialization failed to set an active screen. Exiting.")
-             # Attempt minimal cleanup if app object exists
              if app: app.cleanup()
              sys.exit(1)
 
