@@ -6,33 +6,38 @@ Initializes Pygame, basic MIDI, UI placeholder, and runs the main event loop.
 Handles exit via MIDI CC 47.
 """
 
-import pygame
-import mido
 import sys
 import os
-import sdnotify # For systemd readiness notification
-import time # For potential sleep/timing
+import sdnotify
+import pygame
+import mido
 
-# --- Constants ---
-SCREEN_WIDTH = 480
-SCREEN_HEIGHT = 320
-FPS = 30
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
 
-# --- Configuration ---
-# Base name of the MIDI device to find
-DEVICE_BASE_NAME = 'X-TOUCH MINI'
-# MIDI CC number designated for exiting the application (Layer B)
-EXIT_CC_NUMBER = 47
-# MIDI CC numbers for screen navigation
-NEXT_SCREEN_CC = 82
-PREV_SCREEN_CC = 90
+
+# Add the current directory to the path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Add debugging
+import config.settings as settings_module
+# Print out what's actually in the module
+print(f"Settings module contents: {dir(settings_module)}")
+# And use the module directly
+SCREEN_WIDTH = settings_module.SCREEN_WIDTH  # This should work if the constant exists
+SCREEN_HEIGHT = settings_module.SCREEN_HEIGHT
+FPS = settings_module.FPS
+BLACK = settings_module.BLACK
+WHITE = settings_module.WHITE
+RED = settings_module.RED
+MIDI_DEVICE_NAME = settings_module.MIDI_DEVICE_NAME
+
+from config.mappings import EXIT_CC, NEXT_SCREEN_CC, PREV_SCREEN_CC
 
 # --- UI Imports --- # MODIFIED: Grouped UI imports
 from ui.base_screen import BaseScreen
 from ui.main_menu_screen import MainMenuScreen # Keep for future use
+from ui.placeholder_screen import PlaceholderScreen # Move this line here
 
 # --- ADDED IMPORTS ---
 # Ensure these files exist and contain the correct class definitions
@@ -63,39 +68,6 @@ except ImportError as e:
 print(f"Available screens: FileManageScreen={'Available' if FileManageScreen else 'Not Available'}, "
       f"SongEditScreen={'Available' if SongEditScreen else 'Not Available'}")
 # --- END ADDED IMPORTS ---
-
-
-# --- Minimal Placeholder Screen ---
-class PlaceholderScreen(BaseScreen):
-    """A very basic screen to display something, including last MIDI message."""
-    def __init__(self, app_ref):
-        super().__init__(app_ref)
-        self.title_text = "emsys Running!"
-        self.title_surf = self.font.render(self.title_text, True, WHITE)
-        self.title_rect = self.title_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20)) # Move title up slightly
-
-        # Pre-render placeholder for MIDI message area
-        self.midi_placeholder_text = "Waiting for MIDI..."
-        self.midi_placeholder_surf = self.font_small.render(self.midi_placeholder_text, True, WHITE)
-        self.midi_placeholder_rect = self.midi_placeholder_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20)) # Position below title
-
-    def draw(self, screen_surface):
-        """Draws the screen content."""
-        # Draw main title
-        screen_surface.blit(self.title_surf, self.title_rect)
-
-        # Get the last MIDI message string from the App instance
-        last_midi_msg = self.app.last_midi_message_str # Read from App
-
-        # Render and draw the last MIDI message or placeholder
-        if last_midi_msg:
-            # Render the actual last message
-            midi_surf = self.font_small.render(last_midi_msg, True, WHITE)
-            midi_rect = midi_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20)) # Same position as placeholder
-            screen_surface.blit(midi_surf, midi_rect)
-        else:
-            # Draw the "Waiting for MIDI..." placeholder
-            screen_surface.blit(self.midi_placeholder_surf, self.midi_placeholder_rect)
 
 
 # --- MIDI Helper Function (from test.py, adapted) ---
@@ -192,7 +164,7 @@ class App:
     def _initialize_midi(self):
         """Finds and opens the MIDI port."""
         self.notify_status("Initializing MIDI...")
-        found_port_name = find_midi_port(DEVICE_BASE_NAME)
+        found_port_name = find_midi_port(MIDI_DEVICE_NAME)
         if found_port_name:
             self.midi_port_name = found_port_name
             print(f"Attempting to open MIDI port: '{self.midi_port_name}'")
@@ -210,7 +182,7 @@ class App:
                 self.notifier.notify("READY=1") # Notify ready even if MIDI fails for now
                 self.midi_port = None
         else:
-            error_info = f"MIDI Device '{DEVICE_BASE_NAME}' not found."
+            error_info = f"MIDI Device '{MIDI_DEVICE_NAME}' not found."
             print(error_info)
             self.notify_status(f"FAIL: {error_info}")
             self.notifier.notify("READY=1") # Notify ready even if MIDI fails for now
@@ -287,8 +259,8 @@ class App:
         # --- END ADDED ---
 
         if msg.type == 'control_change':
-            if msg.control == EXIT_CC_NUMBER and msg.value == 127:
-                print(f"Exit command received (CC #{EXIT_CC_NUMBER}). Shutting down.")
+            if msg.control == EXIT_CC and msg.value == 127:
+                print(f"Exit command received (CC #{EXIT_CC}). Shutting down.")
                 self.notify_status("Exit command received...")
                 self.running = False
             elif msg.control == NEXT_SCREEN_CC and msg.value == 127:

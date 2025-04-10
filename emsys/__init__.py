@@ -13,5 +13,5 @@ handling UI, sequencing, MIDI/OSC communication, and song management.
 
 # You could also define package-level constants here if needed.
 
-print("Initializing emsys package...") # Optional: for debugging import order
+# print("Initializing emsys package...")  # Comment this out
 
