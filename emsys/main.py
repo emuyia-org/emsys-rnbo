@@ -4,6 +4,7 @@ Main entry point for the Emsys Python Application. V1
 
 Initializes Pygame, basic MIDI, UI placeholder, and runs the main event loop.
 Handles exit via MIDI CC 47. Includes MIDI device auto-reconnection.
+Implements universal button hold-repeat for MIDI CC messages.
 """
 
 import sys
@@ -34,6 +35,11 @@ MIDI_DEVICE_NAME = settings_module.MIDI_DEVICE_NAME
 # Import reconnection settings
 RESCAN_INTERVAL_SECONDS = settings_module.RESCAN_INTERVAL_SECONDS
 CONNECTION_CHECK_INTERVAL_SECONDS = settings_module.CONNECTION_CHECK_INTERVAL_SECONDS
+# Import Button Repeat Settings (convert to seconds for internal use)
+# Use getattr for safe access with defaults
+BUTTON_REPEAT_DELAY_S = getattr(settings_module, 'BUTTON_REPEAT_DELAY_MS', 500) / 1000.0
+BUTTON_REPEAT_INTERVAL_S = getattr(settings_module, 'BUTTON_REPEAT_INTERVAL_MS', 100) / 1000.0
+
 
 from emsys.config.mappings import EXIT_CC, NEXT_SCREEN_CC, PREV_SCREEN_CC
 from emsys.utils.midi import find_midi_port
@@ -65,6 +71,8 @@ except ImportError as e:
 
 print(f"Available screens: FileManageScreen={'Available' if FileManageScreen else 'Not Available'}, "
       f"SongEditScreen={'Available' if SongEditScreen else 'Not Available'}")
+print(f"Universal Button Repeat: Delay={BUTTON_REPEAT_DELAY_S*1000}ms, Interval={BUTTON_REPEAT_INTERVAL_S*1000}ms")
+
 
 # Main Application Class
 class App:
@@ -95,6 +103,10 @@ class App:
         # UI State
         self.active_screen = None
         self.last_midi_message_str = None # Keep for potential display
+
+        # Button Hold State (Universal for all CCs)
+        # Dictionary mapping control_number to {'press_time': float, 'last_repeat_time': float, 'message': mido.Message}
+        self.pressed_buttons = {}
 
         self._initialize_midi() # Attempt initial connection
         self.initialize_screens()
@@ -185,6 +197,7 @@ class App:
         port_to_close = self.midi_port
         self.midi_port = None # Set to None immediately
         self.midi_port_name = None
+        self.pressed_buttons.clear() # Clear held buttons on disconnect
 
         if port_to_close:
             try:
@@ -284,8 +297,12 @@ class App:
                 if event.type == pygame.QUIT:
                     self.running = False
                 # Pass other events to the active screen
-                if self.active_screen:
-                    self.active_screen.handle_event(event) # Assuming screens have this method
+                if self.active_screen and hasattr(self.active_screen, 'handle_event'):
+                    try:
+                        self.active_screen.handle_event(event)
+                    except Exception as e:
+                        print(f"Error in screen {self.active_screen.__class__.__name__} handling event {event}: {e}")
+                        traceback.print_exc()
 
             # --- MIDI Reconnection Attempt ---
             if self.midi_port is None and self.is_searching:
@@ -344,6 +361,29 @@ class App:
                     # Optionally stop the app: self.running = False
                     continue
 
+            # --- Handle Button Repeats ---
+            # Iterate over a copy of keys in case the dict changes during iteration
+            pressed_controls = list(self.pressed_buttons.keys())
+            for control in pressed_controls:
+                if control not in self.pressed_buttons: continue # Check if released since loop start
+
+                state = self.pressed_buttons[control]
+                time_held = current_time - state['press_time']
+
+                # Check if initial delay has passed
+                if time_held >= BUTTON_REPEAT_DELAY_S:
+                    time_since_last_repeat = current_time - state['last_repeat_time']
+                    # Check if repeat interval has passed
+                    if time_since_last_repeat >= BUTTON_REPEAT_INTERVAL_S:
+                        # Trigger the action using the stored original message
+                        print(f"Repeat Action for CC {control} (Msg: {state['message']})")
+                        self._dispatch_action(state['message'])
+
+                        # Update last repeat time *only if still pressed*
+                        if control in self.pressed_buttons:
+                             self.pressed_buttons[control]['last_repeat_time'] = current_time
+
+
             # --- Update Active Screen ---
             if self.active_screen:
                  try:
@@ -387,43 +427,111 @@ class App:
         self.cleanup()
 
     def handle_midi_message(self, msg):
-        """Process incoming MIDI messages."""
-        # Optional: Reduce console spam by only printing specific messages or errors
-        # print(f"MIDI Received: {msg}")
+        """
+        Process incoming MIDI messages, tracking CC button presses/releases
+        for the universal repeat mechanism and dispatching the initial action.
+        """
         self.last_midi_message_str = str(msg) # Store for potential display
+        current_time = time.time() # Get time for press tracking
 
         if msg.type == 'control_change':
-            # --- Global CC Handling ---
-            if msg.control == EXIT_CC and msg.value == 127:
-                print(f"Exit command received (CC #{EXIT_CC}). Shutting down.")
+            control = msg.control
+            value = msg.value
+
+            # --- Handle CC Press (value > 0, typically 127) ---
+            if value > 0:
+                # Check if this button is *not* already considered pressed
+                if control not in self.pressed_buttons:
+                    print(f"Button Press Detected: CC {control} (Value: {value})")
+                    # Record the press time, initial repeat time, and the message itself
+                    self.pressed_buttons[control] = {
+                        'press_time': current_time,
+                        'last_repeat_time': current_time, # Set to press time initially
+                        'message': msg # Store the original message for repeats
+                    }
+                    # --- Trigger the INITIAL action ---
+                    self._dispatch_action(msg)
+                # If already pressed, do nothing (prevents re-triggering initial action)
+                # The repeat logic in the main loop will handle continued holding.
+                return # Handled (or ignored if already pressed)
+
+            # --- Handle CC Release (value == 0) ---
+            else: # value == 0
+                # Check if this button *was* considered pressed
+                if control in self.pressed_buttons:
+                    print(f"Button Release Detected: CC {control}")
+                    # Remove the button from the tracking dictionary
+                    del self.pressed_buttons[control]
+                # If not in dict, ignore (e.g., release msg without prior press)
+                return # Handled release
+
+        # --- Handle Non-CC Messages or CCs not handled above (e.g., continuous) ---
+        # If the message wasn't a CC press/release handled above, dispatch it directly.
+        # This allows non-button CCs or other message types (notes, etc.) to be processed.
+        # Note: This currently means non-button CCs won't repeat. If that's needed,
+        # the logic here and in _dispatch_action would need further refinement.
+        # print(f"Dispatching non-button-press/release message: {msg}") # Optional debug
+        self._dispatch_action(msg)
+
+
+    def _dispatch_action(self, msg):
+        """
+        Determines and executes the action associated with a MIDI message.
+        This is called for initial presses and subsequent repeats.
+        """
+        # Optional: Log the dispatch
+        # print(f"Dispatching action for: {msg}")
+
+        # --- Handle Control Change Messages ---
+        if msg.type == 'control_change':
+            control = msg.control
+            value = msg.value # Value might be relevant for some actions
+
+            # --- Global Actions (only trigger on specific values if needed, e.g., 127 for buttons) ---
+            # Check EXIT_CC (typically requires value 127)
+            if control == EXIT_CC and value == 127:
+                print(f"Exit action triggered by CC #{EXIT_CC}")
                 self.notify_status("Exit command received...")
                 self.running = False
-                return # Stop processing this message further
-            elif msg.control == NEXT_SCREEN_CC and msg.value == 127:
-                print(f"Next screen command received (CC #{NEXT_SCREEN_CC})")
+                # Ensure exit button isn't stuck in pressed state if it was somehow added
+                if control in self.pressed_buttons:
+                    del self.pressed_buttons[control]
+                return # Exit action takes precedence
+
+            # Check NEXT_SCREEN_CC (typically requires value 127)
+            elif control == NEXT_SCREEN_CC and value == 127:
+                print(f"Next screen action triggered by CC #{NEXT_SCREEN_CC}")
                 self.next_screen()
-                return # Stop processing this message further
-            elif msg.control == PREV_SCREEN_CC and msg.value == 127:
-                print(f"Previous screen command received (CC #{PREV_SCREEN_CC})")
+                return # Screen navigation handled
+
+            # Check PREV_SCREEN_CC (typically requires value 127)
+            elif control == PREV_SCREEN_CC and value == 127:
+                print(f"Previous screen action triggered by CC #{PREV_SCREEN_CC}")
                 self.previous_screen()
-                return # Stop processing this message further
+                return # Screen navigation handled
 
             # --- Pass to Active Screen ---
-            # Check if active_screen exists and has a handle_midi method
+            # If not a handled global CC, pass it to the active screen's handler
             if self.active_screen and hasattr(self.active_screen, 'handle_midi'):
                 try:
+                    # print(f"Passing CC {control} (Value: {value}) to screen: {self.active_screen.__class__.__name__}") # Debug
                     self.active_screen.handle_midi(msg)
                 except Exception as screen_midi_err:
                      print(f"Error in screen {self.active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
                      traceback.print_exc()
+            # else: print(f"No active screen or handle_midi method for CC {control}") # Debug
+
+        # --- Handle Other Message Types (Notes, etc.) ---
         else:
-             # Handle other message types if needed, or pass them to the screen
-             if self.active_screen and hasattr(self.active_screen, 'handle_midi'):
-                 try:
-                     self.active_screen.handle_midi(msg)
-                 except Exception as screen_midi_err:
-                      print(f"Error in screen {self.active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
-                      traceback.print_exc()
+            # Pass non-CC messages directly to the active screen
+            if self.active_screen and hasattr(self.active_screen, 'handle_midi'):
+                try:
+                    # print(f"Passing non-CC message {msg} to screen: {self.active_screen.__class__.__name__}") # Debug
+                    self.active_screen.handle_midi(msg)
+                except Exception as screen_midi_err:
+                     print(f"Error in screen {self.active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
+                     traceback.print_exc()
+            # else: print(f"No active screen or handle_midi method for non-CC message {msg}") # Debug
 
 
     def next_screen(self):
@@ -432,9 +540,13 @@ class App:
         try:
             current_index = self.screens.index(self.active_screen)
             next_index = (current_index + 1) % len(self.screens)
+            # Log the switch action itself
+            print(f"Action: Switch screen {self.active_screen.__class__.__name__} -> {self.screens[next_index].__class__.__name__}")
             self.set_active_screen(self.screens[next_index])
         except (ValueError, AttributeError): # Handle if active_screen somehow not in list
-             if self.screens: self.set_active_screen(self.screens[0])
+             if self.screens:
+                  print(f"Action: Switch screen (fallback) -> {self.screens[0].__class__.__name__}")
+                  self.set_active_screen(self.screens[0])
 
     def previous_screen(self):
         """Switch to the previous available screen."""
@@ -442,9 +554,13 @@ class App:
         try:
             current_index = self.screens.index(self.active_screen)
             prev_index = (current_index - 1) % len(self.screens) # Correctly handles negative index
+            # Log the switch action itself
+            print(f"Action: Switch screen {self.active_screen.__class__.__name__} -> {self.screens[prev_index].__class__.__name__}")
             self.set_active_screen(self.screens[prev_index])
         except (ValueError, AttributeError): # Handle if active_screen somehow not in list
-             if self.screens: self.set_active_screen(self.screens[0])
+             if self.screens:
+                  print(f"Action: Switch screen (fallback) -> {self.screens[0].__class__.__name__}")
+                  self.set_active_screen(self.screens[0])
 
     def set_active_screen(self, screen):
         """Set the active screen, call cleanup/init if needed, and notify status."""
@@ -466,8 +582,7 @@ class App:
              try: self.active_screen.init()
              except Exception as e: print(f"Error during screen init: {e}")
 
-        print(f"Switched to screen: {screen.__class__.__name__}")
-        # Update status notification (MIDI status might change later in the loop)
+        # Status notification includes screen name and MIDI status
         current_midi_status = self.midi_error_message or (self.midi_port_name if self.midi_port else "Searching...")
         self.notify_status(f"Screen: {self.active_screen.__class__.__name__}. MIDI: {current_midi_status}")
 
@@ -489,6 +604,7 @@ class App:
             try: self.midi_port.close()
             except Exception as e: print(f"Error closing MIDI port: {e}")
         self.midi_port = None # Ensure it's None after closing
+        self.pressed_buttons.clear() # Clear button state on cleanup
 
         pygame.quit()
         print("Pygame quit.")
@@ -541,6 +657,7 @@ def main():
             try:
                 if app.active_screen and hasattr(app.active_screen, 'cleanup'): app.active_screen.cleanup()
                 if app.midi_port: app.midi_port.close()
+                app.pressed_buttons.clear() # Clear button state
             except: pass # Ignore errors during crash cleanup
         try: pygame.quit()
         except: pass
