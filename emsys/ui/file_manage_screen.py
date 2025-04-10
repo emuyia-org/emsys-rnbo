@@ -63,6 +63,10 @@ class FileManageScreen(BaseScreen):
         self.text_input_widget = TextInputWidget(app_ref)
         # ---------------------------------------
 
+        # --- Add deletion confirmation state ---
+        self.delete_confirmation_active = False
+        # -------------------------------------
+
     def init(self):
         """Called when the screen becomes active. Load the song list."""
         super().init()
@@ -155,6 +159,19 @@ class FileManageScreen(BaseScreen):
             return # Don't process other actions while text input is active
         # ----------------------------------
 
+        # --- Handle Delete Confirmation Mode ---
+        if self.delete_confirmation_active:
+            if cc == mappings.YES_NAV_CC:
+                self._perform_delete()
+                return
+            elif cc == mappings.NO_NAV_CC:
+                self.delete_confirmation_active = False
+                self.set_feedback("Delete cancelled.")
+                return
+            # Ignore other buttons during delete confirmation
+            return
+        # -------------------------------------
+
         # --- Normal File Management Mode ---
 
         # Handle CREATE_SONG_CC
@@ -166,6 +183,12 @@ class FileManageScreen(BaseScreen):
         elif cc == mappings.RENAME_SONG_CC:
             self._start_file_rename()
             return
+
+        # --- Add DELETE_SEGMENT_CC handling ---
+        elif cc == mappings.DELETE_SEGMENT_CC:
+            self._delete_selected_song()
+            return
+        # ----------------------------------
 
         # --- List Navigation/Selection (only if list exists) ---
         if not self.song_list:
@@ -311,6 +334,55 @@ class FileManageScreen(BaseScreen):
 
     # --- End of Renaming Methods ---
 
+    def _delete_selected_song(self):
+        """Initiates the deletion of the selected song with confirmation."""
+        if self.selected_index is None or not self.song_list:
+            self.set_feedback("No song selected to delete", is_error=True)
+            return
+
+        try:
+            song_name = self.song_list[self.selected_index]
+            self.delete_confirmation_active = True
+            self.set_feedback(f"Delete '{song_name}'? Press YES to confirm, NO to cancel", is_error=True)
+        except IndexError:
+            self.set_feedback("Selection error, cannot delete.", is_error=True)
+            self.selected_index = 0 if self.song_list else None  # Reset index
+
+    def _perform_delete(self):
+        """Performs the actual song deletion after confirmation."""
+        if self.selected_index is None or not self.song_list:
+            self.delete_confirmation_active = False
+            self.set_feedback("No song selected to delete", is_error=True)
+            return
+
+        try:
+            song_name = self.song_list[self.selected_index]
+            
+            # Check if the song to be deleted is the currently loaded song
+            is_current_song = (self.app.current_song and self.app.current_song.name == song_name)
+            
+            # Delete the song using file_io
+            if hasattr(file_io, 'delete_song') and file_io.delete_song(song_name):
+                self.set_feedback(f"Deleted: '{song_name}'")
+                
+                # If we deleted the current song, clear the app's current_song reference
+                if is_current_song:
+                    self.app.current_song = None
+                    print(f"Cleared current song as it was deleted: '{song_name}'")
+                
+                # Update the song list and selection
+                self._refresh_song_list()
+                if not self.song_list:
+                    self.selected_index = None
+                elif self.selected_index >= len(self.song_list):
+                    self.selected_index = len(self.song_list) - 1
+                    
+            else:
+                self.set_feedback(f"Failed to delete '{song_name}'", is_error=True)
+        except Exception as e:
+            self.set_feedback(f"Error deleting song: {str(e)}", is_error=True)
+        
+        self.delete_confirmation_active = False
 
     def _create_new_song(self):
         """Creates a new song and navigates to the song edit screen."""
@@ -429,7 +501,11 @@ class FileManageScreen(BaseScreen):
             # Add hint for renaming
             rename_cc = getattr(mappings, 'RENAME_SONG_CC', None)
             rename_hint = f"(Rename: CC {rename_cc})" if rename_cc else ""
-
+            
+            # --- Add hint for deletion ---
+            delete_cc = getattr(mappings, 'DELETE_SEGMENT_CC', None)
+            delete_hint = f"(Delete: CC {delete_cc})" if delete_cc else ""
+            # --------------------------
 
             if not self.song_list:
                 create_cc = getattr(mappings, 'CREATE_SONG_CC', '?')
@@ -467,15 +543,23 @@ class FileManageScreen(BaseScreen):
                         # Draw highlight background
                         highlight_rect = pygame.Rect(LEFT_MARGIN, y_offset - 2, screen_surface.get_width() - (2 * LEFT_MARGIN), LINE_HEIGHT)
                         pygame.draw.rect(screen_surface, (40, 80, 40), highlight_rect) # Dark green background
-                        # Add rename hint next to selected item
+                        
+                        # --- Display both rename and delete hints ---
+                        hints = []
                         if rename_hint:
-                            hint_surf = self.font_small.render(rename_hint, True, WHITE)
+                            hints.append(rename_hint)
+                        if delete_hint:
+                            hints.append(delete_hint)
+                        
+                        if hints:
+                            combined_hint = " | ".join(hints)
+                            hint_surf = self.font_small.render(combined_hint, True, WHITE)
                             hint_rect = hint_surf.get_rect(midleft=(item_rect.right + 10, item_rect.centery))
                             # Prevent hint going off screen
                             if hint_rect.right > screen_surface.get_width() - LEFT_MARGIN:
                                 hint_rect.right = screen_surface.get_width() - LEFT_MARGIN
                             screen_surface.blit(hint_surf, hint_rect)
-
+                        # -----------------------------------------
 
                     screen_surface.blit(item_surf, item_rect)
                     y_offset += LINE_HEIGHT
@@ -489,6 +573,11 @@ class FileManageScreen(BaseScreen):
 
         # --- Draw Feedback Message (Common) ---
         self._draw_feedback(screen_surface)
+        
+        # --- Draw Delete Confirmation UI if active ---
+        if self.delete_confirmation_active and not self.text_input_widget.is_active:
+            self._draw_delete_confirmation(screen_surface)
+        # -----------------------------------------
 
     def _draw_feedback(self, surface):
         """Draws the feedback message at the bottom."""
@@ -501,4 +590,42 @@ class FileManageScreen(BaseScreen):
             pygame.draw.rect(surface, BLACK, bg_rect)
             pygame.draw.rect(surface, color, bg_rect, 1) # Border
             surface.blit(feedback_surf, feedback_rect)
+
+    def _draw_delete_confirmation(self, surface):
+        """Draws the delete confirmation overlay."""
+        # Create semi-transparent overlay
+        overlay = pygame.Surface((surface.get_width(), surface.get_height()), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))  # Semi-transparent black
+        surface.blit(overlay, (0, 0))
+        
+        # Draw confirmation box
+        box_width, box_height = 400, 150
+        box_x = (surface.get_width() - box_width) // 2
+        box_y = (surface.get_height() - box_height) // 2
+        
+        # Box background and border
+        pygame.draw.rect(surface, BLACK, (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(surface, RED, (box_x, box_y, box_width, box_height), 2)
+        
+        # Title
+        title_text = "Confirm Delete"
+        title_surf = self.font_large.render(title_text, True, RED)
+        title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
+        surface.blit(title_surf, title_rect)
+        
+        # Song name
+        if self.selected_index is not None and self.selected_index < len(self.song_list):
+            song_name = self.song_list[self.selected_index]
+            song_text = f"'{song_name}'"
+            song_surf = self.font.render(song_text, True, WHITE)
+            song_rect = song_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
+            surface.blit(song_surf, song_rect)
+        
+        # Instruction
+        yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
+        no_cc = getattr(mappings, 'NO_NAV_CC', '?')
+        instr_text = f"Press CC {yes_cc} to delete or CC {no_cc} to cancel"
+        instr_surf = self.font.render(instr_text, True, WHITE)
+        instr_rect = instr_surf.get_rect(midbottom=(surface.get_width() // 2, box_y + box_height - 15))
+        surface.blit(instr_surf, instr_rect)
 
