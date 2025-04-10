@@ -54,6 +54,7 @@ PARAM_STEPS = {
 
 class SongEditScreen(BaseScreen):
     """Screen for editing song structure and segment parameters."""
+    """Screen for editing song structure and segment parameters."""
 
     def __init__(self, app_ref):
         """Initialize the song editing screen."""

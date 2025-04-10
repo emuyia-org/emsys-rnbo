@@ -1,11 +1,12 @@
 # emsys/config/mappings.py
+# emsys/config/mappings.py
 """
 X-TOUCH MINI
 Button ref: (L)ayer A-B // (C)olumn 1-8 // (R)ow 1-2
 """
 
 # MIDI CC number designated for exiting the application (Layer B)
-EXIT_CC = 47
+EXIT_CC = 47 # Button 8 Push
 
 # MIDI CC numbers for screen navigation
 NEXT_SCREEN_CC = 82 # LB C1 R1
