@@ -12,6 +12,10 @@ class MainMenuScreen(BaseScreen):
     
     def __init__(self, app_ref):
         super().__init__(app_ref)
+        # Define additional fonts needed
+        self.font_large = pygame.font.Font(None, 48)  # Larger font for titles
+        self.font_small = pygame.font.Font(None, 18)  # Smaller font for hints/captions
+        
         self.title = "MAIN MENU"
         self.title_surf = self.font_large.render(self.title, True, (255, 255, 255))
         self.title_rect = self.title_surf.get_rect(center=(self.app.screen.get_width() // 2, 50))
@@ -47,7 +51,7 @@ class MainMenuScreen(BaseScreen):
         # No dynamic content yet, so nothing to update
         pass
 
-    def draw(self, screen_surface):
+    def draw(self, screen_surface, midi_status=None):
         """Draw the main menu content."""
         # Draw background
         pygame.draw.rect(screen_surface, (30, 30, 30), 

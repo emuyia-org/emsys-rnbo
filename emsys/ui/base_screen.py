@@ -1,34 +1,51 @@
-# -*- coding: utf-8 -*-
-"""
-Base Screen class for the Emsys Application.
-Provides common functionality for all screens.
-"""
+# emsys/ui/base_screen.py
 
 import pygame
+from emsys.config import settings
 
 class BaseScreen:
     """Base class for all application screens."""
-    
-    def __init__(self, app_ref):
-        """Initialize the base screen."""
-        self.app = app_ref
-        # Set up common fonts that all screens can use
-        self.font = pygame.font.SysFont(None, 36)  # Standard font
-        self.font_large = pygame.font.SysFont(None, 48)  # Larger font
-        self.font_small = pygame.font.SysFont(None, 24)  # Smaller font
-    
+
+    def __init__(self, app):
+        self.app = app
+        self.font = pygame.font.Font(None, 24) # Example font
+
     def handle_event(self, event):
-        """Handle pygame events. To be implemented by subclasses."""
-        pass
-    
+        """Handle a single Pygame event."""
+        pass # Default implementation does nothing
+
+    def handle_midi(self, msg):
+        """Handle an incoming MIDI message."""
+        pass # Default implementation does nothing
+
     def update(self):
-        """Update screen state. To be implemented by subclasses."""
+        """Update screen state (called once per frame)."""
+        pass # Default implementation does nothing
+
+    # --- MODIFICATION HERE ---
+    def draw(self, screen, midi_status=None):
+        """
+        Draw the screen content.
+
+        Args:
+            screen: The Pygame surface to draw onto.
+            midi_status (str, optional): A string describing the current MIDI connection status. Defaults to None.
+        """
+        # Base implementation could potentially draw the status, or do nothing
+        # Example: Draw status at the top
+        if midi_status:
+            status_surface = self.font.render(midi_status, True, settings.WHITE)
+            screen.blit(status_surface, (10, 10))
+        # --- END MODIFICATION ---
+
+        # Existing base draw logic (if any) or leave it to subclasses
         pass
-    
-    def draw(self, screen_surface):
-        """Draw the screen content. Must be implemented by subclasses."""
-        raise NotImplementedError("Each screen must implement its own draw method")
-    
+
     def init(self):
-        """Optional initialization when screen becomes active."""
-        pass
+        """Called when the screen becomes active."""
+        pass # Default implementation does nothing
+
+    def cleanup(self):
+        """Called when the screen becomes inactive."""
+        pass # Default implementation does nothing
+

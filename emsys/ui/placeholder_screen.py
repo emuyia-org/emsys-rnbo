@@ -1,36 +1,50 @@
-# Corrected imports
-from emsys.ui.base_screen import BaseScreen  # Use absolute import
-from emsys.config.settings import SCREEN_WIDTH, SCREEN_HEIGHT, WHITE  # Import WHITE color
+# emsys/ui/placeholder_screen.py
 
-# --- Minimal Placeholder Screen ---
+import pygame
+from emsys.ui.base_screen import BaseScreen
+from emsys.config.settings import WHITE, SCREEN_WIDTH, SCREEN_HEIGHT # Import necessary constants
+
 class PlaceholderScreen(BaseScreen):
-    # ... rest of the class remains the same ...
-    def __init__(self, app_ref):
-        super().__init__(app_ref)
-        self.title_text = "emsys Running!"
-        self.title_surf = self.font.render(self.title_text, True, WHITE)
-        self.title_rect = self.title_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 20)) # Move title up slightly
+    """
+    A simple placeholder screen displaying basic info.
+    """
+    def __init__(self, app):
+        # Initialize the BaseScreen (sets self.app and self.font)
+        super().__init__(app)
+        
+        self.title_text = "Emsys Controller"
+        self.title_font = pygame.font.Font(None, 48)  # Define a specific title font
+        self.title_surf = self.title_font.render(self.title_text, True, WHITE)
+        self.title_rect = self.title_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 3))
 
-        # Pre-render placeholder for MIDI message area
-        self.midi_placeholder_text = "Waiting for MIDI..."
-        self.midi_placeholder_surf = self.font_small.render(self.midi_placeholder_text, True, WHITE)
-        self.midi_placeholder_rect = self.midi_placeholder_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20)) # Position below title
+        self.midi_placeholder_text = "MIDI Status Area"
+        # Use the font inherited from BaseScreen
+        self.midi_placeholder_surf = self.font.render(self.midi_placeholder_text, True, WHITE)
+        self.midi_placeholder_rect = self.midi_placeholder_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
 
-    def draw(self, screen_surface):
-        """Draws the screen content."""
-        # Draw main title
-        screen_surface.blit(self.title_surf, self.title_rect)
+        # Add any other specific initializations for PlaceholderScreen
+        print("PlaceholderScreen initialized")
 
-        # Get the last MIDI message string from the App instance
-        last_midi_msg = self.app.last_midi_message_str # Read from App
 
-        # Render and draw the last MIDI message or placeholder
-        if last_midi_msg:
-            # Render the actual last message
-            midi_surf = self.font_small.render(last_midi_msg, True, WHITE)
-            midi_rect = midi_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 20)) # Same position as placeholder
-            screen_surface.blit(midi_surf, midi_rect)
+    def draw(self, screen, midi_status=None):
+        """Draw the placeholder content."""
+        # Optionally call the base draw method if it does something useful (like drawing status)
+        # super().draw(screen, midi_status)
+
+        # Draw screen-specific elements
+        screen.blit(self.title_surf, self.title_rect)
+
+        # Update and draw the actual MIDI status if provided
+        if midi_status:
+            status_surf = self.font.render(midi_status, True, WHITE) # Use self.font
+            status_rect = status_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            screen.blit(status_surf, status_rect)
         else:
-            # Draw the "Waiting for MIDI..." placeholder
-            screen_surface.blit(self.midi_placeholder_surf, self.midi_placeholder_rect)
+            # Fallback to placeholder text if no status is given
+            screen.blit(self.midi_placeholder_surf, self.midi_placeholder_rect)
+
+        # Draw other elements as needed
+
+    # Implement other methods like handle_event, handle_midi, update if needed
+    # ...
 

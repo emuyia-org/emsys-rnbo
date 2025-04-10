@@ -59,6 +59,10 @@ class SongEditScreen(BaseScreen):
     def __init__(self, app_ref):
         """Initialize the song editing screen."""
         super().__init__(app_ref)
+        # Define additional fonts needed
+        self.font_large = pygame.font.Font(None, 36)  # Larger font for titles
+        self.font_small = pygame.font.Font(None, 18)  # Smaller font for detailed info
+        
         self.current_song: Optional[Song] = None
         self.selected_segment_index: Optional[int] = None
         self.selected_parameter_key: Optional[str] = None
@@ -447,7 +451,7 @@ class SongEditScreen(BaseScreen):
 
     # --- Drawing Methods ---
 
-    def draw(self, screen_surface):
+    def draw(self, screen_surface, midi_status=None):
         """Draws the song editor interface or the rename interface."""
         # --- Draw Rename Interface if active ---
         if self.is_renaming_song:

@@ -37,6 +37,10 @@ class FileManageScreen(BaseScreen):
     def __init__(self, app_ref):
         """Initialize the file management screen."""
         super().__init__(app_ref)
+        # Define additional fonts needed
+        self.font_large = pygame.font.Font(None, 36)  # Larger font for titles
+        self.font_small = pygame.font.Font(None, 18)  # Smaller font for indicators/details
+        
         self.title_text = "Load Song"
         self.title_surf = self.font_large.render(self.title_text, True, WHITE)
         self.title_rect = self.title_surf.get_rect(midtop=(self.app.screen.get_width() // 2, TOP_MARGIN))
@@ -236,7 +240,7 @@ class FileManageScreen(BaseScreen):
             return 0
         return available_height // LINE_HEIGHT
 
-    def draw(self, screen_surface):
+    def draw(self, screen_surface, midi_status=None):
         """Draws the screen content."""
         # Draw the title
         screen_surface.blit(self.title_surf, self.title_rect)
