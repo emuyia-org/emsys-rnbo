@@ -2,10 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 Screen for viewing and editing Song objects. Includes renaming functionality.
+Uses column-based navigation (Segments <-> Parameters).
 """
 import pygame
 import time
 from typing import List, Optional, Tuple, Any
+from enum import Enum, auto
 
 # Core components
 from .base_screen import BaseScreen
@@ -32,6 +34,7 @@ PARAM_COLOR = WHITE     # Color for parameter names/values
 VALUE_COLOR = WHITE     # Color for parameter values (can be different)
 FEEDBACK_COLOR = BLUE   # Color for feedback messages
 ERROR_COLOR = RED       # Color for error messages
+FOCUS_BORDER_COLOR = BLUE # Color for the border around the focused column
 
 # Define layout constants
 LEFT_MARGIN = 15
@@ -40,6 +43,7 @@ LINE_HEIGHT = 25
 PARAM_INDENT = 30
 SEGMENT_LIST_WIDTH = 180 # Width for the segment list area
 PARAM_AREA_X = LEFT_MARGIN + SEGMENT_LIST_WIDTH + 15 # Start X for parameter details
+COLUMN_BORDER_WIDTH = 2 # Width of the focus border
 
 # Define parameter editing steps
 PARAM_STEPS = {
@@ -52,8 +56,13 @@ PARAM_STEPS = {
     'automatic_transport_interrupt': 1, # Special handling for bool
 }
 
+# --- Define Focus Columns ---
+class FocusColumn(Enum):
+    SEGMENT_LIST = auto()
+    PARAMETER_DETAILS = auto()
+# ---------------------------
+
 class SongEditScreen(BaseScreen):
-    """Screen for editing song structure and segment parameters."""
     """Screen for editing song structure and segment parameters."""
 
     def __init__(self, app_ref):
@@ -62,7 +71,7 @@ class SongEditScreen(BaseScreen):
         # Define additional fonts needed
         self.font_large = pygame.font.Font(None, 36)  # Larger font for titles
         self.font_small = pygame.font.Font(None, 18)  # Smaller font for detailed info
-        
+
         self.current_song: Optional[Song] = None
         self.selected_segment_index: Optional[int] = None
         self.selected_parameter_key: Optional[str] = None
@@ -73,6 +82,10 @@ class SongEditScreen(BaseScreen):
         self.is_renaming_song: bool = False
         self.song_renamer_instance: Optional[SongRenamer] = None
         # -----------------------------
+
+        # --- Add state for column focus ---
+        self.focused_column: FocusColumn = FocusColumn.SEGMENT_LIST
+        # ---------------------------------
 
         # Define the order and names of editable parameters
         self.parameter_keys: List[str] = [
@@ -109,11 +122,14 @@ class SongEditScreen(BaseScreen):
 
         # Initialize selection state
         if self.current_song and self.current_song.segments:
-            self.selected_segment_index = 0
-            if self.parameter_keys: # Ensure parameter keys exist
-                self.selected_parameter_key = self.parameter_keys[0]
-            else:
+            # If no segment is selected or index is invalid, select the first one
+            if self.selected_segment_index is None or self.selected_segment_index >= len(self.current_song.segments):
+                self.selected_segment_index = 0
+            # If no parameter is selected or invalid, select the first one
+            if not self.parameter_keys:
                 self.selected_parameter_key = None
+            elif self.selected_parameter_key not in self.parameter_keys:
+                self.selected_parameter_key = self.parameter_keys[0]
         else:
             self.selected_segment_index = None
             self.selected_parameter_key = None
@@ -122,6 +138,9 @@ class SongEditScreen(BaseScreen):
         self.is_renaming_song = False
         self.song_renamer_instance = None
         # ------------------------------------
+        # --- Reset focus state on init ---
+        self.focused_column = FocusColumn.SEGMENT_LIST
+        # ---------------------------------
         self.clear_feedback() # Clear any old feedback
 
     def cleanup(self):
@@ -132,6 +151,9 @@ class SongEditScreen(BaseScreen):
         self.is_renaming_song = False
         self.song_renamer_instance = None
         # ---------------------------------------------
+        # --- Reset focus state on cleanup ---
+        self.focused_column = FocusColumn.SEGMENT_LIST
+        # ----------------------------------
         self.clear_feedback()
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
@@ -157,7 +179,7 @@ class SongEditScreen(BaseScreen):
             return
 
         cc = msg.control
-        print(f"SongEditScreen received CC: {cc}")
+        print(f"SongEditScreen received CC: {cc} | Focus: {self.focused_column}")
 
         # --- Handle Renaming Mode FIRST ---
         if self.is_renaming_song:
@@ -165,37 +187,42 @@ class SongEditScreen(BaseScreen):
             return # Don't process other actions while renaming
         # ----------------------------------
 
-        # --- Normal Edit Mode Handling ---
-        # Navigation
-        if cc == mappings.DOWN_NAV_CC:
-            self._change_selected_segment(1)
-        elif cc == mappings.UP_NAV_CC:
-            self._change_selected_segment(-1)
-        elif cc == mappings.RIGHT_NAV_CC:
-            self._change_selected_parameter(1)
-        elif cc == mappings.LEFT_NAV_CC:
-            self._change_selected_parameter(-1)
+        # --- Normal Edit Mode Handling (Column-Based) ---
 
-        # Value Modification
+        # Navigation - Behavior depends on focused column
+        if cc == mappings.DOWN_NAV_CC:
+            if self.focused_column == FocusColumn.SEGMENT_LIST:
+                self._change_selected_segment(1)
+            elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                self._change_selected_parameter_vertically(1)
+        elif cc == mappings.UP_NAV_CC:
+            if self.focused_column == FocusColumn.SEGMENT_LIST:
+                self._change_selected_segment(-1)
+            elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                self._change_selected_parameter_vertically(-1)
+        elif cc == mappings.RIGHT_NAV_CC:
+            self._navigate_focus(1) # Move focus right
+        elif cc == mappings.LEFT_NAV_CC:
+            self._navigate_focus(-1) # Move focus left
+
+        # Value Modification (Only if Parameter column is focused)
         elif cc == mappings.YES_NAV_CC: # Increment
             self._modify_selected_parameter(1)
         elif cc == mappings.NO_NAV_CC: # Decrement
             self._modify_selected_parameter(-1)
 
-        # Actions
+        # Actions (Generally independent of focus, but act on selection)
         elif cc == mappings.SAVE_SONG_CC:
             self._save_current_song()
         elif cc == mappings.ADD_SEGMENT_CC:
             self._add_new_segment()
         elif cc == mappings.DELETE_SEGMENT_CC:
             self._delete_selected_segment()
-        # --- Add a trigger for renaming ---
         elif cc == mappings.RENAME_SONG_CC: # CC 85
              self._start_song_rename()
-        # ----------------------------------
 
     # --- NEW: Methods for Renaming ---
-
+    # ... (rename methods remain unchanged) ...
     def _start_song_rename(self):
         """Initiates the song renaming process."""
         if self.current_song:
@@ -303,11 +330,38 @@ class SongEditScreen(BaseScreen):
     # --- End of Renaming Methods ---
 
 
-    # --- Internal Helper Methods for Actions (Existing - with guards) ---
+    # --- Internal Helper Methods for Actions (Modified for Focus) ---
+
+    def _navigate_focus(self, direction: int):
+        """Change the focused column."""
+        if self.is_renaming_song: return
+
+        if direction > 0: # Move Right
+            if self.focused_column == FocusColumn.SEGMENT_LIST:
+                # Check if navigation to parameters is possible
+                if self.current_song and self.current_song.segments and self.selected_segment_index is not None and self.parameter_keys:
+                    self.focused_column = FocusColumn.PARAMETER_DETAILS
+                    # Ensure a parameter is selected (select first if needed)
+                    if self.selected_parameter_key not in self.parameter_keys:
+                        self.selected_parameter_key = self.parameter_keys[0]
+                    self.clear_feedback()
+                    print("Focus moved to Parameters")
+                else:
+                    self.set_feedback("Cannot focus parameters (no segment/params?)", is_error=True)
+            # else: Already in the rightmost column
+
+        elif direction < 0: # Move Left
+            if self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                self.focused_column = FocusColumn.SEGMENT_LIST
+                self.clear_feedback()
+                print("Focus moved to Segments")
+            # else: Already in the leftmost column
 
     def _change_selected_segment(self, direction: int):
-        """Move segment selection up or down."""
+        """Move segment selection up or down (only when segment list is focused)."""
         if self.is_renaming_song: return # Prevent action during rename
+        if self.focused_column != FocusColumn.SEGMENT_LIST: return # Only act if focused
+
         if not self.current_song or not self.current_song.segments:
             self.set_feedback("No segments to select", is_error=True)
             return
@@ -316,19 +370,33 @@ class SongEditScreen(BaseScreen):
         if self.selected_segment_index is None:
             self.selected_segment_index = 0
         else:
-            self.selected_segment_index = (self.selected_segment_index + direction) % num_segments
+            new_index = (self.selected_segment_index + direction) % num_segments
+            # Handle wrap-around explicitly if needed, or rely on modulo
+            self.selected_segment_index = new_index
 
+        # When segment changes, reset parameter selection to the first one
         if self.parameter_keys:
             self.selected_parameter_key = self.parameter_keys[0]
+        else:
+            self.selected_parameter_key = None
         self.clear_feedback()
 
 
-    def _change_selected_parameter(self, direction: int):
-        """Move parameter selection left or right."""
+    def _change_selected_parameter_vertically(self, direction: int):
+        """Move parameter selection up or down (only when parameter details are focused)."""
         if self.is_renaming_song: return # Prevent action during rename
+        if self.focused_column != FocusColumn.PARAMETER_DETAILS: return # Only act if focused
+
         if self.selected_segment_index is None or not self.parameter_keys:
-            self.set_feedback("Select a segment first", is_error=True)
+            self.set_feedback("No parameters to select", is_error=True)
             return
+
+        # Ensure a parameter is currently selected
+        if self.selected_parameter_key is None:
+             if self.parameter_keys:
+                 self.selected_parameter_key = self.parameter_keys[0]
+             else:
+                 return # No parameters available
 
         try:
             current_param_index = self.parameter_keys.index(self.selected_parameter_key)
@@ -336,12 +404,18 @@ class SongEditScreen(BaseScreen):
             self.selected_parameter_key = self.parameter_keys[next_param_index]
             self.clear_feedback()
         except (ValueError, AttributeError):
+            # Fallback if current key isn't found (shouldn't happen ideally)
             self.selected_parameter_key = self.parameter_keys[0] if self.parameter_keys else None
 
 
     def _modify_selected_parameter(self, direction: int):
-        """Increment or decrement the value of the selected parameter."""
+        """Increment or decrement the value of the selected parameter (only if parameter details are focused)."""
         if self.is_renaming_song: return # Prevent action during rename
+        # --- Add focus check ---
+        if self.focused_column != FocusColumn.PARAMETER_DETAILS:
+            self.set_feedback("Focus parameters to modify (Right Arrow)", is_error=True)
+            return
+        # -----------------------
         if self.selected_segment_index is None or self.selected_parameter_key is None:
             self.set_feedback("Select segment and parameter first", is_error=True)
             return
@@ -356,9 +430,11 @@ class SongEditScreen(BaseScreen):
             new_value: Any
 
             if isinstance(current_value, bool):
+                # Toggle boolean with either direction
                 new_value = not current_value
             elif isinstance(current_value, int):
                 new_value = current_value + direction * step
+                # Apply constraints
                 if key in ('program_message_1', 'program_message_2'):
                     new_value = max(MIN_PROGRAM_MSG, min(MAX_PROGRAM_MSG, new_value))
                 elif key == 'loop_length':
@@ -367,16 +443,20 @@ class SongEditScreen(BaseScreen):
                     new_value = max(MIN_REPETITIONS, min(MAX_REPETITIONS, new_value))
             elif isinstance(current_value, float):
                 new_value = current_value + direction * step
+                # Apply constraints
                 if key == 'tempo':
                     new_value = max(MIN_TEMPO, min(MAX_TEMPO, new_value))
                 elif key == 'tempo_ramp':
                     new_value = max(MIN_RAMP, min(MAX_RAMP, new_value))
-                new_value = round(new_value, 2)
+                new_value = round(new_value, 2) # Keep precision reasonable
             else:
                 self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
                 return
 
+            # Update the song data
             self.current_song.update_segment(self.selected_segment_index, **{key: new_value})
+
+            # Provide feedback
             display_name = self.parameter_display_names.get(key, key)
             value_display = "YES" if isinstance(new_value, bool) and new_value else "NO" if isinstance(new_value, bool) else new_value
             self.set_feedback(f"{display_name}: {value_display}")
@@ -404,15 +484,21 @@ class SongEditScreen(BaseScreen):
             self.set_feedback("Load a song first", is_error=True)
             return
 
-        new_segment = Segment()
+        new_segment = Segment() # Create a default segment
         insert_index = (self.selected_segment_index + 1) if self.selected_segment_index is not None else len(self.current_song.segments)
 
         try:
             self.current_song.add_segment(new_segment, index=insert_index)
+            # Select the newly added segment
             self.selected_segment_index = insert_index
+            # Reset parameter selection for the new segment
             if self.parameter_keys:
                  self.selected_parameter_key = self.parameter_keys[0]
-            self.set_feedback(f"Added new segment at position {insert_index + 1}")
+            else:
+                 self.selected_parameter_key = None
+            # Set focus back to segment list after adding
+            self.focused_column = FocusColumn.SEGMENT_LIST
+            self.set_feedback(f"Added segment {insert_index + 1}")
         except Exception as e:
             self.set_feedback(f"Error adding segment: {e}", is_error=True)
 
@@ -420,6 +506,11 @@ class SongEditScreen(BaseScreen):
     def _delete_selected_segment(self):
         """Delete the currently selected segment."""
         if self.is_renaming_song: return # Prevent action during rename
+        # --- Allow deletion only if segment list is focused? Or based on selection? Let's allow based on selection ---
+        # if self.focused_column != FocusColumn.SEGMENT_LIST:
+        #     self.set_feedback("Focus segment list to delete (Left Arrow)", is_error=True)
+        #     return
+        # ----------------------------------------------------------------------------------------------------------
         if self.selected_segment_index is None or not self.current_song or not self.current_song.segments:
             self.set_feedback("No segment selected to delete", is_error=True)
             return
@@ -429,27 +520,41 @@ class SongEditScreen(BaseScreen):
             self.current_song.remove_segment(self.selected_segment_index)
             num_segments = len(self.current_song.segments)
 
+            # Adjust selection after deletion
             if num_segments == 0:
                 self.selected_segment_index = None
                 self.selected_parameter_key = None
             elif self.selected_segment_index >= num_segments:
+                # If last segment was deleted, select the new last one
                 self.selected_segment_index = num_segments - 1
-            # Else: index remains valid
+            # Else: index remains valid, keep it selected
 
+            # Reset parameter selection if segment index changed or became invalid
+            if self.selected_segment_index is not None and self.parameter_keys:
+                 self.selected_parameter_key = self.parameter_keys[0]
+            else:
+                 self.selected_parameter_key = None
+
+            # Ensure focus is on segment list after deletion
+            self.focused_column = FocusColumn.SEGMENT_LIST
             self.set_feedback(f"Deleted segment {deleted_index_for_feedback}")
 
         except IndexError:
              self.set_feedback("Error deleting segment (index out of range?)", is_error=True)
+             # Reset selection safely
              if self.current_song and self.current_song.segments:
                  self.selected_segment_index = 0
+                 if self.parameter_keys: self.selected_parameter_key = self.parameter_keys[0]
+                 else: self.selected_parameter_key = None
              else:
                  self.selected_segment_index = None
                  self.selected_parameter_key = None
+             self.focused_column = FocusColumn.SEGMENT_LIST # Reset focus
         except Exception as e:
             self.set_feedback(f"Error deleting segment: {e}", is_error=True)
 
 
-    # --- Drawing Methods ---
+    # --- Drawing Methods (Modified for Focus) ---
 
     def draw(self, screen_surface, midi_status=None):
         """Draws the song editor interface or the rename interface."""
@@ -458,6 +563,7 @@ class SongEditScreen(BaseScreen):
             self._draw_rename_interface(screen_surface)
         # --- Draw Normal Edit Interface ---
         elif not self.current_song:
+            # Display message if no song is loaded
             no_song_text = "No Song Loaded. Use File Manager."
             no_song_surf = self.font_large.render(no_song_text, True, WHITE)
             no_song_rect = no_song_surf.get_rect(center=(screen_surface.get_width() // 2, screen_surface.get_height() // 2))
@@ -473,22 +579,33 @@ class SongEditScreen(BaseScreen):
             title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
             screen_surface.blit(title_surf, title_rect)
 
+            # Calculate available height for columns
+            content_start_y = title_rect.bottom + 15
+            content_height = screen_surface.get_height() - content_start_y - 40 # Reserve space for feedback
+
             # Draw Segment List
-            self._draw_segment_list(screen_surface, title_rect.bottom + 15)
+            self._draw_segment_list(screen_surface, content_start_y, content_height)
 
             # Draw Parameter Details
-            self._draw_parameter_details(screen_surface, title_rect.bottom + 15)
+            self._draw_parameter_details(screen_surface, content_start_y, content_height)
 
         # --- Draw Feedback Message (Common to both modes) ---
         self._draw_feedback(screen_surface)
 
 
-    def _draw_segment_list(self, surface, start_y):
-        """Draws the list of segments on the left."""
-        list_rect = pygame.Rect(LEFT_MARGIN, start_y, SEGMENT_LIST_WIDTH, surface.get_height() - start_y - 40)
+    def _draw_segment_list(self, surface, start_y, height):
+        """Draws the list of segments on the left, indicating focus."""
+        list_rect = pygame.Rect(LEFT_MARGIN, start_y, SEGMENT_LIST_WIDTH, height)
         y_offset = list_rect.top + 5
 
-        header_surf = self.font.render("Segments:", True, WHITE)
+        # --- Draw Focus Border ---
+        is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
+        if is_focused:
+            pygame.draw.rect(surface, FOCUS_BORDER_COLOR, list_rect, COLUMN_BORDER_WIDTH)
+        # -------------------------
+
+        header_color = FOCUS_BORDER_COLOR if is_focused else WHITE
+        header_surf = self.font.render("Segments:", True, header_color)
         surface.blit(header_surf, (list_rect.left + 5, y_offset))
         y_offset += LINE_HEIGHT + 5
 
@@ -497,38 +614,52 @@ class SongEditScreen(BaseScreen):
             surface.blit(no_segments_surf, (list_rect.left + 10, y_offset))
             return
 
-        max_items_to_display = list_rect.height // LINE_HEIGHT
-        start_index = 0 # TODO: Implement scrolling
+        # Basic scrolling logic (can be enhanced later)
+        max_items_to_display = (list_rect.height - (y_offset - list_rect.top)) // LINE_HEIGHT
+        start_index = 0
+        if self.selected_segment_index is not None and self.selected_segment_index >= max_items_to_display:
+            start_index = self.selected_segment_index - max_items_to_display + 1
 
         for i, segment in enumerate(self.current_song.segments[start_index:]):
-            if i >= max_items_to_display:
+            current_y = y_offset + (i * LINE_HEIGHT)
+            if current_y + LINE_HEIGHT > list_rect.bottom: # Stop drawing if exceeding bounds
                 more_surf = self.font_small.render("...", True, WHITE)
-                surface.blit(more_surf, (list_rect.left + 5, y_offset))
+                surface.blit(more_surf, (list_rect.left + 5, current_y))
                 break
 
             display_index = start_index + i
-            seg_text = f"{display_index + 1}: T={segment.tempo:.0f} L={segment.loop_length} R={segment.repetitions}"
+            # Format segment info concisely
+            seg_text = f"{display_index + 1}: T{segment.tempo:.0f} L{segment.loop_length} R{segment.repetitions}"
             is_selected = (display_index == self.selected_segment_index)
             color = HIGHLIGHT_COLOR if is_selected else WHITE
 
             seg_surf = self.font_small.render(seg_text, True, color)
-            seg_rect = seg_surf.get_rect(topleft=(list_rect.left + 10, y_offset))
+            seg_rect = seg_surf.get_rect(topleft=(list_rect.left + 10, current_y))
 
+            # Draw selection highlight for the item
             if is_selected:
-                 sel_rect = pygame.Rect(list_rect.left, y_offset - 2, list_rect.width, LINE_HEIGHT)
-                 pygame.draw.rect(surface, (40, 80, 40), sel_rect)
+                 # Use a slightly different highlight if the column is NOT focused? Optional.
+                 sel_bg_color = (40, 80, 40) # Standard green highlight
+                 sel_rect = pygame.Rect(list_rect.left + (COLUMN_BORDER_WIDTH if is_focused else 0), current_y - 2,
+                                        list_rect.width - (2 * COLUMN_BORDER_WIDTH if is_focused else 0), LINE_HEIGHT)
+                 pygame.draw.rect(surface, sel_bg_color, sel_rect)
 
             surface.blit(seg_surf, seg_rect)
-            y_offset += LINE_HEIGHT
 
 
-    def _draw_parameter_details(self, surface, start_y):
-        """Draws the parameters of the selected segment on the right."""
-        param_rect = pygame.Rect(PARAM_AREA_X, start_y, surface.get_width() - PARAM_AREA_X - LEFT_MARGIN, surface.get_height() - start_y - 40)
+    def _draw_parameter_details(self, surface, start_y, height):
+        """Draws the parameters of the selected segment on the right, indicating focus."""
+        param_rect = pygame.Rect(PARAM_AREA_X, start_y, surface.get_width() - PARAM_AREA_X - LEFT_MARGIN, height)
         y_offset = param_rect.top + 5
 
+        # --- Draw Focus Border ---
+        is_focused = (self.focused_column == FocusColumn.PARAMETER_DETAILS)
+        if is_focused:
+            pygame.draw.rect(surface, FOCUS_BORDER_COLOR, param_rect, COLUMN_BORDER_WIDTH)
+        # -------------------------
+
         if self.selected_segment_index is None or not self.current_song:
-            no_selection_surf = self.font.render("Select a segment", True, WHITE)
+            no_selection_surf = self.font.render("Select segment (<-)", True, WHITE)
             surface.blit(no_selection_surf, (param_rect.left + 5, y_offset))
             return
 
@@ -539,17 +670,36 @@ class SongEditScreen(BaseScreen):
              surface.blit(no_selection_surf, (param_rect.left + 5, y_offset))
              return
 
-        header_text = f"Segment {self.selected_segment_index + 1} Parameters:"
-        header_surf = self.font.render(header_text, True, WHITE)
+        header_color = FOCUS_BORDER_COLOR if is_focused else WHITE
+        header_text = f"Segment {self.selected_segment_index + 1} Params:"
+        header_surf = self.font.render(header_text, True, header_color)
         surface.blit(header_surf, (param_rect.left + 5, y_offset))
         y_offset += LINE_HEIGHT + 5
 
-        for key in self.parameter_keys:
+        # Basic scrolling for parameters (can be enhanced)
+        max_items_to_display = (param_rect.height - (y_offset - param_rect.top)) // LINE_HEIGHT
+        start_param_index = 0
+        if self.selected_parameter_key and self.parameter_keys:
+            try:
+                current_param_idx = self.parameter_keys.index(self.selected_parameter_key)
+                if current_param_idx >= max_items_to_display:
+                    start_param_index = current_param_idx - max_items_to_display + 1
+            except ValueError:
+                pass # Keep start_index 0 if key not found
+
+        for i, key in enumerate(self.parameter_keys[start_param_index:]):
+            current_y = y_offset + (i * LINE_HEIGHT)
+            if current_y + LINE_HEIGHT > param_rect.bottom: # Stop drawing if exceeding bounds
+                more_surf = self.font_small.render("...", True, WHITE)
+                surface.blit(more_surf, (param_rect.left + PARAM_INDENT, current_y))
+                break
+
             display_name = self.parameter_display_names.get(key, key)
             try:
                 value = getattr(segment, key)
+                # Format value nicely
                 if isinstance(value, bool): value_str = "YES" if value else "NO"
-                elif isinstance(value, float): value_str = f"{value:.1f}"
+                elif isinstance(value, float): value_str = f"{value:.1f}" # Show one decimal for floats
                 else: value_str = str(value)
 
                 param_text = f"{display_name}: {value_str}"
@@ -557,19 +707,20 @@ class SongEditScreen(BaseScreen):
                 color = HIGHLIGHT_COLOR if is_selected else PARAM_COLOR
 
                 param_surf = self.font.render(param_text, True, color)
-                param_draw_rect = param_surf.get_rect(topleft=(param_rect.left + PARAM_INDENT, y_offset))
+                param_draw_rect = param_surf.get_rect(topleft=(param_rect.left + PARAM_INDENT, current_y))
 
+                # Draw selection highlight for the item
                 if is_selected:
-                    sel_rect = pygame.Rect(param_rect.left, y_offset - 2, param_rect.width, LINE_HEIGHT)
-                    pygame.draw.rect(surface, (40, 80, 40), sel_rect)
+                    sel_bg_color = (40, 80, 40) # Standard green highlight
+                    sel_rect = pygame.Rect(param_rect.left + (COLUMN_BORDER_WIDTH if is_focused else 0), current_y - 2,
+                                           param_rect.width - (2 * COLUMN_BORDER_WIDTH if is_focused else 0), LINE_HEIGHT)
+                    pygame.draw.rect(surface, sel_bg_color, sel_rect)
 
                 surface.blit(param_surf, param_draw_rect)
-                y_offset += LINE_HEIGHT
 
             except AttributeError:
                 error_surf = self.font_small.render(f"Error: Param '{key}' not found", True, ERROR_COLOR)
-                surface.blit(error_surf, (param_rect.left + PARAM_INDENT, y_offset))
-                y_offset += LINE_HEIGHT
+                surface.blit(error_surf, (param_rect.left + PARAM_INDENT, current_y))
 
 
     def _draw_feedback(self, surface):
@@ -578,12 +729,13 @@ class SongEditScreen(BaseScreen):
             message, timestamp, color = self.feedback_message
             feedback_surf = self.font.render(message, True, color)
             feedback_rect = feedback_surf.get_rect(center=(surface.get_width() // 2, surface.get_height() - 25))
+            # Add a background for better visibility
             bg_rect = feedback_rect.inflate(10, 5)
-            pygame.draw.rect(surface, BLACK, bg_rect)
-            pygame.draw.rect(surface, color, bg_rect, 1)
+            pygame.draw.rect(surface, BLACK, bg_rect) # Black background
+            pygame.draw.rect(surface, color, bg_rect, 1) # Colored border matching text
             surface.blit(feedback_surf, feedback_rect)
 
-    # --- NEW: Drawing method for Rename Interface ---
+    # --- Drawing method for Rename Interface (Unchanged) ---
     def _draw_rename_interface(self, surface):
         """Draws the dedicated interface for renaming the song."""
         if not self.song_renamer_instance: return
