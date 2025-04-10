@@ -5,7 +5,7 @@ Serves as the primary navigation screen.
 """
 
 import pygame
-from .base_screen import BaseScreen
+from emsys.ui.base_screen import BaseScreen
 
 class MainMenuScreen(BaseScreen):
     """Main menu screen for the application."""
