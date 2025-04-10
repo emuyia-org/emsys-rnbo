@@ -6,8 +6,8 @@ These classes are designed to hold the structural information for musical pieces
 allowing for sequencing and editing within the application.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass, field, asdict
+from typing import List, Optional, Dict, Any
 
 # --- Constants for Validation (Optional but Recommended) ---
 # You might want to define these here or import from config if they become more widely used
@@ -151,6 +151,55 @@ class Song:
                 # if hasattr(segment, '__post_init__'): segment.__post_init__()
             else:
                 raise AttributeError(f"Segment object has no attribute '{key}'")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Converts the Song object to a dictionary suitable for serialization.
+        
+        Returns:
+            A dictionary containing the song name and segments.
+        """
+        return {
+            "name": self.name,
+            "segments": [asdict(segment) for segment in self.segments]
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Song':
+        """
+        Creates a Song object from a dictionary (deserialization).
+        
+        Args:
+            data: Dictionary containing song data with 'name' and 'segments'.
+            
+        Returns:
+            A new Song instance populated with the data.
+            
+        Raises:
+            KeyError: If required keys are missing.
+            TypeError: If data types are incorrect.
+        """
+        if not isinstance(data, dict):
+            raise TypeError("Data must be a dictionary")
+            
+        name = data.get("name")
+        if not name:
+            raise KeyError("Song data must contain 'name'")
+            
+        segments_data = data.get("segments", [])
+        if not isinstance(segments_data, list):
+            raise TypeError("'segments' must be a list")
+            
+        segments = []
+        for segment_dict in segments_data:
+            try:
+                # Create Segment instance using dictionary unpacking
+                segment = Segment(**segment_dict)
+                segments.append(segment)
+            except TypeError as e:
+                raise TypeError(f"Error creating segment: {e}")
+                
+        return cls(name=name, segments=segments)
 
     def clear_segments(self):
         """Removes all segments from the song."""

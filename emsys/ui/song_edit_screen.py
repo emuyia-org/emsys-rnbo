@@ -1,19 +1,25 @@
+# emsys/ui/song_edit_screen.py
 # -*- coding: utf-8 -*-
 """
-Screen for viewing and editing Song objects.
+Screen for viewing and editing Song objects. Includes renaming functionality.
 """
 import pygame
 import time
 from typing import List, Optional, Tuple, Any
 
+# Core components
 from .base_screen import BaseScreen
 from ..core.song import Song, Segment
-# Import constants for validation/clamping
 from ..core.song import (MIN_TEMPO, MAX_TEMPO, MIN_RAMP, MAX_RAMP,
                          MIN_LOOP_LENGTH, MAX_LOOP_LENGTH, MIN_REPETITIONS,
                          MAX_REPETITIONS, MIN_PROGRAM_MSG, MAX_PROGRAM_MSG)
+# Utilities and Config
 from ..utils import file_io # Import the file I/O utilities
 from ..config import settings, mappings
+
+# --- Import the actual SongRenamer ---
+from ..core.song_renamer import SongRenamer, RenameMode
+# ------------------------------------
 
 # Define colors (can also be imported from settings)
 WHITE = settings.WHITE
@@ -55,11 +61,15 @@ class SongEditScreen(BaseScreen):
         self.current_song: Optional[Song] = None
         self.selected_segment_index: Optional[int] = None
         self.selected_parameter_key: Optional[str] = None
-        self.feedback_message: Optional[Tuple[str, float]] = None # (message, timestamp)
+        self.feedback_message: Optional[Tuple[str, float, Tuple[int, int, int]]] = None # (message, timestamp, color) - Added color
         self.feedback_duration: float = 2.0 # seconds
 
+        # --- Add state for renaming ---
+        self.is_renaming_song: bool = False
+        self.song_renamer_instance: Optional[SongRenamer] = None
+        # -----------------------------
+
         # Define the order and names of editable parameters
-        # Using Segment.__annotations__.keys() is possible but less controlled
         self.parameter_keys: List[str] = [
             'program_message_1',
             'program_message_2',
@@ -88,8 +98,6 @@ class SongEditScreen(BaseScreen):
         if hasattr(self.app, 'current_song'):
             self.current_song = self.app.current_song
         else:
-            # This case should ideally be handled by ensuring a song is loaded
-            # before navigating here, perhaps via FileManageScreen.
             self.current_song = None
             print("Warning: No 'current_song' attribute found in app reference.")
             self.set_feedback("No song loaded!", is_error=True, duration=5.0)
@@ -97,18 +105,28 @@ class SongEditScreen(BaseScreen):
         # Initialize selection state
         if self.current_song and self.current_song.segments:
             self.selected_segment_index = 0
-            self.selected_parameter_key = self.parameter_keys[0]
+            if self.parameter_keys: # Ensure parameter keys exist
+                self.selected_parameter_key = self.parameter_keys[0]
+            else:
+                self.selected_parameter_key = None
         else:
             self.selected_segment_index = None
             self.selected_parameter_key = None
 
+        # --- Reset renaming state on init ---
+        self.is_renaming_song = False
+        self.song_renamer_instance = None
+        # ------------------------------------
         self.clear_feedback() # Clear any old feedback
 
     def cleanup(self):
         """Called when the screen becomes inactive."""
         super().cleanup()
-        # Optionally prompt to save changes here if needed (more complex)
         print(f"{self.__class__.__name__} is being deactivated.")
+        # --- Ensure renaming state is cleared on exit ---
+        self.is_renaming_song = False
+        self.song_renamer_instance = None
+        # ---------------------------------------------
         self.clear_feedback()
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
@@ -136,7 +154,14 @@ class SongEditScreen(BaseScreen):
         cc = msg.control
         print(f"SongEditScreen received CC: {cc}")
 
-        # --- Navigation ---
+        # --- Handle Renaming Mode FIRST ---
+        if self.is_renaming_song:
+            self._handle_rename_input(cc)
+            return # Don't process other actions while renaming
+        # ----------------------------------
+
+        # --- Normal Edit Mode Handling ---
+        # Navigation
         if cc == mappings.DOWN_NAV_CC:
             self._change_selected_segment(1)
         elif cc == mappings.UP_NAV_CC:
@@ -146,24 +171,138 @@ class SongEditScreen(BaseScreen):
         elif cc == mappings.LEFT_NAV_CC:
             self._change_selected_parameter(-1)
 
-        # --- Value Modification ---
+        # Value Modification
         elif cc == mappings.YES_NAV_CC: # Increment
             self._modify_selected_parameter(1)
         elif cc == mappings.NO_NAV_CC: # Decrement
             self._modify_selected_parameter(-1)
 
-        # --- Actions ---
+        # Actions
         elif cc == mappings.SAVE_SONG_CC:
             self._save_current_song()
         elif cc == mappings.ADD_SEGMENT_CC:
             self._add_new_segment()
         elif cc == mappings.DELETE_SEGMENT_CC:
             self._delete_selected_segment()
+        # --- Add a trigger for renaming ---
+        elif cc == mappings.RENAME_SONG_CC: # CC 85
+             self._start_song_rename()
+        # ----------------------------------
 
-    # --- Internal Helper Methods for Actions ---
+    # --- NEW: Methods for Renaming ---
+
+    def _start_song_rename(self):
+        """Initiates the song renaming process."""
+        if self.current_song:
+            self.is_renaming_song = True
+            # Initialize the renamer with the current song name
+            self.song_renamer_instance = SongRenamer(self.current_song.name)
+            self.clear_feedback() # Clear other feedback
+            print("Starting song rename mode.")
+            self.set_feedback("Renaming Song...", duration=1.0) # Brief indicator
+        else:
+            self.set_feedback("No song loaded to rename", is_error=True)
+
+    def _handle_rename_input(self, cc: int):
+        """Processes MIDI CC input specifically for the SongRenamer."""
+        if not self.song_renamer_instance:
+            # Should not happen if is_renaming_song is True, but safety check
+            self.is_renaming_song = False
+            return
+
+        # Map CCs to renamer button names
+        button_map = {
+            mappings.YES_NAV_CC: 'yes',
+            mappings.NO_NAV_CC: 'no',
+            mappings.UP_NAV_CC: 'up',
+            mappings.DOWN_NAV_CC: 'down',
+            mappings.LEFT_NAV_CC: 'left',
+            mappings.RIGHT_NAV_CC: 'right',
+        }
+        button_name = button_map.get(cc)
+
+        if button_name:
+            state_changed = self.song_renamer_instance.handle_input(button_name)
+            if state_changed:
+                self.clear_feedback() # Clear feedback on valid input that changes state
+
+        # Use SAVE_SONG_CC to confirm the rename
+        elif cc == mappings.SAVE_SONG_CC:
+            self._confirm_song_rename()
+
+        # Use DELETE_SEGMENT_CC to cancel rename
+        elif cc == mappings.DELETE_SEGMENT_CC:
+             self._cancel_song_rename()
+
+        else:
+            # Optional: Provide feedback for unmapped buttons in this mode
+            # self.set_feedback("Unknown command in rename mode", is_error=True)
+            pass
+
+    def _confirm_song_rename(self):
+        """Confirms the rename, updates the song, and saves."""
+        if not self.is_renaming_song or not self.song_renamer_instance or not self.current_song:
+            return # Should not happen
+
+        new_name = self.song_renamer_instance.get_current_title().strip()
+        old_name = self.current_song.name
+
+        if not new_name:
+            self.set_feedback("Song name cannot be empty.", is_error=True)
+            return # Stay in rename mode
+
+        if new_name == old_name:
+            self.set_feedback("Name unchanged. Exiting rename.")
+            self.is_renaming_song = False
+            self.song_renamer_instance = None
+            return
+
+        print(f"Attempting to rename song from '{old_name}' to '{new_name}'")
+
+        # --- File Renaming Logic ---
+        if not hasattr(file_io, 'rename_song'):
+             self.set_feedback("Error: File renaming function not implemented!", is_error=True)
+             return
+
+        # Use the rename_song function from file_io
+        if file_io.rename_song(old_name, new_name):
+            # Update the in-memory song object's name
+            self.current_song.name = new_name
+            self.set_feedback(f"Renamed to '{new_name}'. Saving...")
+            pygame.display.flip() # Show feedback immediately
+
+            # Save the song content with the new name
+            if file_io.save_song(self.current_song):
+                self.set_feedback(f"Song renamed and saved as '{new_name}'")
+            else:
+                self.set_feedback(f"Renamed file, but failed to save content for '{new_name}'", is_error=True)
+
+            # Exit rename mode on successful rename
+            self.is_renaming_song = False
+            self.song_renamer_instance = None
+
+        else:
+            # file_io.rename_song failed (e.g., file exists, permissions)
+            # file_io.rename_song should print the specific error
+            self.set_feedback(f"Failed to rename file (see console)", is_error=True)
+            # Stay in rename mode so the user can try a different name or cancel.
+
+    def _cancel_song_rename(self):
+        """Cancels the renaming process without saving changes."""
+        if self.is_renaming_song:
+            self.is_renaming_song = False
+            self.song_renamer_instance = None
+            self.set_feedback("Rename cancelled.")
+            print("Cancelled song rename mode.")
+
+    # --- End of Renaming Methods ---
+
+
+    # --- Internal Helper Methods for Actions (Existing - with guards) ---
 
     def _change_selected_segment(self, direction: int):
         """Move segment selection up or down."""
+        if self.is_renaming_song: return # Prevent action during rename
         if not self.current_song or not self.current_song.segments:
             self.set_feedback("No segments to select", is_error=True)
             return
@@ -174,13 +313,14 @@ class SongEditScreen(BaseScreen):
         else:
             self.selected_segment_index = (self.selected_segment_index + direction) % num_segments
 
-        # Reset parameter selection when changing segments (optional, could preserve)
         if self.parameter_keys:
             self.selected_parameter_key = self.parameter_keys[0]
         self.clear_feedback()
 
+
     def _change_selected_parameter(self, direction: int):
         """Move parameter selection left or right."""
+        if self.is_renaming_song: return # Prevent action during rename
         if self.selected_segment_index is None or not self.parameter_keys:
             self.set_feedback("Select a segment first", is_error=True)
             return
@@ -191,31 +331,30 @@ class SongEditScreen(BaseScreen):
             self.selected_parameter_key = self.parameter_keys[next_param_index]
             self.clear_feedback()
         except (ValueError, AttributeError):
-            # Should not happen if state is consistent, but reset just in case
-            self.selected_parameter_key = self.parameter_keys[0]
+            self.selected_parameter_key = self.parameter_keys[0] if self.parameter_keys else None
+
 
     def _modify_selected_parameter(self, direction: int):
         """Increment or decrement the value of the selected parameter."""
+        if self.is_renaming_song: return # Prevent action during rename
         if self.selected_segment_index is None or self.selected_parameter_key is None:
             self.set_feedback("Select segment and parameter first", is_error=True)
             return
-        if not self.current_song: return # Should not happen
+        if not self.current_song: return
 
         try:
             segment = self.current_song.get_segment(self.selected_segment_index)
             key = self.selected_parameter_key
             current_value = getattr(segment, key)
-            step = PARAM_STEPS.get(key, 1) # Default step is 1
+            step = PARAM_STEPS.get(key, 1)
 
             new_value: Any
 
-            # Handle different types
             if isinstance(current_value, bool):
-                new_value = not current_value # Toggle boolean
+                new_value = not current_value
             elif isinstance(current_value, int):
                 new_value = current_value + direction * step
-                # Clamping for ints
-                if key == 'program_message_1' or key == 'program_message_2':
+                if key in ('program_message_1', 'program_message_2'):
                     new_value = max(MIN_PROGRAM_MSG, min(MAX_PROGRAM_MSG, new_value))
                 elif key == 'loop_length':
                     new_value = max(MIN_LOOP_LENGTH, min(MAX_LOOP_LENGTH, new_value))
@@ -223,26 +362,27 @@ class SongEditScreen(BaseScreen):
                     new_value = max(MIN_REPETITIONS, min(MAX_REPETITIONS, new_value))
             elif isinstance(current_value, float):
                 new_value = current_value + direction * step
-                # Clamping for floats
                 if key == 'tempo':
                     new_value = max(MIN_TEMPO, min(MAX_TEMPO, new_value))
                 elif key == 'tempo_ramp':
                     new_value = max(MIN_RAMP, min(MAX_RAMP, new_value))
-                new_value = round(new_value, 2) # Round floats for display/storage
+                new_value = round(new_value, 2)
             else:
                 self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
                 return
 
-            # Update the song data
             self.current_song.update_segment(self.selected_segment_index, **{key: new_value})
             display_name = self.parameter_display_names.get(key, key)
-            self.set_feedback(f"{display_name}: {new_value}")
+            value_display = "YES" if isinstance(new_value, bool) and new_value else "NO" if isinstance(new_value, bool) else new_value
+            self.set_feedback(f"{display_name}: {value_display}")
 
         except (IndexError, AttributeError, TypeError, ValueError) as e:
             self.set_feedback(f"Error modifying value: {e}", is_error=True)
 
+
     def _save_current_song(self):
         """Save the current song state to a file."""
+        if self.is_renaming_song: return # Prevent action during rename
         if self.current_song:
             if file_io.save_song(self.current_song):
                 self.set_feedback(f"Song '{self.current_song.name}' saved.")
@@ -251,48 +391,50 @@ class SongEditScreen(BaseScreen):
         else:
             self.set_feedback("No song loaded to save", is_error=True)
 
+
     def _add_new_segment(self):
         """Add a new segment with default values after the selected one."""
+        if self.is_renaming_song: return # Prevent action during rename
         if not self.current_song:
             self.set_feedback("Load a song first", is_error=True)
             return
 
-        new_segment = Segment() # Create a segment with defaults
+        new_segment = Segment()
         insert_index = (self.selected_segment_index + 1) if self.selected_segment_index is not None else len(self.current_song.segments)
 
         try:
             self.current_song.add_segment(new_segment, index=insert_index)
-            self.selected_segment_index = insert_index # Select the newly added segment
+            self.selected_segment_index = insert_index
             if self.parameter_keys:
                  self.selected_parameter_key = self.parameter_keys[0]
             self.set_feedback(f"Added new segment at position {insert_index + 1}")
         except Exception as e:
             self.set_feedback(f"Error adding segment: {e}", is_error=True)
 
+
     def _delete_selected_segment(self):
         """Delete the currently selected segment."""
+        if self.is_renaming_song: return # Prevent action during rename
         if self.selected_segment_index is None or not self.current_song or not self.current_song.segments:
             self.set_feedback("No segment selected to delete", is_error=True)
             return
 
         try:
-            removed_segment = self.current_song.remove_segment(self.selected_segment_index)
+            deleted_index_for_feedback = self.selected_segment_index + 1
+            self.current_song.remove_segment(self.selected_segment_index)
             num_segments = len(self.current_song.segments)
 
-            # Adjust selection after deletion
             if num_segments == 0:
                 self.selected_segment_index = None
                 self.selected_parameter_key = None
             elif self.selected_segment_index >= num_segments:
-                # If last segment was deleted, select the new last one
                 self.selected_segment_index = num_segments - 1
-            # Otherwise, the index remains valid (points to the segment after the deleted one)
+            # Else: index remains valid
 
-            self.set_feedback(f"Deleted segment {self.selected_segment_index + 2}") # +2 because index was 0-based and points to next now
+            self.set_feedback(f"Deleted segment {deleted_index_for_feedback}")
 
         except IndexError:
              self.set_feedback("Error deleting segment (index out of range?)", is_error=True)
-             # Reset selection state if inconsistent
              if self.current_song and self.current_song.segments:
                  self.selected_segment_index = 0
              else:
@@ -305,42 +447,42 @@ class SongEditScreen(BaseScreen):
     # --- Drawing Methods ---
 
     def draw(self, screen_surface):
-        """Draws the song editor interface."""
-        # Clear screen (optional, if main loop doesn't fill)
-        # screen_surface.fill(BLACK)
-
-        if not self.current_song:
-            # Display message if no song is loaded
+        """Draws the song editor interface or the rename interface."""
+        # --- Draw Rename Interface if active ---
+        if self.is_renaming_song:
+            self._draw_rename_interface(screen_surface)
+        # --- Draw Normal Edit Interface ---
+        elif not self.current_song:
             no_song_text = "No Song Loaded. Use File Manager."
             no_song_surf = self.font_large.render(no_song_text, True, WHITE)
             no_song_rect = no_song_surf.get_rect(center=(screen_surface.get_width() // 2, screen_surface.get_height() // 2))
             screen_surface.blit(no_song_surf, no_song_rect)
-            self._draw_feedback(screen_surface) # Still draw feedback if any
-            return
+        else:
+            # Draw Song Title
+            title_text = f"Editing: {self.current_song.name}"
+            rename_cc = getattr(mappings, 'RENAME_SONG_CC', None)
+            if rename_cc:
+                 title_text += f" (Rename: CC {rename_cc})"
 
-        # --- Draw Song Title ---
-        title_text = f"Editing: {self.current_song.name}"
-        title_surf = self.font_large.render(title_text, True, WHITE)
-        title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
-        screen_surface.blit(title_surf, title_rect)
+            title_surf = self.font_large.render(title_text, True, WHITE)
+            title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
+            screen_surface.blit(title_surf, title_rect)
 
-        # --- Draw Segment List ---
-        self._draw_segment_list(screen_surface, title_rect.bottom + 15)
+            # Draw Segment List
+            self._draw_segment_list(screen_surface, title_rect.bottom + 15)
 
-        # --- Draw Parameter Details ---
-        self._draw_parameter_details(screen_surface, title_rect.bottom + 15)
+            # Draw Parameter Details
+            self._draw_parameter_details(screen_surface, title_rect.bottom + 15)
 
-        # --- Draw Feedback Message ---
+        # --- Draw Feedback Message (Common to both modes) ---
         self._draw_feedback(screen_surface)
+
 
     def _draw_segment_list(self, surface, start_y):
         """Draws the list of segments on the left."""
-        list_rect = pygame.Rect(LEFT_MARGIN, start_y, SEGMENT_LIST_WIDTH, surface.get_height() - start_y - 40) # Reserve space at bottom for feedback
-        # pygame.draw.rect(surface, (50,50,50), list_rect, 1) # Optional: border for debug
-
+        list_rect = pygame.Rect(LEFT_MARGIN, start_y, SEGMENT_LIST_WIDTH, surface.get_height() - start_y - 40)
         y_offset = list_rect.top + 5
 
-        # Header
         header_surf = self.font.render("Segments:", True, WHITE)
         surface.blit(header_surf, (list_rect.left + 5, y_offset))
         y_offset += LINE_HEIGHT + 5
@@ -350,39 +492,34 @@ class SongEditScreen(BaseScreen):
             surface.blit(no_segments_surf, (list_rect.left + 10, y_offset))
             return
 
-        # TODO: Implement scrolling if list exceeds available height
         max_items_to_display = list_rect.height // LINE_HEIGHT
-        start_index = 0 # For scrolling later
+        start_index = 0 # TODO: Implement scrolling
 
         for i, segment in enumerate(self.current_song.segments[start_index:]):
             if i >= max_items_to_display:
-                # Indicate more items below
                 more_surf = self.font_small.render("...", True, WHITE)
                 surface.blit(more_surf, (list_rect.left + 5, y_offset))
                 break
 
             display_index = start_index + i
-            # Basic segment info (e.g., index and tempo)
             seg_text = f"{display_index + 1}: T={segment.tempo:.0f} L={segment.loop_length} R={segment.repetitions}"
-            color = HIGHLIGHT_COLOR if display_index == self.selected_segment_index else WHITE
             is_selected = (display_index == self.selected_segment_index)
+            color = HIGHLIGHT_COLOR if is_selected else WHITE
 
             seg_surf = self.font_small.render(seg_text, True, color)
             seg_rect = seg_surf.get_rect(topleft=(list_rect.left + 10, y_offset))
 
             if is_selected:
-                 # Draw a selection indicator (e.g., background rectangle)
                  sel_rect = pygame.Rect(list_rect.left, y_offset - 2, list_rect.width, LINE_HEIGHT)
-                 pygame.draw.rect(surface, (40, 80, 40), sel_rect) # Dark green background
+                 pygame.draw.rect(surface, (40, 80, 40), sel_rect)
 
             surface.blit(seg_surf, seg_rect)
             y_offset += LINE_HEIGHT
 
+
     def _draw_parameter_details(self, surface, start_y):
         """Draws the parameters of the selected segment on the right."""
         param_rect = pygame.Rect(PARAM_AREA_X, start_y, surface.get_width() - PARAM_AREA_X - LEFT_MARGIN, surface.get_height() - start_y - 40)
-        # pygame.draw.rect(surface, (50,50,50), param_rect, 1) # Optional: border for debug
-
         y_offset = param_rect.top + 5
 
         if self.selected_segment_index is None or not self.current_song:
@@ -395,47 +532,40 @@ class SongEditScreen(BaseScreen):
         except IndexError:
              no_selection_surf = self.font.render("Segment not found?", True, ERROR_COLOR)
              surface.blit(no_selection_surf, (param_rect.left + 5, y_offset))
-             return # Should not happen if selection logic is correct
+             return
 
-        # Header
         header_text = f"Segment {self.selected_segment_index + 1} Parameters:"
         header_surf = self.font.render(header_text, True, WHITE)
         surface.blit(header_surf, (param_rect.left + 5, y_offset))
         y_offset += LINE_HEIGHT + 5
 
-        # Draw each parameter
         for key in self.parameter_keys:
             display_name = self.parameter_display_names.get(key, key)
             try:
                 value = getattr(segment, key)
-                # Format value nicely
-                if isinstance(value, bool):
-                    value_str = "YES" if value else "NO"
-                elif isinstance(value, float):
-                    value_str = f"{value:.1f}" # One decimal place for display
-                else:
-                    value_str = str(value)
+                if isinstance(value, bool): value_str = "YES" if value else "NO"
+                elif isinstance(value, float): value_str = f"{value:.1f}"
+                else: value_str = str(value)
 
                 param_text = f"{display_name}: {value_str}"
-                color = HIGHLIGHT_COLOR if key == self.selected_parameter_key else PARAM_COLOR
                 is_selected = (key == self.selected_parameter_key)
+                color = HIGHLIGHT_COLOR if is_selected else PARAM_COLOR
 
                 param_surf = self.font.render(param_text, True, color)
                 param_draw_rect = param_surf.get_rect(topleft=(param_rect.left + PARAM_INDENT, y_offset))
 
                 if is_selected:
-                    # Draw selection indicator
                     sel_rect = pygame.Rect(param_rect.left, y_offset - 2, param_rect.width, LINE_HEIGHT)
-                    pygame.draw.rect(surface, (40, 80, 40), sel_rect) # Dark green background
+                    pygame.draw.rect(surface, (40, 80, 40), sel_rect)
 
                 surface.blit(param_surf, param_draw_rect)
                 y_offset += LINE_HEIGHT
 
             except AttributeError:
-                # Draw error if attribute doesn't exist (shouldn't happen)
                 error_surf = self.font_small.render(f"Error: Param '{key}' not found", True, ERROR_COLOR)
                 surface.blit(error_surf, (param_rect.left + PARAM_INDENT, y_offset))
                 y_offset += LINE_HEIGHT
+
 
     def _draw_feedback(self, surface):
         """Draws the feedback message at the bottom."""
@@ -443,8 +573,95 @@ class SongEditScreen(BaseScreen):
             message, timestamp, color = self.feedback_message
             feedback_surf = self.font.render(message, True, color)
             feedback_rect = feedback_surf.get_rect(center=(surface.get_width() // 2, surface.get_height() - 25))
-            # Optional: Add a background to make it stand out
             bg_rect = feedback_rect.inflate(10, 5)
             pygame.draw.rect(surface, BLACK, bg_rect)
-            pygame.draw.rect(surface, color, bg_rect, 1) # Border
+            pygame.draw.rect(surface, color, bg_rect, 1)
             surface.blit(feedback_surf, feedback_rect)
+
+    # --- NEW: Drawing method for Rename Interface ---
+    def _draw_rename_interface(self, surface):
+        """Draws the dedicated interface for renaming the song."""
+        if not self.song_renamer_instance: return
+
+        rename_info = self.song_renamer_instance.get_display_info()
+        mode = rename_info['mode']
+        title_with_caret = rename_info['title_with_caret']
+        keyboard_layout = rename_info['keyboard_layout']
+        k_row, k_col = rename_info['keyboard_cursor']
+
+        # Draw Title Being Edited
+        title_text = f"Rename: {title_with_caret}"
+        title_surf = self.font_large.render(title_text, True, WHITE)
+        title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, TOP_MARGIN + 10))
+        if title_rect.width > surface.get_width() - 20: # Basic clipping
+             title_rect.width = surface.get_width() - 20
+             title_rect.centerx = surface.get_width() // 2
+        surface.blit(title_surf, title_rect)
+
+        # Draw Instructions
+        instr_y = title_rect.bottom + 10
+        yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
+        no_cc = getattr(mappings, 'NO_NAV_CC', '?')
+        save_cc = getattr(mappings, 'SAVE_SONG_CC', '?')
+        cancel_cc = getattr(mappings, 'DELETE_SEGMENT_CC', '?') # Using DELETE as cancel
+
+        if mode == RenameMode.CARET:
+            instr_text = f"Arrows: Move | {no_cc}: Backspace | {yes_cc}: Keyboard"
+            instr2_text = f"{save_cc}: Confirm | {cancel_cc}: Cancel"
+        elif mode == RenameMode.KEYBOARD:
+            instr_text = f"Arrows: Select | {yes_cc}: Insert Char"
+            instr2_text = f"{no_cc}: Back to Caret"
+
+        instr_surf = self.font_small.render(instr_text, True, WHITE)
+        instr_rect = instr_surf.get_rect(centerx=surface.get_width() // 2, top=instr_y)
+        surface.blit(instr_surf, instr_rect)
+
+        instr2_surf = self.font_small.render(instr2_text, True, WHITE)
+        instr2_rect = instr2_surf.get_rect(centerx=surface.get_width() // 2, top=instr_rect.bottom + 2)
+        surface.blit(instr2_surf, instr2_rect)
+
+        instr_y = instr2_rect.bottom
+
+        # Draw Keyboard (if in Keyboard mode)
+        if mode == RenameMode.KEYBOARD:
+            keyboard_y = instr_y + 15
+            keyboard_line_height = LINE_HEIGHT
+
+            for r_idx, row_str in enumerate(keyboard_layout):
+                row_y = keyboard_y + (r_idx * keyboard_line_height)
+                row_width = self.font.size(row_str)[0]
+                row_start_x = (surface.get_width() - row_width) // 2
+
+                if r_idx == k_row:
+                    # Highlight selected character
+                    if row_str and 0 <= k_col < len(row_str): # Check validity
+                        pre_char = row_str[:k_col]
+                        char = row_str[k_col]
+                        post_char = row_str[k_col+1:]
+
+                        pre_surf = self.font.render(pre_char, True, WHITE)
+                        char_surf = self.font.render(char, True, BLACK)
+                        post_surf = self.font.render(post_char, True, WHITE)
+
+                        pre_rect = pre_surf.get_rect(topleft=(row_start_x, row_y))
+                        char_width, char_height = self.font.size(char)
+                        char_bg_rect = pygame.Rect(pre_rect.right, row_y - 2, char_width + 4, keyboard_line_height)
+                        pygame.draw.rect(surface, HIGHLIGHT_COLOR, char_bg_rect)
+                        char_rect = char_surf.get_rect(center=char_bg_rect.center)
+                        post_rect = post_surf.get_rect(topleft=(char_bg_rect.right, row_y))
+
+                        surface.blit(pre_surf, pre_rect)
+                        surface.blit(char_surf, char_rect)
+                        surface.blit(post_surf, post_rect)
+                    else: # Draw row normally if cursor is invalid
+                         row_surf = self.font.render(row_str, True, RED) # Indicate error
+                         row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
+                         surface.blit(row_surf, row_rect)
+                else:
+                    # Draw normal row
+                    row_surf = self.font.render(row_str, True, WHITE)
+                    row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
+                    surface.blit(row_surf, row_rect)
+
+    # --- End of Drawing Methods ---
+

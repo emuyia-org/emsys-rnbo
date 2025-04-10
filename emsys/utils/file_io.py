@@ -11,20 +11,25 @@ from typing import List, Optional, Dict, Any
 
 # Updated to use absolute import
 from emsys.core.song import Song, Segment
+from emsys.config import settings
 
 # --- Configuration ---
 
+# Define file extension for songs
+SONG_EXTENSION = ".song"
+
 # Define the directory where song files will be stored.
-# Option 1: Absolute path (common for deployment on Pi)
-# SONGS_DIR = "/home/pi/emsys_songs/"
-# Option 2: Relative path (useful for development, relative to the project root)
-# Assumes your project root is the parent directory of 'emsys'
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SONGS_DIR = os.path.join(PROJECT_ROOT, "data", "songs")
-# Option 3: Relative to the emsys package itself
-# Emsys package dir is parent of utils dir
-# EMSYS_PACKAGE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# SONGS_DIR = os.path.join(EMSYS_PACKAGE_DIR, "data", "songs")
+# Try to get from settings, or fall back to a default path if not found
+try:
+    SONGS_DIR = settings.SONGS_DIR
+except AttributeError:
+    # Fall back to default path relative to project root
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    SONGS_DIR = os.path.join(PROJECT_ROOT, "data", "songs")
+    print(f"Warning: settings.SONGS_DIR not found. Using default: {SONGS_DIR}")
+
+# Ensure the songs directory exists
+os.makedirs(SONGS_DIR, exist_ok=True)
 
 print(f"Using song directory: {SONGS_DIR}")
 
@@ -53,141 +58,6 @@ def sanitize_filename(name: str) -> str:
 
 # --- Core I/O Functions ---
 
-def save_song(song: Song, directory: str = SONGS_DIR) -> bool:
-    """
-    Saves a Song object to a JSON file in the specified directory.
-
-    The filename is derived from the sanitized song name.
-
-    Args:
-        song: The Song object to save.
-        directory: The directory path to save the file in. Defaults to SONGS_DIR.
-
-    Returns:
-        True if saving was successful, False otherwise.
-    """
-    if not isinstance(song, Song):
-        print(f"Error: Attempted to save an object that is not a Song: {type(song)}")
-        return False
-
-    # Ensure the target directory exists
-    try:
-        os.makedirs(directory, exist_ok=True)
-    except OSError as e:
-        print(f"Error: Could not create directory '{directory}': {e}")
-        return False
-
-    # Prepare data for JSON serialization
-    try:
-        # Use asdict for Segment dataclasses
-        song_data = {
-            "name": song.name,
-            "segments": [asdict(segment) for segment in song.segments]
-        }
-    except Exception as e:
-        print(f"Error: Failed to convert song '{song.name}' data for serialization: {e}")
-        return False
-
-    # Create a safe filename
-    base_filename = sanitize_filename(song.name)
-    filename = f"{base_filename}.json"
-    filepath = os.path.join(directory, filename)
-
-    # Write the JSON data to the file
-    try:
-        print(f"Attempting to save song to: {filepath}")
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(song_data, f, indent=4, ensure_ascii=False)
-        print(f"Song '{song.name}' saved successfully as '{filename}'.")
-        return True
-    except IOError as e:
-        print(f"Error: Could not write song file '{filepath}': {e}")
-        return False
-    except Exception as e:
-        print(f"Error: An unexpected error occurred during save to '{filepath}': {e}")
-        return False
-
-def load_song(filename_or_basename: str, directory: str = SONGS_DIR) -> Optional[Song]:
-    """
-    Loads a Song object from a JSON file.
-
-    Args:
-        filename_or_basename: The base name of the song (e.g., "my-cool-song")
-                              or the full filename ("my-cool-song.json").
-        directory: The directory path where the file is located. Defaults to SONGS_DIR.
-
-    Returns:
-        The loaded Song object, or None if loading fails.
-    """
-    # Ensure the filename ends with .json
-    if not filename_or_basename.lower().endswith(".json"):
-        filename = f"{filename_or_basename}.json"
-    else:
-        filename = filename_or_basename
-
-    filepath = os.path.join(directory, filename)
-
-    if not os.path.exists(filepath):
-        print(f"Error: Song file not found: {filepath}")
-        return None
-    if not os.path.isfile(filepath):
-        print(f"Error: Path exists but is not a file: {filepath}")
-        return None
-
-    try:
-        print(f"Attempting to load song from: {filepath}")
-        with open(filepath, 'r', encoding='utf-8') as f:
-            song_data = json.load(f)
-
-        # --- Reconstruct the Song object ---
-        song_name = song_data.get("name")
-        if not song_name:
-            print(f"Warning: Song file '{filename}' is missing 'name'. Using default.")
-            # Extract name from filename if possible, otherwise default
-            song_name = os.path.splitext(filename)[0] if filename else "Untitled Loaded Song"
-
-        loaded_segments: List[Segment] = []
-        segment_data_list = song_data.get("segments")
-
-        if segment_data_list is None:
-             print(f"Warning: Song file '{filename}' is missing 'segments' list.")
-             segment_data_list = [] # Treat as empty list
-        elif not isinstance(segment_data_list, list):
-             print(f"Error: 'segments' data in '{filename}' is not a list. Cannot load segments.")
-             # Decide if you want to return None or a song with no segments
-             return Song(name=song_name, segments=[]) # Return song with empty segments
-
-        # Recreate Segment objects
-        for i, segment_dict in enumerate(segment_data_list):
-            if not isinstance(segment_dict, dict):
-                print(f"Warning: Skipping segment #{i+1} in '{filename}' - data is not a dictionary: {segment_dict}")
-                continue
-            try:
-                # Create Segment instance using dictionary unpacking.
-                # This assumes keys in JSON match Segment attributes.
-                segment = Segment(**segment_dict)
-                loaded_segments.append(segment)
-            except TypeError as te:
-                # Handles cases where keys don't match or are missing
-                print(f"Warning: Skipping segment #{i+1} in '{filename}' due to key mismatch or missing keys: {segment_dict}. Error: {te}")
-            except Exception as e_seg:
-                print(f"Warning: Error creating segment #{i+1} from data in '{filename}': {segment_dict}. Error: {e_seg}")
-
-        # Create the final Song object
-        song = Song(name=song_name, segments=loaded_segments)
-        print(f"Song '{song.name}' loaded successfully from '{filename}'. Found {len(loaded_segments)} segments.")
-        return song
-
-    except json.JSONDecodeError as e:
-        print(f"Error: Failed to decode JSON from '{filepath}': {e}")
-        return None
-    except IOError as e:
-        print(f"Error: Could not read song file '{filepath}': {e}")
-        return None
-    except Exception as e:
-        print(f"Error: An unexpected error occurred during load from '{filepath}': {e}")
-        return None
-
 def list_songs(directory: str = SONGS_DIR) -> List[str]:
     """
     Lists available song files (basenames without extension) in the directory.
@@ -198,32 +68,138 @@ def list_songs(directory: str = SONGS_DIR) -> List[str]:
     Returns:
         A sorted list of song basenames (e.g., ["my-song", "another-track"]).
     """
-    if not os.path.isdir(directory):
-        print(f"Info: Song directory '{directory}' not found. No songs to list.")
-        # Create it the first time? Optional.
-        # try:
-        #     os.makedirs(directory, exist_ok=True)
-        # except OSError:
-        #     pass # Ignore error if creation fails here
-        return []
     try:
-        files = os.listdir(directory)
-        # Filter for .json files and extract the base name
-        song_basenames = [
-            os.path.splitext(f)[0]
-            for f in files
-            if f.lower().endswith(".json") and os.path.isfile(os.path.join(directory, f))
-        ]
-        return sorted(song_basenames)
-    except OSError as e:
-        print(f"Error: Could not list files in directory '{directory}': {e}")
+        files = [f for f in os.listdir(directory) if f.endswith(SONG_EXTENSION)]
+        # Return only the base name
+        return sorted([os.path.splitext(f)[0] for f in files])
+    except FileNotFoundError:
+        print(f"Error: Songs directory not found at {directory}")
         return []
+    except Exception as e:
+        print(f"Error listing songs: {e}")
+        return []
+
+def save_song(song: Song, directory: str = SONGS_DIR) -> bool:
+    """
+    Saves a Song object to a JSON file.
+
+    Args:
+        song: The Song object to save.
+        directory: The directory path to save the file in. Defaults to SONGS_DIR.
+
+    Returns:
+        True if saving was successful, False otherwise.
+    """
+    if not song or not song.name:
+        print("Error: Cannot save song with invalid name.")
+        return False
+    
+    filename = os.path.join(directory, f"{song.name}{SONG_EXTENSION}")
+    try:
+        data = song.to_dict()
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=4)
+        print(f"Song '{song.name}' saved to {filename}")
+        return True
+    except TypeError as e:
+        print(f"Error serializing song '{song.name}': {e}")
+        return False
+    except IOError as e:
+        print(f"Error writing song file '{filename}': {e}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred saving song '{song.name}': {e}")
+        return False
+
+def load_song(basename: str, directory: str = SONGS_DIR) -> Optional[Song]:
+    """
+    Loads a Song object from a JSON file by its base name.
+
+    Args:
+        basename: The base name of the song (without extension).
+        directory: The directory path where the file is located. Defaults to SONGS_DIR.
+
+    Returns:
+        The loaded Song object, or None if loading fails.
+    """
+    filename = os.path.join(directory, f"{basename}{SONG_EXTENSION}")
+    if not os.path.exists(filename):
+        print(f"Error: Song file not found: {filename}")
+        return None
+    try:
+        with open(filename, 'r') as f:
+            data = json.load(f)
+        song = Song.from_dict(data)
+        # Ensure the loaded song's name matches the filename basename
+        if song.name != basename:
+             print(f"Warning: Song name in file ('{song.name}') differs from filename ('{basename}'). Using filename.")
+             song.name = basename
+        print(f"Song '{basename}' loaded successfully.")
+        return song
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON from '{filename}': {e}")
+        return None
+    except KeyError as e:
+        print(f"Error loading song '{basename}': Missing key {e}")
+        return None
+    except TypeError as e:
+        print(f"Error processing song data from '{filename}': {e}")
+        return None
+    except IOError as e:
+        print(f"Error reading song file '{filename}': {e}")
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred loading song '{basename}': {e}")
+        return None
+
+# --- NEW: Function to rename a song file ---
+def rename_song(old_basename: str, new_basename: str, directory: str = SONGS_DIR) -> bool:
+    """
+    Renames a song file safely.
+    
+    Args:
+        old_basename: Original name of the song file (without extension).
+        new_basename: New name for the song file (without extension).
+        directory: Directory containing the song files. Defaults to SONGS_DIR.
+        
+    Returns:
+        True if rename was successful, False otherwise.
+    """
+    if not old_basename or not new_basename or old_basename == new_basename:
+        print("Error: Invalid names provided for renaming.")
+        return False
+    if '/' in new_basename or '\\' in new_basename or '.' in new_basename:
+         print(f"Error: Invalid characters in new song name '{new_basename}'.")
+         return False
+
+    old_filename = os.path.join(directory, f"{old_basename}{SONG_EXTENSION}")
+    new_filename = os.path.join(directory, f"{new_basename}{SONG_EXTENSION}")
+
+    if not os.path.exists(old_filename):
+        print(f"Error: Cannot rename, source file '{old_filename}' does not exist.")
+        return False
+
+    if os.path.exists(new_filename):
+        print(f"Error: Cannot rename, target file '{new_filename}' already exists.")
+        return False
+
+    try:
+        os.rename(old_filename, new_filename)
+        print(f"Renamed '{old_filename}' to '{new_filename}'")
+        return True
+    except OSError as e:
+        print(f"Error renaming file from '{old_basename}' to '{new_basename}': {e}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred renaming song: {e}")
+        return False
 
 # --- Example Usage (for testing this module directly) ---
 if __name__ == '__main__':
     print("\n--- Testing file_io Module ---")
 
     # Ensure the test directory exists
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     TEST_SONGS_DIR = os.path.join(PROJECT_ROOT, "data", "test_songs")
     print(f"Using test directory: {TEST_SONGS_DIR}")
     if not os.path.exists(TEST_SONGS_DIR):
