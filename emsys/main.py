@@ -12,8 +12,6 @@ import sdnotify
 import pygame
 import mido
 
-
-
 # Add the current directory to the path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
@@ -33,6 +31,7 @@ RED = settings_module.RED
 MIDI_DEVICE_NAME = settings_module.MIDI_DEVICE_NAME
 
 from config.mappings import EXIT_CC, NEXT_SCREEN_CC, PREV_SCREEN_CC
+from utils.midi import find_midi_port  # Updated import path
 
 # --- UI Imports --- # MODIFIED: Grouped UI imports
 from ui.base_screen import BaseScreen
@@ -68,23 +67,6 @@ except ImportError as e:
 print(f"Available screens: FileManageScreen={'Available' if FileManageScreen else 'Not Available'}, "
       f"SongEditScreen={'Available' if SongEditScreen else 'Not Available'}")
 # --- END ADDED IMPORTS ---
-
-
-# --- MIDI Helper Function (from test.py, adapted) ---
-def find_midi_port(base_name):
-    """Searches for MIDI input port containing base_name."""
-    print(f"Searching for MIDI input port containing: '{base_name}'")
-    try:
-        available_ports = mido.get_input_names()
-        print("Available ports:", available_ports)
-        for port_name in available_ports:
-            if base_name in port_name:
-                print(f"Found matching port: '{port_name}'")
-                return port_name
-    except Exception as e:
-        print(f"Error getting MIDI port names: {e}")
-    print(f"No MIDI input port found containing '{base_name}'.")
-    return None
 
 # --- Main Application Class ---
 class App:
