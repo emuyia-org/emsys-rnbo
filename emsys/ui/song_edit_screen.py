@@ -1,7 +1,7 @@
 # emsys/ui/song_edit_screen.py
 # -*- coding: utf-8 -*-
 """
-Screen for viewing and editing Song objects. Includes renaming functionality.
+Screen for viewing and editing Song objects. Includes renaming functionality via widget.
 Uses column-based navigation (Segments <-> Parameters).
 """
 import pygame
@@ -19,8 +19,8 @@ from ..core.song import (MIN_TEMPO, MAX_TEMPO, MIN_RAMP, MAX_RAMP,
 from ..utils import file_io # Import the file I/O utilities
 from ..config import settings, mappings
 
-# --- Import the actual SongRenamer ---
-from ..core.song_renamer import SongRenamer, RenameMode
+# --- Import the TextInputWidget ---
+from .widgets import TextInputWidget, TextInputStatus
 # ------------------------------------
 
 # Define colors (can also be imported from settings)
@@ -78,10 +78,9 @@ class SongEditScreen(BaseScreen):
         self.feedback_message: Optional[Tuple[str, float, Tuple[int, int, int]]] = None # (message, timestamp, color) - Added color
         self.feedback_duration: float = 2.0 # seconds
 
-        # --- Add state for renaming ---
-        self.is_renaming_song: bool = False
-        self.song_renamer_instance: Optional[SongRenamer] = None
-        # -----------------------------
+        # --- Add instance of TextInputWidget ---
+        self.text_input_widget = TextInputWidget(app_ref)
+        # ---------------------------------------
 
         # --- Add state for column focus ---
         self.focused_column: FocusColumn = FocusColumn.SEGMENT_LIST
@@ -134,10 +133,9 @@ class SongEditScreen(BaseScreen):
             self.selected_segment_index = None
             self.selected_parameter_key = None
 
-        # --- Reset renaming state on init ---
-        self.is_renaming_song = False
-        self.song_renamer_instance = None
-        # ------------------------------------
+        # --- Reset text input widget state on init ---
+        self.text_input_widget.cancel()
+        # ---------------------------------------------
         # --- Reset focus state on init ---
         self.focused_column = FocusColumn.SEGMENT_LIST
         # ---------------------------------
@@ -147,10 +145,9 @@ class SongEditScreen(BaseScreen):
         """Called when the screen becomes inactive."""
         super().cleanup()
         print(f"{self.__class__.__name__} is being deactivated.")
-        # --- Ensure renaming state is cleared on exit ---
-        self.is_renaming_song = False
-        self.song_renamer_instance = None
-        # ---------------------------------------------
+        # --- Ensure text input widget is cleared on exit ---
+        self.text_input_widget.cancel()
+        # --------------------------------------------------
         # --- Reset focus state on cleanup ---
         self.focused_column = FocusColumn.SEGMENT_LIST
         # ----------------------------------
@@ -179,12 +176,17 @@ class SongEditScreen(BaseScreen):
             return
 
         cc = msg.control
-        print(f"SongEditScreen received CC: {cc} | Focus: {self.focused_column}")
+        print(f"SongEditScreen received CC: {cc} | Focus: {self.focused_column} | TextInput Active: {self.text_input_widget.is_active}")
 
-        # --- Handle Renaming Mode FIRST ---
-        if self.is_renaming_song:
-            self._handle_rename_input(cc)
-            return # Don't process other actions while renaming
+        # --- Handle Text Input Mode FIRST ---
+        if self.text_input_widget.is_active:
+            status = self.text_input_widget.handle_input(cc)
+            if status == TextInputStatus.CONFIRMED:
+                self._confirm_song_rename() # Call the confirmation logic
+            elif status == TextInputStatus.CANCELLED:
+                self._cancel_song_rename() # Call the cancellation logic
+            # If ACTIVE or ERROR, the widget handles drawing, we just wait
+            return # Don't process other actions while text input is active
         # ----------------------------------
 
         # --- Normal Edit Mode Handling (Column-Based) ---
@@ -221,72 +223,42 @@ class SongEditScreen(BaseScreen):
         elif cc == mappings.RENAME_SONG_CC: # CC 85
              self._start_song_rename()
 
-    # --- NEW: Methods for Renaming ---
-    # ... (rename methods remain unchanged) ...
+    # --- NEW: Methods using TextInputWidget ---
     def _start_song_rename(self):
-        """Initiates the song renaming process."""
+        """Initiates the song renaming process using the widget."""
         if self.current_song:
-            self.is_renaming_song = True
-            # Initialize the renamer with the current song name
-            self.song_renamer_instance = SongRenamer(self.current_song.name)
+            self.text_input_widget.start(self.current_song.name, prompt="Rename Song")
             self.clear_feedback() # Clear other feedback
-            print("Starting song rename mode.")
+            print("Starting song rename mode via widget.")
             self.set_feedback("Renaming Song...", duration=1.0) # Brief indicator
         else:
             self.set_feedback("No song loaded to rename", is_error=True)
 
-    def _handle_rename_input(self, cc: int):
-        """Processes MIDI CC input specifically for the SongRenamer."""
-        if not self.song_renamer_instance:
-            # Should not happen if is_renaming_song is True, but safety check
-            self.is_renaming_song = False
-            return
-
-        # Map CCs to renamer button names
-        button_map = {
-            mappings.YES_NAV_CC: 'yes',
-            mappings.NO_NAV_CC: 'no',
-            mappings.UP_NAV_CC: 'up',
-            mappings.DOWN_NAV_CC: 'down',
-            mappings.LEFT_NAV_CC: 'left',
-            mappings.RIGHT_NAV_CC: 'right',
-        }
-        button_name = button_map.get(cc)
-
-        if button_name:
-            state_changed = self.song_renamer_instance.handle_input(button_name)
-            if state_changed:
-                self.clear_feedback() # Clear feedback on valid input that changes state
-
-        # Use SAVE_SONG_CC to confirm the rename
-        elif cc == mappings.SAVE_SONG_CC:
-            self._confirm_song_rename()
-
-        # Use DELETE_SEGMENT_CC to cancel rename
-        elif cc == mappings.DELETE_SEGMENT_CC:
-             self._cancel_song_rename()
-
-        else:
-            # Optional: Provide feedback for unmapped buttons in this mode
-            # self.set_feedback("Unknown command in rename mode", is_error=True)
-            pass
-
     def _confirm_song_rename(self):
         """Confirms the rename, updates the song, and saves."""
-        if not self.is_renaming_song or not self.song_renamer_instance or not self.current_song:
-            return # Should not happen
+        if not self.text_input_widget.is_active or not self.current_song:
+            self.text_input_widget.cancel() # Ensure widget is inactive
+            return
 
-        new_name = self.song_renamer_instance.get_current_title().strip()
+        new_name = self.text_input_widget.get_text()
+        if new_name is None: # Should not happen if CONFIRMED, but safety check
+             self.set_feedback("Error getting new name from widget.", is_error=True)
+             self.text_input_widget.cancel()
+             return
+
+        new_name = new_name.strip()
         old_name = self.current_song.name
 
         if not new_name:
-            self.set_feedback("Song name cannot be empty.", is_error=True)
-            return # Stay in rename mode
+            # Widget returned CONFIRMED but text is empty. Keep widget active? Or cancel?
+            # Let's cancel and show error. User can try again.
+            self.set_feedback("Song name cannot be empty. Rename cancelled.", is_error=True)
+            self.text_input_widget.cancel()
+            return
 
         if new_name == old_name:
             self.set_feedback("Name unchanged. Exiting rename.")
-            self.is_renaming_song = False
-            self.song_renamer_instance = None
+            self.text_input_widget.cancel()
             return
 
         print(f"Attempting to rename song from '{old_name}' to '{new_name}'")
@@ -294,6 +266,7 @@ class SongEditScreen(BaseScreen):
         # --- File Renaming Logic ---
         if not hasattr(file_io, 'rename_song'):
              self.set_feedback("Error: File renaming function not implemented!", is_error=True)
+             self.text_input_widget.cancel() # Cancel rename process
              return
 
         # Use the rename_song function from file_io
@@ -307,25 +280,31 @@ class SongEditScreen(BaseScreen):
             if file_io.save_song(self.current_song):
                 self.set_feedback(f"Song renamed and saved as '{new_name}'")
             else:
+                # This is tricky - file renamed but content save failed.
+                # The in-memory song has the new name. Attempting to save again might work.
+                # Or should we try to rename back? Let's report error for now.
                 self.set_feedback(f"Renamed file, but failed to save content for '{new_name}'", is_error=True)
 
             # Exit rename mode on successful rename
-            self.is_renaming_song = False
-            self.song_renamer_instance = None
+            self.text_input_widget.cancel()
 
         else:
             # file_io.rename_song failed (e.g., file exists, permissions)
             # file_io.rename_song should print the specific error
             self.set_feedback(f"Failed to rename file (see console)", is_error=True)
-            # Stay in rename mode so the user can try a different name or cancel.
+            # Keep the widget active so the user can try a different name or cancel.
+            # No, let's cancel on failure to avoid inconsistent state. User can retry.
+            self.text_input_widget.cancel()
+
 
     def _cancel_song_rename(self):
-        """Cancels the renaming process without saving changes."""
-        if self.is_renaming_song:
-            self.is_renaming_song = False
-            self.song_renamer_instance = None
-            self.set_feedback("Rename cancelled.")
-            print("Cancelled song rename mode.")
+        """Cancels the renaming process initiated by the widget."""
+        # The widget handles its own deactivation in handle_input -> cancel()
+        # We just need to provide feedback.
+        self.set_feedback("Rename cancelled.")
+        print("Cancelled song rename mode.")
+        # Ensure widget is inactive, though it should be already
+        self.text_input_widget.cancel()
 
     # --- End of Renaming Methods ---
 
@@ -334,7 +313,7 @@ class SongEditScreen(BaseScreen):
 
     def _navigate_focus(self, direction: int):
         """Change the focused column."""
-        if self.is_renaming_song: return
+        if self.text_input_widget.is_active: return # Prevent action during text input
 
         if direction > 0: # Move Right
             if self.focused_column == FocusColumn.SEGMENT_LIST:
@@ -359,7 +338,7 @@ class SongEditScreen(BaseScreen):
 
     def _change_selected_segment(self, direction: int):
         """Move segment selection up or down (only when segment list is focused)."""
-        if self.is_renaming_song: return # Prevent action during rename
+        if self.text_input_widget.is_active: return # Prevent action during text input
         if self.focused_column != FocusColumn.SEGMENT_LIST: return # Only act if focused
 
         if not self.current_song or not self.current_song.segments:
@@ -384,7 +363,7 @@ class SongEditScreen(BaseScreen):
 
     def _change_selected_parameter_vertically(self, direction: int):
         """Move parameter selection up or down (only when parameter details are focused)."""
-        if self.is_renaming_song: return # Prevent action during rename
+        if self.text_input_widget.is_active: return # Prevent action during text input
         if self.focused_column != FocusColumn.PARAMETER_DETAILS: return # Only act if focused
 
         if self.selected_segment_index is None or not self.parameter_keys:
@@ -410,7 +389,7 @@ class SongEditScreen(BaseScreen):
 
     def _modify_selected_parameter(self, direction: int):
         """Increment or decrement the value of the selected parameter (only if parameter details are focused)."""
-        if self.is_renaming_song: return # Prevent action during rename
+        if self.text_input_widget.is_active: return # Prevent action during text input
         # --- Add focus check ---
         if self.focused_column != FocusColumn.PARAMETER_DETAILS:
             self.set_feedback("Focus parameters to modify (Right Arrow)", is_error=True)
@@ -467,7 +446,7 @@ class SongEditScreen(BaseScreen):
 
     def _save_current_song(self):
         """Save the current song state to a file."""
-        if self.is_renaming_song: return # Prevent action during rename
+        if self.text_input_widget.is_active: return # Prevent action during text input
         if self.current_song:
             if file_io.save_song(self.current_song):
                 self.set_feedback(f"Song '{self.current_song.name}' saved.")
@@ -479,7 +458,7 @@ class SongEditScreen(BaseScreen):
 
     def _add_new_segment(self):
         """Add a new segment with default values after the selected one."""
-        if self.is_renaming_song: return # Prevent action during rename
+        if self.text_input_widget.is_active: return # Prevent action during text input
         if not self.current_song:
             self.set_feedback("Load a song first", is_error=True)
             return
@@ -505,7 +484,7 @@ class SongEditScreen(BaseScreen):
 
     def _delete_selected_segment(self):
         """Delete the currently selected segment."""
-        if self.is_renaming_song: return # Prevent action during rename
+        if self.text_input_widget.is_active: return # Prevent action during text input
         # --- Allow deletion only if segment list is focused? Or based on selection? Let's allow based on selection ---
         # if self.focused_column != FocusColumn.SEGMENT_LIST:
         #     self.set_feedback("Focus segment list to delete (Left Arrow)", is_error=True)
@@ -557,10 +536,12 @@ class SongEditScreen(BaseScreen):
     # --- Drawing Methods (Modified for Focus) ---
 
     def draw(self, screen_surface, midi_status=None):
-        """Draws the song editor interface or the rename interface."""
-        # --- Draw Rename Interface if active ---
-        if self.is_renaming_song:
-            self._draw_rename_interface(screen_surface)
+        """Draws the song editor interface or the text input interface."""
+        # --- Draw Text Input Interface if active ---
+        if self.text_input_widget.is_active:
+            # Optionally clear background first if widget doesn't
+            # screen_surface.fill(BLACK)
+            self.text_input_widget.draw(screen_surface)
         # --- Draw Normal Edit Interface ---
         elif not self.current_song:
             # Display message if no song is loaded
@@ -590,6 +571,8 @@ class SongEditScreen(BaseScreen):
             self._draw_parameter_details(screen_surface, content_start_y, content_height)
 
         # --- Draw Feedback Message (Common to both modes) ---
+        # Only draw feedback if text input is NOT active, or allow widget to draw its own?
+        # Let's draw feedback always, it appears at the bottom anyway.
         self._draw_feedback(screen_surface)
 
 
@@ -735,90 +718,6 @@ class SongEditScreen(BaseScreen):
             pygame.draw.rect(surface, color, bg_rect, 1) # Colored border matching text
             surface.blit(feedback_surf, feedback_rect)
 
-    # --- Drawing method for Rename Interface (Unchanged) ---
-    def _draw_rename_interface(self, surface):
-        """Draws the dedicated interface for renaming the song."""
-        if not self.song_renamer_instance: return
-
-        rename_info = self.song_renamer_instance.get_display_info()
-        mode = rename_info['mode']
-        title_with_caret = rename_info['title_with_caret']
-        keyboard_layout = rename_info['keyboard_layout']
-        k_row, k_col = rename_info['keyboard_cursor']
-
-        # Draw Title Being Edited
-        title_text = f"Rename: {title_with_caret}"
-        title_surf = self.font_large.render(title_text, True, WHITE)
-        title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, TOP_MARGIN + 10))
-        if title_rect.width > surface.get_width() - 20: # Basic clipping
-             title_rect.width = surface.get_width() - 20
-             title_rect.centerx = surface.get_width() // 2
-        surface.blit(title_surf, title_rect)
-
-        # Draw Instructions
-        instr_y = title_rect.bottom + 10
-        yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
-        no_cc = getattr(mappings, 'NO_NAV_CC', '?')
-        save_cc = getattr(mappings, 'SAVE_SONG_CC', '?')
-        cancel_cc = getattr(mappings, 'DELETE_SEGMENT_CC', '?') # Using DELETE as cancel
-
-        if mode == RenameMode.CARET:
-            instr_text = f"Arrows: Move | {no_cc}: Backspace | {yes_cc}: Keyboard"
-            instr2_text = f"{save_cc}: Confirm | {cancel_cc}: Cancel"
-        elif mode == RenameMode.KEYBOARD:
-            instr_text = f"Arrows: Select | {yes_cc}: Insert Char"
-            instr2_text = f"{no_cc}: Back to Caret"
-
-        instr_surf = self.font_small.render(instr_text, True, WHITE)
-        instr_rect = instr_surf.get_rect(centerx=surface.get_width() // 2, top=instr_y)
-        surface.blit(instr_surf, instr_rect)
-
-        instr2_surf = self.font_small.render(instr2_text, True, WHITE)
-        instr2_rect = instr2_surf.get_rect(centerx=surface.get_width() // 2, top=instr_rect.bottom + 2)
-        surface.blit(instr2_surf, instr2_rect)
-
-        instr_y = instr2_rect.bottom
-
-        # Draw Keyboard (if in Keyboard mode)
-        if mode == RenameMode.KEYBOARD:
-            keyboard_y = instr_y + 15
-            keyboard_line_height = LINE_HEIGHT
-
-            for r_idx, row_str in enumerate(keyboard_layout):
-                row_y = keyboard_y + (r_idx * keyboard_line_height)
-                row_width = self.font.size(row_str)[0]
-                row_start_x = (surface.get_width() - row_width) // 2
-
-                if r_idx == k_row:
-                    # Highlight selected character
-                    if row_str and 0 <= k_col < len(row_str): # Check validity
-                        pre_char = row_str[:k_col]
-                        char = row_str[k_col]
-                        post_char = row_str[k_col+1:]
-
-                        pre_surf = self.font.render(pre_char, True, WHITE)
-                        char_surf = self.font.render(char, True, BLACK)
-                        post_surf = self.font.render(post_char, True, WHITE)
-
-                        pre_rect = pre_surf.get_rect(topleft=(row_start_x, row_y))
-                        char_width, char_height = self.font.size(char)
-                        char_bg_rect = pygame.Rect(pre_rect.right, row_y - 2, char_width + 4, keyboard_line_height)
-                        pygame.draw.rect(surface, HIGHLIGHT_COLOR, char_bg_rect)
-                        char_rect = char_surf.get_rect(center=char_bg_rect.center)
-                        post_rect = post_surf.get_rect(topleft=(char_bg_rect.right, row_y))
-
-                        surface.blit(pre_surf, pre_rect)
-                        surface.blit(char_surf, char_rect)
-                        surface.blit(post_surf, post_rect)
-                    else: # Draw row normally if cursor is invalid
-                         row_surf = self.font.render(row_str, True, RED) # Indicate error
-                         row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
-                         surface.blit(row_surf, row_rect)
-                else:
-                    # Draw normal row
-                    row_surf = self.font.render(row_str, True, WHITE)
-                    row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
-                    surface.blit(row_surf, row_rect)
+    # --- REMOVED: _draw_rename_interface - Handled by widget ---
 
     # --- End of Drawing Methods ---
-
