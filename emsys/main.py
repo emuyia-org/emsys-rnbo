@@ -12,12 +12,13 @@ import sdnotify
 import pygame
 import mido
 
-# Add the current directory to the path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+# Add the project root directory to the path to enable absolute imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-import config.settings as settings_module
+# Now we can use absolute imports from the emsys package
+from emsys.config import settings as settings_module
 print(f"Settings module contents: {dir(settings_module)}")
 
 SCREEN_WIDTH = settings_module.SCREEN_WIDTH
@@ -28,41 +29,40 @@ WHITE = settings_module.WHITE
 RED = settings_module.RED
 MIDI_DEVICE_NAME = settings_module.MIDI_DEVICE_NAME
 
-from config.mappings import EXIT_CC, NEXT_SCREEN_CC, PREV_SCREEN_CC
-from utils.midi import find_midi_port
+from emsys.config.mappings import EXIT_CC, NEXT_SCREEN_CC, PREV_SCREEN_CC
+from emsys.utils.midi import find_midi_port
 
 # UI Imports
-from ui.base_screen import BaseScreen
-from ui.main_menu_screen import MainMenuScreen
-from ui.placeholder_screen import PlaceholderScreen
+from emsys.ui.base_screen import BaseScreen
+from emsys.ui.main_menu_screen import MainMenuScreen
+from emsys.ui.placeholder_screen import PlaceholderScreen
 
 # Additional screen imports
 FileManageScreen = None
 SongEditScreen = None
 
 try:
-    import ui.file_manage_screen
-    if hasattr(ui.file_manage_screen, 'FileManageScreen'):
-        from ui.file_manage_screen import FileManageScreen
+    import emsys.ui.file_manage_screen
+    if hasattr(emsys.ui.file_manage_screen, 'FileManageScreen'):
+        from emsys.ui.file_manage_screen import FileManageScreen
     else:
-        print(f"Error: ui.file_manage_screen module exists but doesn't contain FileManageScreen class")
+        print(f"Error: emsys.ui.file_manage_screen module exists but doesn't contain FileManageScreen class")
 except ImportError as e:
     print(f"Error importing file_manage_screen: {e}")
     print("Please ensure 'ui/file_manage_screen.py' exists")
 
 try:
-    import ui.song_edit_screen
-    if hasattr(ui.song_edit_screen, 'SongEditScreen'):
-        from ui.song_edit_screen import SongEditScreen
+    import emsys.ui.song_edit_screen
+    if hasattr(emsys.ui.song_edit_screen, 'SongEditScreen'):
+        from emsys.ui.song_edit_screen import SongEditScreen
     else:
-        print(f"Error: ui.song_edit_screen module exists but doesn't contain SongEditScreen class")
+        print(f"Error: emsys.ui.song_edit_screen module exists but doesn't contain SongEditScreen class")
 except ImportError as e:
     print(f"Error importing song_edit_screen: {e}")
     print("Please ensure 'ui/song_edit_screen.py' exists")
 
 print(f"Available screens: FileManageScreen={'Available' if FileManageScreen else 'Not Available'}, "
       f"SongEditScreen={'Available' if SongEditScreen else 'Not Available'}")
-
 
 # Main Application Class
 class App:
@@ -291,7 +291,8 @@ class App:
 
 
 # Script Entry Point
-if __name__ == '__main__':
+def main():
+    """Main function that can be imported and run from other scripts."""
     app = None
     try:
         app = App()
@@ -320,4 +321,7 @@ if __name__ == '__main__':
         try: pygame.quit()
         except: pass
         sys.exit(1)
+
+if __name__ == '__main__':
+    main()
 

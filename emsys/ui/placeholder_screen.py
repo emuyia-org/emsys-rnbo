@@ -1,9 +1,10 @@
-from ui.base_screen import BaseScreen
-from config.settings import SCREEN_WIDTH, SCREEN_HEIGHT, WHITE
+# Corrected imports
+from emsys.ui.base_screen import BaseScreen  # Use absolute import
+from emsys.config.settings import SCREEN_WIDTH, SCREEN_HEIGHT, WHITE  # Import WHITE color
 
 # --- Minimal Placeholder Screen ---
 class PlaceholderScreen(BaseScreen):
-    """A very basic screen to display something, including last MIDI message."""
+    # ... rest of the class remains the same ...
     def __init__(self, app_ref):
         super().__init__(app_ref)
         self.title_text = "emsys Running!"
@@ -32,3 +33,4 @@ class PlaceholderScreen(BaseScreen):
         else:
             # Draw the "Waiting for MIDI..." placeholder
             screen_surface.blit(self.midi_placeholder_surf, self.midi_placeholder_rect)
+

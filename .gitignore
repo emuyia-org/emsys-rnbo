@@ -17,3 +17,4 @@ experiments/sets/*.mset
 experiments/sets/*.seq
 Desktop.ini
 __pycache__
+data/songs/*.json
