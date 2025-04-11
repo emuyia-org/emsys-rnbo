@@ -353,11 +353,13 @@ class SongEditScreen(BaseScreen):
             # Handle wrap-around explicitly if needed, or rely on modulo
             self.selected_segment_index = new_index
 
-        # When segment changes, reset parameter selection to the first one
-        if self.parameter_keys:
-            self.selected_parameter_key = self.parameter_keys[0]
-        else:
-            self.selected_parameter_key = None
+        # Preserve the currently selected parameter when changing segments
+        # Only reset if there's no selected parameter or it's not in the parameter list
+        if not self.selected_parameter_key or (self.parameter_keys and self.selected_parameter_key not in self.parameter_keys):
+            if self.parameter_keys:
+                self.selected_parameter_key = self.parameter_keys[0]
+            else:
+                self.selected_parameter_key = None
         self.clear_feedback()
 
 
