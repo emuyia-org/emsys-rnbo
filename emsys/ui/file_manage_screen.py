@@ -433,7 +433,7 @@ class FileManageScreen(BaseScreen):
 
             # Save the song to disk
             if file_io.save_song(new_song):
-                self.set_feedback(f"Created new song: {new_song_name}", duration=1.5)
+                self.set_feedback(f"Created new song: {new_song_name}. Use navigation buttons to switch screens.")
                 # Refresh the song list to include the new song
                 self._refresh_song_list()
                 # Select the new song in the list
@@ -448,9 +448,9 @@ class FileManageScreen(BaseScreen):
                 except (ValueError, IndexError):
                     pass  # If we can't find or select it, that's ok
 
-                # Navigate to the next screen (song edit) after a short delay
-                NAVIGATE_EVENT = pygame.USEREVENT + 1
-                pygame.time.set_timer(NAVIGATE_EVENT, 1500, loops=1)  # 1500 ms delay
+                # Remove automatic navigation
+                # NAVIGATE_EVENT = pygame.USEREVENT + 1
+                # pygame.time.set_timer(NAVIGATE_EVENT, 1500, loops=1)  # 1500 ms delay
             else:
                 self.set_feedback(f"Failed to save new song.", is_error=True)
                 self.app.current_song = None
@@ -477,10 +477,11 @@ class FileManageScreen(BaseScreen):
             if loaded_song:
                 # CRITICAL: Update the main app's current song
                 self.app.current_song = loaded_song
-                self.set_feedback(f"Loaded: {selected_basename}", duration=1.5)
-                # Navigate to the next screen (likely SongEditScreen) after a short delay
-                NAVIGATE_EVENT = pygame.USEREVENT + 1
-                pygame.time.set_timer(NAVIGATE_EVENT, 1500, loops=1) # 1500 ms delay
+                self.set_feedback(f"Loaded: {selected_basename}. Use navigation buttons to switch screens.")
+
+                # Remove automatic navigation
+                # NAVIGATE_EVENT = pygame.USEREVENT + 1
+                # pygame.time.set_timer(NAVIGATE_EVENT, 1500, loops=1) # 1500 ms delay
 
             else:
                 # Loading failed (file_io.load_song returns None and prints error)
@@ -495,15 +496,14 @@ class FileManageScreen(BaseScreen):
             print(f"Unexpected error during load: {e}") # Log detailed error
             self.app.current_song = None # Ensure current song is cleared
 
-    # Override handle_event to catch our custom navigation event
+    # Update handle_event to not navigate when NAVIGATE_EVENT is received
     def handle_event(self, event):
         super().handle_event(event)
-        NAVIGATE_EVENT = pygame.USEREVENT + 1
-        if event.type == NAVIGATE_EVENT:
-            # Check if navigation was triggered by load or create
-            # We might need a flag if different destinations are possible
-            print("Navigate event triggered after load/create.")
-            self.app.next_screen() # Go to the next screen in the list
+        # Remove navigation on NAVIGATE_EVENT
+        # NAVIGATE_EVENT = pygame.USEREVENT + 1
+        # if event.type == NAVIGATE_EVENT:
+        #     print("Navigate event triggered after load/create.")
+        #     self.app.next_screen() # Go to the next screen in the list
 
     def _get_max_visible_items(self) -> int:
         """Calculate how many list items fit on the screen."""
