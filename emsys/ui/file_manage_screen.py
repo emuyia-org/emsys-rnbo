@@ -8,8 +8,10 @@ from typing import List, Optional, Tuple
 import datetime # Needed for default new song name
 
 # Core components
-from emsys.ui.base_screen import BaseScreen
 from emsys.core.song import Song, Segment
+
+# Base class for screens
+from emsys.ui.base_screen import BaseScreen
 
 # Utilities and Config
 from emsys.utils import file_io
@@ -185,7 +187,7 @@ class FileManageScreen(BaseScreen):
             return
 
         # --- Add DELETE_SEGMENT_CC handling ---
-        elif cc == mappings.DELETE_SEGMENT_CC:
+        elif cc == mappings.DELETE_SEGMENT_CC: # Note: Using DELETE_SEGMENT_CC for song deletion
             self._delete_selected_song()
             return
         # ----------------------------------
@@ -292,7 +294,9 @@ class FileManageScreen(BaseScreen):
 
             # --- Critical: Check if the renamed song was the loaded current_song ---
             renamed_current = False
-            if self.app.current_song and self.app.current_song.name == old_name:
+            # Use getattr for safety, although current_song should exist if rename is possible
+            current_song_obj = getattr(self.app, 'current_song', None)
+            if current_song_obj and current_song_obj.name == old_name:
                 print(f"Updating current song in memory from '{old_name}' to '{new_name}'")
                 self.app.current_song.name = new_name
                 renamed_current = True
@@ -320,7 +324,7 @@ class FileManageScreen(BaseScreen):
             self.text_input_widget.cancel() # Exit rename mode
 
         else:
-            # file_io.rename_song failed
+            # file_io.rename_song failed (it should print the reason)
             self.set_feedback(f"Failed to rename file (see console)", is_error=True)
             # Keep widget active? No, cancel to avoid confusion. User can retry.
             self.text_input_widget.cancel()
@@ -343,7 +347,8 @@ class FileManageScreen(BaseScreen):
         try:
             song_name = self.song_list[self.selected_index]
             self.delete_confirmation_active = True
-            self.set_feedback(f"Delete '{song_name}'? Press YES to confirm, NO to cancel", is_error=True)
+            # Use a more specific feedback message for confirmation
+            self.set_feedback(f"Delete '{song_name}'? CC{mappings.YES_NAV_CC}=YES, CC{mappings.NO_NAV_CC}=NO", is_error=True, duration=10.0) # Longer duration
         except IndexError:
             self.set_feedback("Selection error, cannot delete.", is_error=True)
             self.selected_index = 0 if self.song_list else None  # Reset index
@@ -357,32 +362,58 @@ class FileManageScreen(BaseScreen):
 
         try:
             song_name = self.song_list[self.selected_index]
-            
+
+            # --- MODIFIED LINE: Use getattr for safer access ---
             # Check if the song to be deleted is the currently loaded song
-            is_current_song = (self.app.current_song and self.app.current_song.name == song_name)
-            
+            current_song_obj = getattr(self.app, 'current_song', None)
+            is_current_song = (current_song_obj and current_song_obj.name == song_name)
+            # --- END MODIFICATION ---
+
             # Delete the song using file_io
             if hasattr(file_io, 'delete_song') and file_io.delete_song(song_name):
                 self.set_feedback(f"Deleted: '{song_name}'")
-                
+
                 # If we deleted the current song, clear the app's current_song reference
                 if is_current_song:
+                    # This check implies self.app.current_song existed, so direct assignment is safe here
                     self.app.current_song = None
                     print(f"Cleared current song as it was deleted: '{song_name}'")
-                
+
+                # Store the index before refreshing
+                deleted_index = self.selected_index
+
                 # Update the song list and selection
                 self._refresh_song_list()
+
+                # Adjust selection after deletion
                 if not self.song_list:
                     self.selected_index = None
-                elif self.selected_index >= len(self.song_list):
-                    self.selected_index = len(self.song_list) - 1
-                    
+                else:
+                    # Try to select the next item, or the previous if it was the last
+                    if deleted_index >= len(self.song_list):
+                        self.selected_index = len(self.song_list) - 1
+                    else:
+                        self.selected_index = deleted_index
+                    # Ensure selection is within bounds (especially if list became empty)
+                    if self.selected_index < 0:
+                        self.selected_index = None
+                    elif self.selected_index >= len(self.song_list):
+                         self.selected_index = len(self.song_list) - 1
+
+
             else:
-                self.set_feedback(f"Failed to delete '{song_name}'", is_error=True)
+                # file_io.delete_song should print the specific error
+                self.set_feedback(f"Failed to delete '{song_name}' (see console)", is_error=True)
+        except IndexError:
+             # This might happen if the list changes unexpectedly between selection and deletion
+             self.set_feedback("Selection error during delete.", is_error=True)
+             self._refresh_song_list() # Refresh to get a consistent state
         except Exception as e:
+            # Catch other unexpected errors
             self.set_feedback(f"Error deleting song: {str(e)}", is_error=True)
-        
-        self.delete_confirmation_active = False
+            print(f"Unexpected error in _perform_delete: {e}") # Log detailed error
+
+        self.delete_confirmation_active = False # Always deactivate confirmation mode
 
     def _create_new_song(self):
         """Creates a new song and navigates to the song edit screen."""
@@ -454,13 +485,14 @@ class FileManageScreen(BaseScreen):
             else:
                 # Loading failed (file_io.load_song returns None and prints error)
                 self.app.current_song = None # Ensure current song is cleared
-                self.set_feedback(f"Failed to load '{selected_basename}'", is_error=True)
+                self.set_feedback(f"Failed to load '{selected_basename}' (see console)", is_error=True)
 
         except IndexError:
             self.set_feedback("Selection index error.", is_error=True)
             self.selected_index = 0 if self.song_list else None # Reset index
         except Exception as e:
             self.set_feedback(f"Error during load: {e}", is_error=True)
+            print(f"Unexpected error during load: {e}") # Log detailed error
             self.app.current_song = None # Ensure current song is cleared
 
     # Override handle_event to catch our custom navigation event
@@ -501,8 +533,9 @@ class FileManageScreen(BaseScreen):
             # Add hint for renaming
             rename_cc = getattr(mappings, 'RENAME_SONG_CC', None)
             rename_hint = f"(Rename: CC {rename_cc})" if rename_cc else ""
-            
+
             # --- Add hint for deletion ---
+            # Assuming DELETE_SEGMENT_CC is used for song deletion here
             delete_cc = getattr(mappings, 'DELETE_SEGMENT_CC', None)
             delete_hint = f"(Delete: CC {delete_cc})" if delete_cc else ""
             # --------------------------
@@ -543,14 +576,14 @@ class FileManageScreen(BaseScreen):
                         # Draw highlight background
                         highlight_rect = pygame.Rect(LEFT_MARGIN, y_offset - 2, screen_surface.get_width() - (2 * LEFT_MARGIN), LINE_HEIGHT)
                         pygame.draw.rect(screen_surface, (40, 80, 40), highlight_rect) # Dark green background
-                        
+
                         # --- Display both rename and delete hints ---
                         hints = []
                         if rename_hint:
                             hints.append(rename_hint)
                         if delete_hint:
                             hints.append(delete_hint)
-                        
+
                         if hints:
                             combined_hint = " | ".join(hints)
                             hint_surf = self.font_small.render(combined_hint, True, WHITE)
@@ -573,8 +606,9 @@ class FileManageScreen(BaseScreen):
 
         # --- Draw Feedback Message (Common) ---
         self._draw_feedback(screen_surface)
-        
+
         # --- Draw Delete Confirmation UI if active ---
+        # Only draw if not in text input mode AND confirmation is active
         if self.delete_confirmation_active and not self.text_input_widget.is_active:
             self._draw_delete_confirmation(screen_surface)
         # -----------------------------------------
@@ -597,30 +631,35 @@ class FileManageScreen(BaseScreen):
         overlay = pygame.Surface((surface.get_width(), surface.get_height()), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 180))  # Semi-transparent black
         surface.blit(overlay, (0, 0))
-        
+
         # Draw confirmation box
         box_width, box_height = 400, 150
         box_x = (surface.get_width() - box_width) // 2
         box_y = (surface.get_height() - box_height) // 2
-        
+
         # Box background and border
         pygame.draw.rect(surface, BLACK, (box_x, box_y, box_width, box_height))
         pygame.draw.rect(surface, RED, (box_x, box_y, box_width, box_height), 2)
-        
+
         # Title
         title_text = "Confirm Delete"
         title_surf = self.font_large.render(title_text, True, RED)
         title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
         surface.blit(title_surf, title_rect)
-        
-        # Song name
+
+        # Song name (ensure selected_index is valid)
+        song_name = "Error: No song selected" # Default/fallback text
         if self.selected_index is not None and self.selected_index < len(self.song_list):
-            song_name = self.song_list[self.selected_index]
-            song_text = f"'{song_name}'"
-            song_surf = self.font.render(song_text, True, WHITE)
-            song_rect = song_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
-            surface.blit(song_surf, song_rect)
-        
+            try:
+                song_name = self.song_list[self.selected_index]
+            except IndexError:
+                 pass # Keep default text if index becomes invalid
+
+        song_text = f"'{song_name}'"
+        song_surf = self.font.render(song_text, True, WHITE)
+        song_rect = song_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
+        surface.blit(song_surf, song_rect)
+
         # Instruction
         yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
         no_cc = getattr(mappings, 'NO_NAV_CC', '?')

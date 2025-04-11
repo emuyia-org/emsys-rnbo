@@ -493,6 +493,11 @@ class SongEditScreen(BaseScreen):
         if self.selected_segment_index is None or not self.current_song or not self.current_song.segments:
             self.set_feedback("No segment selected to delete", is_error=True)
             return
+            
+        # Check if this is the last segment and prevent deletion if it is
+        if len(self.current_song.segments) <= 1:
+            self.set_feedback("Cannot delete the last segment", is_error=True)
+            return
 
         try:
             deleted_index_for_feedback = self.selected_segment_index + 1

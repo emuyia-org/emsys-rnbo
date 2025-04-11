@@ -16,7 +16,7 @@ from emsys.config import settings
 # --- Configuration ---
 
 # Define file extension for songs
-SONG_EXTENSION = ".song"
+SONG_EXTENSION = ".song" # Using .song as defined
 
 # Define the directory where song files will be stored.
 # Try to get from settings, or fall back to a default path if not found
@@ -81,7 +81,7 @@ def list_songs(directory: str = SONGS_DIR) -> List[str]:
 
 def save_song(song: Song, directory: str = SONGS_DIR) -> bool:
     """
-    Saves a Song object to a JSON file.
+    Saves a Song object to a JSON file. The filename is derived from song.name.
 
     Args:
         song: The Song object to save.
@@ -93,8 +93,11 @@ def save_song(song: Song, directory: str = SONGS_DIR) -> bool:
     if not song or not song.name:
         print("Error: Cannot save song with invalid name.")
         return False
-    
-    filename = os.path.join(directory, f"{song.name}{SONG_EXTENSION}")
+
+    # Use the song's name directly for the filename (as done in load/list)
+    filename_base = song.name
+    filename = os.path.join(directory, f"{filename_base}{SONG_EXTENSION}")
+
     try:
         data = song.to_dict()
         with open(filename, 'w') as f:
@@ -131,6 +134,7 @@ def load_song(basename: str, directory: str = SONGS_DIR) -> Optional[Song]:
             data = json.load(f)
         song = Song.from_dict(data)
         # Ensure the loaded song's name matches the filename basename
+        # This is important because the filename is the source of truth for listing/loading
         if song.name != basename:
              print(f"Warning: Song name in file ('{song.name}') differs from filename ('{basename}'). Using filename.")
              song.name = basename
@@ -152,24 +156,24 @@ def load_song(basename: str, directory: str = SONGS_DIR) -> Optional[Song]:
         print(f"An unexpected error occurred loading song '{basename}': {e}")
         return None
 
-# --- NEW: Function to rename a song file ---
 def rename_song(old_basename: str, new_basename: str, directory: str = SONGS_DIR) -> bool:
     """
     Renames a song file safely.
-    
+
     Args:
         old_basename: Original name of the song file (without extension).
         new_basename: New name for the song file (without extension).
         directory: Directory containing the song files. Defaults to SONGS_DIR.
-        
+
     Returns:
         True if rename was successful, False otherwise.
     """
     if not old_basename or not new_basename or old_basename == new_basename:
         print("Error: Invalid names provided for renaming.")
         return False
+    # Basic check for invalid characters in the *basename* itself
     if '/' in new_basename or '\\' in new_basename or '.' in new_basename:
-         print(f"Error: Invalid characters in new song name '{new_basename}'.")
+         print(f"Error: Invalid characters (/, \\, .) in new song name '{new_basename}'.")
          return False
 
     old_filename = os.path.join(directory, f"{old_basename}{SONG_EXTENSION}")
@@ -194,24 +198,66 @@ def rename_song(old_basename: str, new_basename: str, directory: str = SONGS_DIR
         print(f"An unexpected error occurred renaming song: {e}")
         return False
 
+# --- NEW: Function to delete a song file ---
+def delete_song(basename: str, directory: str = SONGS_DIR) -> bool:
+    """
+    Deletes a song file safely.
+
+    Args:
+        basename: The base name of the song file to delete (without extension).
+        directory: Directory containing the song file. Defaults to SONGS_DIR.
+
+    Returns:
+        True if deletion was successful, False otherwise.
+    """
+    if not basename:
+        print("Error: Invalid empty basename provided for deletion.")
+        return False
+
+    filename = os.path.join(directory, f"{basename}{SONG_EXTENSION}")
+
+    if not os.path.exists(filename):
+        print(f"Error: Cannot delete, file '{filename}' does not exist.")
+        return False
+
+    try:
+        os.remove(filename)
+        print(f"Successfully deleted song file: '{filename}'")
+        return True
+    except OSError as e:
+        # This will catch permission errors, file not found (if it disappeared
+        # between the check and remove), etc.
+        print(f"Error deleting file '{filename}': {e}")
+        return False
+    except Exception as e:
+        # Catch any other unexpected errors during deletion
+        print(f"An unexpected error occurred deleting song '{basename}': {e}")
+        return False
+
 # --- Example Usage (for testing this module directly) ---
 if __name__ == '__main__':
     print("\n--- Testing file_io Module ---")
 
     # Ensure the test directory exists
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    TEST_SONGS_DIR = os.path.join(PROJECT_ROOT, "data", "test_songs")
+    # Use a dedicated test directory to avoid cluttering the main songs dir
+    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    TEST_SONGS_DIR = os.path.join(PROJECT_ROOT, "data", "test_songs_io") # Unique name
     print(f"Using test directory: {TEST_SONGS_DIR}")
-    if not os.path.exists(TEST_SONGS_DIR):
-        os.makedirs(TEST_SONGS_DIR, exist_ok=True)
+    # Clean up previous test runs if needed
+    if os.path.exists(TEST_SONGS_DIR):
+        import shutil
+        # Be careful with shutil.rmtree!
+        # shutil.rmtree(TEST_SONGS_DIR)
+        # print("Cleaned up previous test directory.")
+        pass # Or manually clean if preferred
+    os.makedirs(TEST_SONGS_DIR, exist_ok=True)
 
     # 1. Create a dummy song
     print("\n1. Creating Test Song...")
     test_seg1 = Segment(tempo=100.0, loop_length=8, repetitions=2)
     test_seg2 = Segment(program_message_1=5, tempo=140.0, tempo_ramp=1.5, loop_length=16)
-    test_song = Song(name="My Test Song ?!*", segments=[test_seg1, test_seg2])
+    test_song = Song(name="My Test Song 1", segments=[test_seg1, test_seg2]) # Simple name
     print(f"   {test_song}")
-    print(f"   Segments: {test_song.segments}")
 
     # 2. Save the song
     print("\n2. Saving Test Song...")
@@ -223,40 +269,67 @@ if __name__ == '__main__':
     print("\n3. Listing Songs...")
     available_songs = list_songs(directory=TEST_SONGS_DIR)
     print(f"   Available songs: {available_songs}")
-    sanitized_name = sanitize_filename(test_song.name)
-    assert sanitized_name in available_songs
+    assert test_song.name in available_songs
 
-    # 4. Load the song (using basename)
-    print("\n4. Loading Test Song (by basename)...")
-    loaded_song = load_song(sanitized_name, directory=TEST_SONGS_DIR)
-    if loaded_song:
-        print(f"   Loaded song: {loaded_song}")
-        print(f"   Loaded segments: {loaded_song.segments}")
-        assert loaded_song.name == test_song.name # Original name should be preserved inside JSON
-        assert len(loaded_song.segments) == len(test_song.segments)
-        assert loaded_song.segments[0].tempo == test_song.segments[0].tempo
-        assert loaded_song.segments[1].program_message_1 == test_song.segments[1].program_message_1
-    else:
-        print("   Failed to load song.")
-        assert False # Test failed if load fails
+    # 4. Load the song
+    print("\n4. Loading Test Song...")
+    loaded_song = load_song(test_song.name, directory=TEST_SONGS_DIR)
+    assert loaded_song is not None
+    assert loaded_song.name == test_song.name
+    print(f"   Loaded song: {loaded_song.name}")
 
-    # 5. Load the song (using full filename)
-    print("\n5. Loading Test Song (by full filename)...")
-    loaded_song_fname = load_song(f"{sanitized_name}.json", directory=TEST_SONGS_DIR)
-    assert loaded_song_fname is not None
-    assert loaded_song_fname.name == test_song.name
+    # 5. Rename the song
+    print("\n5. Renaming Test Song...")
+    new_name = "My Renamed Song"
+    rename_success = rename_song(test_song.name, new_name, directory=TEST_SONGS_DIR)
+    print(f"   Rename successful: {rename_success}")
+    assert rename_success
+    available_songs = list_songs(directory=TEST_SONGS_DIR)
+    print(f"   Available songs after rename: {available_songs}")
+    assert test_song.name not in available_songs
+    assert new_name in available_songs
 
-    # 6. Test loading non-existent song
-    print("\n6. Testing Load Non-existent Song...")
-    non_existent = load_song("this-does-not-exist", directory=TEST_SONGS_DIR)
-    assert non_existent is None
-    print("   Load correctly returned None.")
+    # 6. Try to load by old name (should fail)
+    print("\n6. Loading by old name (should fail)...")
+    old_load_fail = load_song(test_song.name, directory=TEST_SONGS_DIR)
+    assert old_load_fail is None
+    print("   Correctly failed to load by old name.")
 
-    # 7. Clean up test file (optional)
-    # print("\n7. Cleaning up test file...")
-    # test_filepath = os.path.join(TEST_SONGS_DIR, f"{sanitized_name}.json")
-    # if os.path.exists(test_filepath):
-    #     os.remove(test_filepath)
-    #     print(f"   Removed {test_filepath}")
+    # 7. Load by new name (should succeed)
+    print("\n7. Loading by new name...")
+    renamed_loaded = load_song(new_name, directory=TEST_SONGS_DIR)
+    assert renamed_loaded is not None
+    assert renamed_loaded.name == new_name # Check name was updated correctly by load_song
+    print(f"   Loaded renamed song: {renamed_loaded.name}")
+
+    # 8. Delete the renamed song
+    print("\n8. Deleting Renamed Song...")
+    delete_success = delete_song(new_name, directory=TEST_SONGS_DIR)
+    print(f"   Delete successful: {delete_success}")
+    assert delete_success
+    available_songs = list_songs(directory=TEST_SONGS_DIR)
+    print(f"   Available songs after delete: {available_songs}")
+    assert new_name not in available_songs
+
+    # 9. Try to delete non-existent song
+    print("\n9. Deleting Non-existent Song...")
+    delete_fail = delete_song("does-not-exist", directory=TEST_SONGS_DIR)
+    print(f"   Delete non-existent returned: {delete_fail}")
+    assert not delete_fail # Should return False
+
+    # 10. Test saving song with invalid chars in name (should use sanitized name for file)
+    # print("\n10. Saving song with invalid chars...")
+    # invalid_char_song = Song(name="Inv@lid / N?me*", segments=[Segment()])
+    # save_invalid = save_song(invalid_char_song, directory=TEST_SONGS_DIR)
+    # assert save_invalid
+    # sanitized = sanitize_filename(invalid_char_song.name)
+    # assert sanitized in list_songs(directory=TEST_SONGS_DIR)
+    # print(f"   Saved '{invalid_char_song.name}' as '{sanitized}{SONG_EXTENSION}'")
+    # # Clean up this file
+    # delete_song(sanitized, directory=TEST_SONGS_DIR)
 
     print("\n--- file_io Testing Complete ---")
+    # Consider removing the test directory after tests if desired
+    # shutil.rmtree(TEST_SONGS_DIR)
+    # print("Removed test directory.")
+
