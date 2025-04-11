@@ -540,6 +540,11 @@ class FileManageScreen(BaseScreen):
             delete_hint = f"(Delete: CC {delete_cc})" if delete_cc else ""
             # --------------------------
 
+            # Get the current loaded song name for highlighting
+            current_song_name = None
+            if hasattr(self.app, 'current_song') and self.app.current_song:
+                current_song_name = self.app.current_song.name
+
             if not self.song_list:
                 create_cc = getattr(mappings, 'CREATE_SONG_CC', '?')
                 no_songs_text = f"No songs found. Press CC {create_cc} to create."
@@ -565,9 +570,20 @@ class FileManageScreen(BaseScreen):
                 # Draw the visible portion of the list
                 for i in range(self.scroll_offset, end_index):
                     song_name = self.song_list[i]
+                    
+                    # Check if this is the currently loaded song
+                    is_current = (song_name == current_song_name)
+                    
+                    # Display the song name (without special character prefix)
                     display_text = f"{i + 1}. {song_name}"
+                    
                     is_selected = (i == self.selected_index)
-                    color = HIGHLIGHT_COLOR if is_selected else WHITE
+                    
+                    # Determine color - prioritize selection highlight
+                    if is_selected:
+                        color = HIGHLIGHT_COLOR
+                    else:
+                        color = WHITE  # Always use white for better visibility
 
                     item_surf = self.font.render(display_text, True, color)
                     item_rect = item_surf.get_rect(topleft=(LEFT_MARGIN + LIST_ITEM_INDENT, y_offset))
@@ -575,8 +591,24 @@ class FileManageScreen(BaseScreen):
                     if is_selected:
                         # Draw highlight background
                         highlight_rect = pygame.Rect(LEFT_MARGIN, y_offset - 2, screen_surface.get_width() - (2 * LEFT_MARGIN), LINE_HEIGHT)
-                        pygame.draw.rect(screen_surface, (40, 80, 40), highlight_rect) # Dark green background
+                        # Use the standard green highlight for selected items
+                        pygame.draw.rect(screen_surface, (40, 80, 40), highlight_rect)
+                    
+                    # Draw a border around the currently loaded song (after background, before text)
+                    if is_current:
+                        # Create a rectangle slightly larger than the text for the border
+                        border_rect = pygame.Rect(LEFT_MARGIN + LIST_ITEM_INDENT - 10, 
+                                                y_offset - 2, 
+                                                screen_surface.get_width() - LEFT_MARGIN - LIST_ITEM_INDENT - 10, 
+                                                LINE_HEIGHT)
+                        # Draw the border with a bright cyan color for better visibility
+                        border_color = (0, 255, 255)  # Bright cyan
+                        pygame.draw.rect(screen_surface, border_color, border_rect, 2)  # 2px border width
 
+                    screen_surface.blit(item_surf, item_rect)
+
+                    # Display hints for selected items
+                    if is_selected:
                         # --- Display both rename and delete hints ---
                         hints = []
                         if rename_hint:
@@ -594,7 +626,6 @@ class FileManageScreen(BaseScreen):
                             screen_surface.blit(hint_surf, hint_rect)
                         # -----------------------------------------
 
-                    screen_surface.blit(item_surf, item_rect)
                     y_offset += LINE_HEIGHT
 
                 # Draw scroll down indicator if needed
