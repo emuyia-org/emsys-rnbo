@@ -69,8 +69,8 @@ class SongEditScreen(BaseScreen):
         """Initialize the song editing screen."""
         super().__init__(app_ref)
         # Define additional fonts needed
-        self.font_large = pygame.font.Font(None, 36)  # Larger font for titles
-        self.font_small = pygame.font.Font(None, 18)  # Smaller font for detailed info
+        self.font_large = pygame.font.Font(None, 48)  # Larger font for titles
+        self.font_small = pygame.font.Font(None, 24)  # Smaller font for detailed info
 
         self.current_song: Optional[Song] = None
         self.selected_segment_index: Optional[int] = None

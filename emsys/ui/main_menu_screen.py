@@ -14,7 +14,7 @@ class MainMenuScreen(BaseScreen):
         super().__init__(app_ref)
         # Define additional fonts needed
         self.font_large = pygame.font.Font(None, 48)  # Larger font for titles
-        self.font_small = pygame.font.Font(None, 18)  # Smaller font for hints/captions
+        self.font_small = pygame.font.Font(None, 24)  # Smaller font for hints/captions
         
         self.title = "MAIN MENU"
         self.title_surf = self.font_large.render(self.title, True, (255, 255, 255))

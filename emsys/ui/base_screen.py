@@ -8,7 +8,7 @@ class BaseScreen:
 
     def __init__(self, app):
         self.app = app
-        self.font = pygame.font.Font(None, 24) # Example font
+        self.font = pygame.font.Font(None, 36) # Example font
 
     def handle_event(self, event):
         """Handle a single Pygame event."""

@@ -50,16 +50,16 @@ from emsys.ui.base_screen import BaseScreen
 from emsys.ui.placeholder_screen import PlaceholderScreen
 
 # Additional screen imports (keep existing logic)
-FileManageScreen = None
+SongManagerScreen = None
 SongEditScreen = None
 try:
-    import emsys.ui.file_manage_screen
-    if hasattr(emsys.ui.file_manage_screen, 'FileManageScreen'):
-        from emsys.ui.file_manage_screen import FileManageScreen
+    import emsys.ui.song_manager_screen
+    if hasattr(emsys.ui.song_manager_screen, 'SongManagerScreen'):
+        from emsys.ui.song_manager_screen import SongManagerScreen
     else:
-        print(f"Error: emsys.ui.file_manage_screen module exists but doesn't contain FileManageScreen class")
+        print(f"Error: emsys.ui.song_manager_screen module exists but doesn't contain SongManagerScreen class")
 except ImportError as e:
-    print(f"Error importing file_manage_screen: {e}")
+    print(f"Error importing song_manager_screen: {e}")
 try:
     import emsys.ui.song_edit_screen
     if hasattr(emsys.ui.song_edit_screen, 'SongEditScreen'):
@@ -69,7 +69,7 @@ try:
 except ImportError as e:
     print(f"Error importing song_edit_screen: {e}")
 
-print(f"Available screens: FileManageScreen={'Available' if FileManageScreen else 'Not Available'}, "
+print(f"Available screens: SongManagerScreen={'Available' if SongManagerScreen else 'Not Available'}, "
       f"SongEditScreen={'Available' if SongEditScreen else 'Not Available'}")
 print(f"Universal Button Repeat: Delay={BUTTON_REPEAT_DELAY_S*1000}ms, Interval={BUTTON_REPEAT_INTERVAL_S*1000}ms")
 
@@ -116,10 +116,10 @@ class App:
         print("Initializing Screens...")
         self.placeholder_screen = PlaceholderScreen(self)
 
-        if FileManageScreen:
-            self.file_manage_screen = FileManageScreen(self)
+        if SongManagerScreen:
+            self.song_manager_screen = SongManagerScreen(self)
         else:
-            self.file_manage_screen = None
+            self.song_manager_screen = None
 
         if SongEditScreen:
             self.song_edit_screen = SongEditScreen(self)
@@ -130,7 +130,7 @@ class App:
         self.screens = [
             screen for screen in [
                 self.placeholder_screen,
-                self.file_manage_screen,
+                self.song_manager_screen,
                 self.song_edit_screen,
             ] if screen is not None
         ]

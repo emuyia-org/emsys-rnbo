@@ -13,7 +13,7 @@ class PlaceholderScreen(BaseScreen):
         super().__init__(app)
         
         self.title_text = "Emsys Controller"
-        self.title_font = pygame.font.Font(None, 48)  # Define a specific title font
+        self.title_font = pygame.font.Font(None, 64)  # Define a specific title font
         self.title_surf = self.title_font.render(self.title_text, True, WHITE)
         self.title_rect = self.title_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 3))
 

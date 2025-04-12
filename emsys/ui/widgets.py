@@ -42,9 +42,9 @@ class TextInputWidget:
     def __init__(self, app_ref):
         """Initialize the text input widget."""
         self.app = app_ref # Reference to the main application for screen access, fonts etc.
-        self.font_large = pygame.font.Font(None, 36)
-        self.font = pygame.font.Font(None, 24) # Standard font
-        self.font_small = pygame.font.Font(None, 18)
+        self.font_large = pygame.font.Font(None, 48)
+        self.font = pygame.font.Font(None, 32) # Standard font
+        self.font_small = pygame.font.Font(None, 24)
 
         self.is_active: bool = False
         self.renamer_instance: Optional[SongRenamer] = None

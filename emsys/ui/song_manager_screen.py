@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Screen for managing Song files (Loading, Creating, Renaming).
+Screen for managing Songs (Loading, Creating, Renaming).
 """
 import pygame
 import time
@@ -38,17 +38,17 @@ LINE_HEIGHT = 30 # Slightly larger line height for easier reading
 LIST_TOP_PADDING = 10
 LIST_ITEM_INDENT = 25
 
-class FileManageScreen(BaseScreen):
-    """Screen for listing, loading, creating, and renaming song files."""
+class SongManagerScreen(BaseScreen):
+    """Screen for listing, loading, creating, and renaming songs."""
 
     def __init__(self, app_ref):
-        """Initialize the file management screen."""
+        """Initialize the song manager screen."""
         super().__init__(app_ref)
         # Define additional fonts needed
-        self.font_large = pygame.font.Font(None, 36)  # Larger font for titles
-        self.font_small = pygame.font.Font(None, 18)  # Smaller font for indicators/details
+        self.font_large = pygame.font.Font(None, 48)  # Larger font for titles
+        self.font_small = pygame.font.Font(None, 24)  # Smaller font for indicators/details
 
-        self.title_text = "Song File Manager"
+        self.title_text = "Song Manager"
         self.title_surf = self.font_large.render(self.title_text, True, WHITE)
         self.title_rect = self.title_surf.get_rect(midtop=(self.app.screen.get_width() // 2, TOP_MARGIN))
 
@@ -76,7 +76,7 @@ class FileManageScreen(BaseScreen):
         self._refresh_song_list()
         self.clear_feedback()
         # Update title (already done in __init__)
-        # self.title_text = "Song File Manager"
+        # self.title_text = "Song Manager"
         # self.title_surf = self.font_large.render(self.title_text, True, WHITE)
         # self.title_rect = self.title_surf.get_rect(midtop=(self.app.screen.get_width() // 2, TOP_MARGIN))
 
@@ -148,15 +148,15 @@ class FileManageScreen(BaseScreen):
             return
 
         cc = msg.control
-        print(f"FileManageScreen received CC: {cc} | TextInput Active: {self.text_input_widget.is_active}")
+        print(f"SongManagerScreen received CC: {cc} | TextInput Active: {self.text_input_widget.is_active}")
 
         # --- Handle Text Input Mode FIRST ---
         if self.text_input_widget.is_active:
             status = self.text_input_widget.handle_input(cc)
             if status == TextInputStatus.CONFIRMED:
-                self._confirm_file_rename() # Call the confirmation logic
+                self._confirm_song_rename() # Call the confirmation logic
             elif status == TextInputStatus.CANCELLED:
-                self._cancel_file_rename() # Call the cancellation logic
+                self._cancel_song_rename() # Call the cancellation logic
             # If ACTIVE or ERROR, the widget handles drawing, we just wait
             return # Don't process other actions while text input is active
         # ----------------------------------
@@ -174,7 +174,7 @@ class FileManageScreen(BaseScreen):
             return
         # -------------------------------------
 
-        # --- Normal File Management Mode ---
+        # --- Normal Song Management Mode ---
 
         # Handle CREATE_SONG_CC
         if cc == mappings.CREATE_SONG_CC:
@@ -183,7 +183,7 @@ class FileManageScreen(BaseScreen):
 
         # Handle RENAME_SONG_CC
         elif cc == mappings.RENAME_SONG_CC:
-            self._start_file_rename()
+            self._start_song_rename()
             return
 
         # --- Add DELETE_SEGMENT_CC handling ---
@@ -232,24 +232,24 @@ class FileManageScreen(BaseScreen):
             self._load_selected_song()
 
     # --- Methods for Renaming using TextInputWidget ---
-    def _start_file_rename(self):
-        """Initiates renaming for the selected file using the widget."""
+    def _start_song_rename(self):
+        """Initiates renaming for the selected song using the widget."""
         if self.selected_index is None or not self.song_list:
             self.set_feedback("No song selected to rename", is_error=True)
             return
 
         try:
             current_name = self.song_list[self.selected_index]
-            self.text_input_widget.start(current_name, prompt="Rename File")
+            self.text_input_widget.start(current_name, prompt="Rename Song")
             self.clear_feedback()
-            print(f"Starting file rename for: {current_name}")
-            self.set_feedback("Renaming file...", duration=1.0)
+            print(f"Starting song rename for: {current_name}")
+            self.set_feedback("Renaming song...", duration=1.0)
         except IndexError:
             self.set_feedback("Selection error, cannot rename.", is_error=True)
             self.selected_index = 0 if self.song_list else None # Reset index
 
-    def _confirm_file_rename(self):
-        """Confirms the file rename using file_io."""
+    def _confirm_song_rename(self):
+        """Confirms the song rename using file_io."""
         if not self.text_input_widget.is_active or self.selected_index is None:
             self.text_input_widget.cancel()
             return
@@ -271,7 +271,7 @@ class FileManageScreen(BaseScreen):
             return
 
         if not new_name:
-            self.set_feedback("File name cannot be empty. Rename cancelled.", is_error=True)
+            self.set_feedback("Song name cannot be empty. Rename cancelled.", is_error=True)
             self.text_input_widget.cancel()
             return
 
@@ -280,17 +280,17 @@ class FileManageScreen(BaseScreen):
             self.text_input_widget.cancel()
             return
 
-        print(f"Attempting to rename file from '{old_name}' to '{new_name}'")
+        print(f"Attempting to rename song from '{old_name}' to '{new_name}'")
 
-        # --- File Renaming Logic ---
+        # --- Song Renaming Logic ---
         if not hasattr(file_io, 'rename_song'):
-             self.set_feedback("Error: File renaming function not implemented!", is_error=True)
+             self.set_feedback("Error: Song renaming function not implemented!", is_error=True)
              self.text_input_widget.cancel()
              return
 
         # Use the rename_song function from file_io
         if file_io.rename_song(old_name, new_name):
-            self.set_feedback(f"File renamed to '{new_name}'")
+            self.set_feedback(f"Song renamed to '{new_name}'")
 
             # --- Critical: Check if the renamed song was the loaded current_song ---
             renamed_current = False
@@ -325,15 +325,15 @@ class FileManageScreen(BaseScreen):
 
         else:
             # file_io.rename_song failed (it should print the reason)
-            self.set_feedback(f"Failed to rename file (see console)", is_error=True)
+            self.set_feedback(f"Failed to rename song (see console)", is_error=True)
             # Keep widget active? No, cancel to avoid confusion. User can retry.
             self.text_input_widget.cancel()
 
 
-    def _cancel_file_rename(self):
-        """Cancels the file renaming process."""
+    def _cancel_song_rename(self):
+        """Cancels the song renaming process."""
         self.set_feedback("Rename cancelled.")
-        print("Cancelled file rename mode.")
+        print("Cancelled song rename mode.")
         self.text_input_widget.cancel()
 
     # --- End of Renaming Methods ---
@@ -421,7 +421,7 @@ class FileManageScreen(BaseScreen):
         try:
             # Create a default song name based on timestamp to ensure uniqueness
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            new_song_name = f"New_Song_{timestamp}"
+            new_song_name = f"{timestamp}"
 
             # Create a new song with an initial empty segment
             new_song = Song(name=new_song_name)
@@ -433,7 +433,7 @@ class FileManageScreen(BaseScreen):
 
             # Save the song to disk
             if file_io.save_song(new_song):
-                self.set_feedback(f"Created new song: {new_song_name}. Use navigation buttons to switch screens.")
+                self.set_feedback(f"Created new song: {new_song_name}.")
                 # Refresh the song list to include the new song
                 self._refresh_song_list()
                 # Select the new song in the list
@@ -477,7 +477,7 @@ class FileManageScreen(BaseScreen):
             if loaded_song:
                 # CRITICAL: Update the main app's current song
                 self.app.current_song = loaded_song
-                self.set_feedback(f"Loaded: {selected_basename}. Use navigation buttons to switch screens.")
+                self.set_feedback(f"Loaded: {selected_basename}.")
 
                 # Remove automatic navigation
                 # NAVIGATE_EVENT = pygame.USEREVENT + 1
@@ -486,7 +486,7 @@ class FileManageScreen(BaseScreen):
             else:
                 # Loading failed (file_io.load_song returns None and prints error)
                 self.app.current_song = None # Ensure current song is cleared
-                self.set_feedback(f"Failed to load '{selected_basename}' (see console)", is_error=True)
+                self.set_feedback(f"Failed to load '{selected_basename}'", is_error=True)
 
         except IndexError:
             self.set_feedback("Selection index error.", is_error=True)
@@ -521,7 +521,7 @@ class FileManageScreen(BaseScreen):
             # Optionally clear background first
             # screen_surface.fill(BLACK)
             self.text_input_widget.draw(screen_surface)
-        # --- Draw Normal File List Interface ---
+        # --- Draw Normal Song List Interface ---
         else:
             # Draw the title
             screen_surface.blit(self.title_surf, self.title_rect)
@@ -574,7 +574,7 @@ class FileManageScreen(BaseScreen):
                     # Check if this is the currently loaded song
                     is_current = (song_name == current_song_name)
                     
-                    # Display the song name (without special character prefix)
+                    # Display the song name
                     display_text = f"{i + 1}. {song_name}"
                     
                     is_selected = (i == self.selected_index)
