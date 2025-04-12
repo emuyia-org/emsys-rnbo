@@ -271,7 +271,7 @@ class SongManagerScreen(BaseScreen):
             return
 
         if not new_name:
-            self.set_feedback("Song name cannot be empty. Rename cancelled.", is_error=True)
+            self.set_feedback("Song name cannot be empty.", is_error=True)
             self.text_input_widget.cancel()
             return
 
@@ -325,7 +325,7 @@ class SongManagerScreen(BaseScreen):
 
         else:
             # file_io.rename_song failed (it should print the reason)
-            self.set_feedback(f"Failed to rename song (see console)", is_error=True)
+            self.set_feedback(f"Failed to rename song", is_error=True)
             # Keep widget active? No, cancel to avoid confusion. User can retry.
             self.text_input_widget.cancel()
 
@@ -403,7 +403,7 @@ class SongManagerScreen(BaseScreen):
 
             else:
                 # file_io.delete_song should print the specific error
-                self.set_feedback(f"Failed to delete '{song_name}' (see console)", is_error=True)
+                self.set_feedback(f"Failed to delete '{song_name}'", is_error=True)
         except IndexError:
              # This might happen if the list changes unexpectedly between selection and deletion
              self.set_feedback("Selection error during delete.", is_error=True)
@@ -428,8 +428,8 @@ class SongManagerScreen(BaseScreen):
             initial_segment = Segment()  # Create with default values
             new_song.add_segment(initial_segment)
 
-            # Set as current song in the app
-            self.app.current_song = new_song
+            # Don't set as current song in the app - removed this line
+            # self.app.current_song = new_song
 
             # Save the song to disk
             if file_io.save_song(new_song):
@@ -453,12 +453,12 @@ class SongManagerScreen(BaseScreen):
                 # pygame.time.set_timer(NAVIGATE_EVENT, 1500, loops=1)  # 1500 ms delay
             else:
                 self.set_feedback(f"Failed to save new song.", is_error=True)
-                self.app.current_song = None
+                # Don't need to clear current_song since we never set it
 
         except Exception as e:
             self.set_feedback(f"Error creating song: {e}", is_error=True)
             print(f"Error in _create_new_song: {e}")
-            self.app.current_song = None
+            # Don't need to clear current_song since we never set it
 
     def _load_selected_song(self):
         """Attempts to load the selected song and update the app state."""
@@ -547,7 +547,7 @@ class SongManagerScreen(BaseScreen):
 
             if not self.song_list:
                 create_cc = getattr(mappings, 'CREATE_SONG_CC', '?')
-                no_songs_text = f"No songs found. Press CC {create_cc} to create."
+                no_songs_text = f"No songs found."
                 no_songs_surf = self.font.render(no_songs_text, True, WHITE)
                 no_songs_rect = no_songs_surf.get_rect(centerx=screen_surface.get_width() // 2, top=y_offset + 20)
                 screen_surface.blit(no_songs_surf, no_songs_rect)
@@ -694,7 +694,7 @@ class SongManagerScreen(BaseScreen):
         # Instruction
         yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
         no_cc = getattr(mappings, 'NO_NAV_CC', '?')
-        instr_text = f"Press CC {yes_cc} to delete or CC {no_cc} to cancel"
+        instr_text = f""
         instr_surf = self.font.render(instr_text, True, WHITE)
         instr_rect = instr_surf.get_rect(midbottom=(surface.get_width() // 2, box_y + box_height - 15))
         surface.blit(instr_surf, instr_rect)
