@@ -236,29 +236,29 @@ class SongEditScreen(BaseScreen):
 
     def _confirm_song_rename(self):
         """Confirms the rename, updates the song, and saves."""
+        # Check if widget is active *now* - it should be if CONFIRMED was returned correctly
         if not self.text_input_widget.is_active or not self.current_song:
-            self.text_input_widget.cancel() # Ensure widget is inactive
+            # This path should ideally not be hit if CONFIRMED was returned correctly
+            self.text_input_widget.cancel() # Ensure widget is inactive anyway
             return
 
         new_name = self.text_input_widget.get_text()
         if new_name is None: # Should not happen if CONFIRMED, but safety check
              self.set_feedback("Error getting new name from widget.", is_error=True)
-             self.text_input_widget.cancel()
+             self.text_input_widget.cancel() # Cancel on error
              return
 
         new_name = new_name.strip()
         old_name = self.current_song.name
 
         if not new_name:
-            # Widget returned CONFIRMED but text is empty. Keep widget active? Or cancel?
-            # Let's cancel and show error. User can try again.
             self.set_feedback("Song name cannot be empty. Rename cancelled.", is_error=True)
-            self.text_input_widget.cancel()
+            self.text_input_widget.cancel() # Cancel on validation failure
             return
 
         if new_name == old_name:
             self.set_feedback("Name unchanged. Exiting rename.")
-            self.text_input_widget.cancel()
+            self.text_input_widget.cancel() # Cancel if name is the same
             return
 
         print(f"Attempting to rename song from '{old_name}' to '{new_name}'")
@@ -266,7 +266,7 @@ class SongEditScreen(BaseScreen):
         # --- File Renaming Logic ---
         if not hasattr(file_io, 'rename_song'):
              self.set_feedback("Error: File renaming function not implemented!", is_error=True)
-             self.text_input_widget.cancel() # Cancel rename process
+             self.text_input_widget.cancel() # Cancel on missing function
              return
 
         # Use the rename_song function from file_io
@@ -280,30 +280,23 @@ class SongEditScreen(BaseScreen):
             if file_io.save_song(self.current_song):
                 self.set_feedback(f"Song renamed and saved as '{new_name}'")
             else:
-                # This is tricky - file renamed but content save failed.
-                # The in-memory song has the new name. Attempting to save again might work.
-                # Or should we try to rename back? Let's report error for now.
                 self.set_feedback(f"Renamed file, but failed to save content for '{new_name}'", is_error=True)
 
-            # Exit rename mode on successful rename
-            self.text_input_widget.cancel()
+            # Exit rename mode on successful rename (or save failure after rename)
+            self.text_input_widget.cancel() # Cancel after attempting save
 
         else:
-            # file_io.rename_song failed (e.g., file exists, permissions)
-            # file_io.rename_song should print the specific error
+            # file_io.rename_song failed
             self.set_feedback(f"Failed to rename file (see console)", is_error=True)
-            # Keep the widget active so the user can try a different name or cancel.
-            # No, let's cancel on failure to avoid inconsistent state. User can retry.
+            # Cancel on rename failure
             self.text_input_widget.cancel()
-
 
     def _cancel_song_rename(self):
         """Cancels the renaming process initiated by the widget."""
-        # The widget handles its own deactivation in handle_input -> cancel()
-        # We just need to provide feedback.
+        # Widget should already be inactive if CANCELLED status was returned,
+        # but call cancel() again for safety.
         self.set_feedback("Rename cancelled.")
         print("Cancelled song rename mode.")
-        # Ensure widget is inactive, though it should be already
         self.text_input_widget.cancel()
 
     # --- End of Renaming Methods ---

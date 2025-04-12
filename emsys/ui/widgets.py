@@ -99,15 +99,15 @@ class TextInputWidget:
     def handle_input(self, cc: int) -> TextInputStatus:
         """
         Processes MIDI CC input when the widget is active.
-        Unified mode: Always presents keyboard, simulates caret actions.
+        Unified mode: Always presents keyboard, simulates caret actions,
+        and preserves keyboard cursor position using set_keyboard_cursor.
         """
         if not self.is_active or not self.renamer_instance:
             return TextInputStatus.INACTIVE
 
-        # We assume the renamer is kept in KEYBOARD mode visually,
-        # but simulate actions requiring CARET mode internally.
-
         action_taken = False # Flag to track if any action was performed
+        restore_kbd_cursor = False # Flag to indicate if cursor needs restoration
+        saved_k_row, saved_k_col = 0, 0 # Initialize saved cursor position
 
         # --- Unified CC Mapping ---
         if cc == mappings.UP_NAV_CC:
@@ -124,12 +124,28 @@ class TextInputWidget:
             action_taken = True
         elif cc == mappings.YES_NAV_CC:
             print("Inserting character...")
+            # Save cursor before exiting keyboard mode
+            current_info = self.renamer_instance.get_display_info()
+            if current_info['mode'] == RenameMode.KEYBOARD: # Should always be true here
+                 saved_k_row, saved_k_col = current_info['keyboard_cursor']
+                 restore_kbd_cursor = True
+            else:
+                 print("Warning: Tried to save kbd cursor when not in KEYBOARD mode.")
+            # Perform action
             self.renamer_instance.handle_input('yes') # Insert character (switches renamer to CARET)
             self.renamer_instance.handle_input('yes') # Immediately re-enter KEYBOARD mode
             action_taken = True
             print("...Insertion done, back in KEYBOARD mode.")
         elif cc == mappings.PREV_CC: # Move Caret Left (Simulation)
             print("Simulating Caret Left...")
+            # Save cursor before exiting keyboard mode
+            current_info = self.renamer_instance.get_display_info()
+            if current_info['mode'] == RenameMode.KEYBOARD:
+                 saved_k_row, saved_k_col = current_info['keyboard_cursor']
+                 restore_kbd_cursor = True
+            else:
+                 print("Warning: Tried to save kbd cursor when not in KEYBOARD mode.")
+            # Perform action
             self.renamer_instance.handle_input('no')   # Exit keyboard
             self.renamer_instance.handle_input('left') # Move caret left
             self.renamer_instance.handle_input('yes')  # Re-enter keyboard
@@ -137,6 +153,14 @@ class TextInputWidget:
             print("...Simulation done.")
         elif cc == mappings.NEXT_CC: # Move Caret Right (Simulation)
             print("Simulating Caret Right...")
+            # Save cursor before exiting keyboard mode
+            current_info = self.renamer_instance.get_display_info()
+            if current_info['mode'] == RenameMode.KEYBOARD:
+                 saved_k_row, saved_k_col = current_info['keyboard_cursor']
+                 restore_kbd_cursor = True
+            else:
+                 print("Warning: Tried to save kbd cursor when not in KEYBOARD mode.")
+            # Perform action
             self.renamer_instance.handle_input('no')   # Exit keyboard
             self.renamer_instance.handle_input('right')# Move caret right
             self.renamer_instance.handle_input('yes')  # Re-enter keyboard
@@ -144,6 +168,14 @@ class TextInputWidget:
             print("...Simulation done.")
         elif cc == mappings.DELETE_CC: # Backspace (Simulation)
             print("Simulating Backspace...")
+            # Save cursor before exiting keyboard mode
+            current_info = self.renamer_instance.get_display_info()
+            if current_info['mode'] == RenameMode.KEYBOARD:
+                 saved_k_row, saved_k_col = current_info['keyboard_cursor']
+                 restore_kbd_cursor = True
+            else:
+                 print("Warning: Tried to save kbd cursor when not in KEYBOARD mode.")
+            # Perform action
             self.renamer_instance.handle_input('no')   # Exit keyboard
             self.renamer_instance.handle_input('no')   # Backspace (in caret mode)
             self.renamer_instance.handle_input('yes')  # Re-enter keyboard
@@ -155,14 +187,32 @@ class TextInputWidget:
             if not final_text:
                  print("TextInputWidget: Confirmation attempted with empty text.")
                  # Return CONFIRMED and let caller validate.
+                 # DO NOT deactivate here. Let the caller handle it.
                  return TextInputStatus.CONFIRMED
             else:
                  print(f"TextInputWidget confirmed with text: '{final_text}'")
+                 # DO NOT deactivate here. Let the caller handle it.
                  return TextInputStatus.CONFIRMED
         elif cc == mappings.NO_NAV_CC:
             # Cancel action
             self.cancel()
             return TextInputStatus.CANCELLED
+
+        # --- Restore Keyboard Cursor Position ---
+        if restore_kbd_cursor and self.renamer_instance:
+            print(f"Attempting to restore keyboard cursor to ({saved_k_row}, {saved_k_col}) using set_keyboard_cursor...")
+            # Ensure we are back in keyboard mode before setting
+            current_mode = self.renamer_instance.get_display_info()['mode']
+            if current_mode == RenameMode.KEYBOARD:
+                success = self.renamer_instance.set_keyboard_cursor(saved_k_row, saved_k_col)
+                if success:
+                    final_k_row, final_k_col = self.renamer_instance.get_display_info()['keyboard_cursor']
+                    print(f"...Cursor restored to: ({final_k_row}, {final_k_col})")
+                else:
+                    print(f"...Failed to restore cursor to ({saved_k_row}, {saved_k_col}). Coordinates might be invalid now.")
+            else:
+                print(f"Warning: Could not restore cursor, not in KEYBOARD mode (current mode: {current_mode}).")
+
 
         # If any action was taken (or ignored), remain active
         if action_taken:

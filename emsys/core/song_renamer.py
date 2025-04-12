@@ -174,6 +174,36 @@ class SongRenamer:
             "keyboard_cursor": self.keyboard_cursor, # (row, col)
         }
 
+    def set_keyboard_cursor(self, row: int, col: int) -> bool:
+        """
+        Directly sets the keyboard cursor position if the coordinates are valid.
+
+        Args:
+            row: The desired row index.
+            col: The desired column index.
+
+        Returns:
+            bool: True if the cursor was successfully set, False otherwise.
+        """
+        rows = len(self.keyboard_layout)
+        if not (0 <= row < rows):
+            print(f"Error: Row index {row} out of bounds (0-{rows-1}).")
+            return False
+
+        cols_in_row = len(self.keyboard_layout[row])
+        if not (0 <= col < cols_in_row):
+            # Allow setting to col 0 even if row is empty? No, requires valid char index.
+            print(f"Error: Column index {col} out of bounds (0-{cols_in_row-1}) for row {row}.")
+            return False
+
+        # Only allow setting if in keyboard mode? Or allow setting anytime?
+        # Let's allow setting anytime, but it only visually matters in KEYBOARD mode.
+        # The calling widget ensures it's called appropriately.
+        self.keyboard_cursor = (row, col)
+        print(f"Keyboard cursor set to ({row}, {col})")
+        return True
+
+
 # --- Example Usage (for testing this module directly) ---
 if __name__ == "__main__":
     renamer = SongRenamer("My Song")

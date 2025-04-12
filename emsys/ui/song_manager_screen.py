@@ -250,14 +250,15 @@ class SongManagerScreen(BaseScreen):
 
     def _confirm_song_rename(self):
         """Confirms the song rename using file_io."""
+        # Check if widget is active *now*
         if not self.text_input_widget.is_active or self.selected_index is None:
-            self.text_input_widget.cancel()
+            self.text_input_widget.cancel() # Ensure inactive
             return
 
         new_name = self.text_input_widget.get_text()
         if new_name is None:
              self.set_feedback("Error getting new name from widget.", is_error=True)
-             self.text_input_widget.cancel()
+             self.text_input_widget.cancel() # Cancel on error
              return
 
         new_name = new_name.strip()
@@ -266,18 +267,18 @@ class SongManagerScreen(BaseScreen):
             old_name = self.song_list[self.selected_index]
         except IndexError:
             self.set_feedback("Selection error during rename confirmation.", is_error=True)
-            self.text_input_widget.cancel()
+            self.text_input_widget.cancel() # Cancel on error
             self._refresh_song_list() # Refresh list state
             return
 
         if not new_name:
             self.set_feedback("Song name cannot be empty.", is_error=True)
-            self.text_input_widget.cancel()
+            self.text_input_widget.cancel() # Cancel on validation failure
             return
 
         if new_name == old_name:
             self.set_feedback("Name unchanged. Exiting rename.")
-            self.text_input_widget.cancel()
+            self.text_input_widget.cancel() # Cancel if name is the same
             return
 
         print(f"Attempting to rename song from '{old_name}' to '{new_name}'")
@@ -285,7 +286,7 @@ class SongManagerScreen(BaseScreen):
         # --- Song Renaming Logic ---
         if not hasattr(file_io, 'rename_song'):
              self.set_feedback("Error: Song renaming function not implemented!", is_error=True)
-             self.text_input_widget.cancel()
+             self.text_input_widget.cancel() # Cancel on missing function
              return
 
         # Use the rename_song function from file_io
@@ -321,17 +322,18 @@ class SongManagerScreen(BaseScreen):
             except (ValueError, IndexError):
                 self.selected_index = 0 if self.song_list else None # Fallback selection
 
-            self.text_input_widget.cancel() # Exit rename mode
+            self.text_input_widget.cancel() # Exit rename mode on success
 
         else:
-            # file_io.rename_song failed (it should print the reason)
+            # file_io.rename_song failed
             self.set_feedback(f"Failed to rename song", is_error=True)
-            # Keep widget active? No, cancel to avoid confusion. User can retry.
-            self.text_input_widget.cancel()
+            self.text_input_widget.cancel() # Cancel on failure
 
 
     def _cancel_song_rename(self):
         """Cancels the song renaming process."""
+        # Widget should already be inactive if CANCELLED status was returned,
+        # but call cancel() again for safety.
         self.set_feedback("Rename cancelled.")
         print("Cancelled song rename mode.")
         self.text_input_widget.cancel()

@@ -171,10 +171,23 @@ def rename_song(old_basename: str, new_basename: str, directory: str = SONGS_DIR
     if not old_basename or not new_basename or old_basename == new_basename:
         print("Error: Invalid names provided for renaming.")
         return False
-    # Basic check for invalid characters in the *basename* itself
-    if '/' in new_basename or '\\' in new_basename or '.' in new_basename:
-         print(f"Error: Invalid characters (/, \\, .) in new song name '{new_basename}'.")
+
+    # --- Enhanced Validation ---
+    # Check for characters typically invalid in filenames across OSes
+    # Reusing the pattern from sanitize_filename for the check
+    if re.search(r'[\\/*?:"<>|]', new_basename):
+         print(f"Error: Invalid characters found in new song name '{new_basename}'.")
          return False
+    # Also explicitly disallow '.' as it interferes with extension handling
+    if '.' in new_basename:
+         print(f"Error: '.' character is not allowed in song base names ('{new_basename}').")
+         return False
+    # Ensure name isn't just whitespace after potential stripping (though UI should handle this)
+    if not new_basename.strip():
+        print("Error: New song name cannot be empty or just whitespace.")
+        return False
+    # --- End Enhanced Validation ---
+
 
     old_filename = os.path.join(directory, f"{old_basename}{SONG_EXTENSION}")
     new_filename = os.path.join(directory, f"{new_basename}{SONG_EXTENSION}")
