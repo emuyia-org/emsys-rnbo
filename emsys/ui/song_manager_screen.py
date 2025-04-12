@@ -69,6 +69,11 @@ class SongManagerScreen(BaseScreen):
         self.delete_confirmation_active = False
         # -------------------------------------
 
+        # --- Add unsaved changes prompt state ---
+        self.unsaved_prompt_active = False
+        self.song_to_load_after_prompt: Optional[str] = None # Store the basename of the song to load
+        # ----------------------------------------
+
     def init(self):
         """Called when the screen becomes active. Load the song list."""
         super().init()
@@ -83,6 +88,11 @@ class SongManagerScreen(BaseScreen):
         # --- Reset text input widget state on init ---
         self.text_input_widget.cancel()
         # ---------------------------------------------
+        # --- Reset confirmation states on init ---
+        self.delete_confirmation_active = False
+        self.unsaved_prompt_active = False
+        self.song_to_load_after_prompt = None
+        # -----------------------------------------
 
     def cleanup(self):
         """Called when the screen becomes inactive."""
@@ -91,6 +101,11 @@ class SongManagerScreen(BaseScreen):
         # --- Ensure text input widget is cleared on exit ---
         self.text_input_widget.cancel()
         # --------------------------------------------------
+        # --- Reset confirmation states on cleanup ---
+        self.delete_confirmation_active = False
+        self.unsaved_prompt_active = False
+        self.song_to_load_after_prompt = None
+        # ------------------------------------------
         self.clear_feedback()
 
     def _refresh_song_list(self):
@@ -148,7 +163,7 @@ class SongManagerScreen(BaseScreen):
             return
 
         cc = msg.control
-        print(f"SongManagerScreen received CC: {cc} | TextInput Active: {self.text_input_widget.is_active}")
+        print(f"SongManagerScreen received CC: {cc} | TextInput: {self.text_input_widget.is_active} | DeleteConfirm: {self.delete_confirmation_active} | UnsavedPrompt: {self.unsaved_prompt_active}")
 
         # --- Handle Text Input Mode FIRST ---
         if self.text_input_widget.is_active:
@@ -173,6 +188,18 @@ class SongManagerScreen(BaseScreen):
             # Ignore other buttons during delete confirmation
             return
         # -------------------------------------
+
+        # --- Handle Unsaved Changes Prompt Mode ---
+        if self.unsaved_prompt_active:
+            if cc == mappings.SAVE_CC: # Use SAVE button to save
+                self._save_current_and_load_selected()
+            elif cc == mappings.DELETE_CC: # Use DELETE button to discard
+                self._discard_changes_and_load_selected()
+            elif cc == mappings.NO_NAV_CC: # Use NO button to cancel loading
+                self._cancel_load_due_to_unsaved()
+            # Ignore other buttons during this prompt
+            return
+        # ------------------------------------------
 
         # --- Normal Song Management Mode ---
 
@@ -229,7 +256,7 @@ class SongManagerScreen(BaseScreen):
             self.clear_feedback()
 
         elif cc == mappings.YES_NAV_CC:
-            self._load_selected_song()
+            self._load_selected_song() # This now checks for dirty state
 
     # --- Methods for Renaming using TextInputWidget ---
     def _start_song_rename(self):
@@ -463,49 +490,122 @@ class SongManagerScreen(BaseScreen):
             # Don't need to clear current_song since we never set it
 
     def _load_selected_song(self):
-        """Attempts to load the selected song and update the app state."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
+        """
+        Attempts to load the selected song. Checks for unsaved changes in the
+        current song before proceeding.
+        """
+        if self.text_input_widget.is_active: return
         if self.selected_index is None or not self.song_list:
             self.set_feedback("No song selected.", is_error=True)
             return
 
         try:
             selected_basename = self.song_list[self.selected_index]
-            self.set_feedback(f"Loading '{selected_basename}'...")
-            pygame.display.flip() # Show feedback immediately
+            current_song = getattr(self.app, 'current_song', None)
 
-            loaded_song = file_io.load_song(selected_basename)
+            # Check if the selected song is already loaded
+            if current_song and current_song.name == selected_basename:
+                self.set_feedback(f"'{selected_basename}' is already loaded.")
+                # Optionally navigate to edit screen? For now, just feedback.
+                return
 
-            if loaded_song:
-                # CRITICAL: Update the main app's current song
-                self.app.current_song = loaded_song
-                self.set_feedback(f"Loaded: {selected_basename}.")
-
-                # Remove automatic navigation
-                # NAVIGATE_EVENT = pygame.USEREVENT + 1
-                # pygame.time.set_timer(NAVIGATE_EVENT, 1500, loops=1) # 1500 ms delay
-
+            # Check for unsaved changes in the *current* song
+            if current_song and current_song.dirty:
+                print(f"Unsaved changes detected in '{current_song.name}'. Prompting user.")
+                self.song_to_load_after_prompt = selected_basename # Store target song
+                self.unsaved_prompt_active = True
+                self.set_feedback(f"Unsaved changes in '{current_song.name}'!", is_error=True, duration=10.0)
+                # Don't proceed with loading yet
             else:
-                # Loading failed (file_io.load_song returns None and prints error)
-                self.app.current_song = None # Ensure current song is cleared
-                self.set_feedback(f"Failed to load '{selected_basename}'", is_error=True)
+                # No unsaved changes, or no song currently loaded. Proceed directly.
+                self._perform_load(selected_basename)
 
         except IndexError:
             self.set_feedback("Selection index error.", is_error=True)
             self.selected_index = 0 if self.song_list else None # Reset index
         except Exception as e:
-            self.set_feedback(f"Error during load: {e}", is_error=True)
-            print(f"Unexpected error during load: {e}") # Log detailed error
-            self.app.current_song = None # Ensure current song is cleared
+            self.set_feedback(f"Error preparing load: {e}", is_error=True)
+            print(f"Unexpected error during load prep: {e}")
 
-    # Update handle_event to not navigate when NAVIGATE_EVENT is received
-    def handle_event(self, event):
-        super().handle_event(event)
-        # Remove navigation on NAVIGATE_EVENT
-        # NAVIGATE_EVENT = pygame.USEREVENT + 1
-        # if event.type == NAVIGATE_EVENT:
-        #     print("Navigate event triggered after load/create.")
-        #     self.app.next_screen() # Go to the next screen in the list
+    def _perform_load(self, basename_to_load: str):
+        """Internal method to actually load the song file."""
+        self.set_feedback(f"Loading '{basename_to_load}'...")
+        pygame.display.flip() # Show feedback immediately
+
+        loaded_song = file_io.load_song(basename_to_load)
+
+        if loaded_song:
+            self.app.current_song = loaded_song
+            self.set_feedback(f"Loaded: {basename_to_load}.")
+            # Refresh display to show new current song border
+        else:
+            # Loading failed (file_io.load_song returns None and prints error)
+            self.app.current_song = None # Ensure current song is cleared
+            self.set_feedback(f"Failed to load '{basename_to_load}'", is_error=True)
+
+        # Reset prompt state regardless of success/failure
+        self.unsaved_prompt_active = False
+        self.song_to_load_after_prompt = None
+
+
+    def _save_current_and_load_selected(self):
+        """Saves the current song, then loads the selected one."""
+        print("User chose SAVE.")
+        current_song = getattr(self.app, 'current_song', None)
+        basename_to_load = self.song_to_load_after_prompt
+
+        if not current_song or not basename_to_load:
+            self.set_feedback("Error: Missing context for save/load.", is_error=True)
+            self._reset_prompt_state()
+            return
+
+        self.set_feedback(f"Saving '{current_song.name}'...")
+        pygame.display.flip()
+
+        if file_io.save_song(current_song):
+            self.set_feedback(f"Saved '{current_song.name}'.")
+            # Proceed to load the target song
+            self._perform_load(basename_to_load)
+        else:
+            self.set_feedback(f"Failed to save '{current_song.name}'. Load cancelled.", is_error=True)
+            # Keep prompt active? Or cancel? Let's cancel load on save failure.
+            self._reset_prompt_state()
+
+
+    def _discard_changes_and_load_selected(self):
+        """Discards changes to the current song, then loads the selected one."""
+        print("User chose DISCARD.")
+        current_song = getattr(self.app, 'current_song', None)
+        basename_to_load = self.song_to_load_after_prompt
+
+        if not basename_to_load:
+            self.set_feedback("Error: Missing context for discard/load.", is_error=True)
+            self._reset_prompt_state()
+            return
+
+        if current_song:
+            self.set_feedback(f"Discarding changes in '{current_song.name}'...")
+            current_song.dirty = False # Mark as not dirty anymore
+            pygame.display.flip()
+            time.sleep(0.5) # Brief pause for feedback visibility
+
+        # Proceed to load the target song
+        self._perform_load(basename_to_load)
+
+
+    def _cancel_load_due_to_unsaved(self):
+        """Cancels the pending load operation."""
+        print("User chose CANCEL load.")
+        self.set_feedback("Load cancelled.")
+        self._reset_prompt_state()
+
+    def _reset_prompt_state(self):
+        """Resets the state variables related to the unsaved prompt."""
+        self.unsaved_prompt_active = False
+        self.song_to_load_after_prompt = None
+        # Optionally clear feedback here too, or let it time out
+        # self.clear_feedback()
+
 
     def _get_max_visible_items(self) -> int:
         """Calculate how many list items fit on the screen."""
@@ -523,6 +623,12 @@ class SongManagerScreen(BaseScreen):
             # Optionally clear background first
             # screen_surface.fill(BLACK)
             self.text_input_widget.draw(screen_surface)
+        # --- Draw Unsaved Changes Prompt if active ---
+        elif self.unsaved_prompt_active:
+            self._draw_unsaved_prompt(screen_surface)
+        # --- Draw Delete Confirmation if active ---
+        elif self.delete_confirmation_active:
+             self._draw_delete_confirmation(screen_surface)
         # --- Draw Normal Song List Interface ---
         else:
             # Draw the title
@@ -533,8 +639,9 @@ class SongManagerScreen(BaseScreen):
             y_offset = list_area_top
 
             # Replace CC references with button names for hints
-            rename_hint = "" 
-            delete_hint = ""
+            # Use .get() for safety in case mappings change
+            rename_hint = f"Rename ({mappings.button_map.get(mappings.RENAME_CC, f'CC{mappings.RENAME_CC}')})"
+            delete_hint = f"Delete ({mappings.button_map.get(mappings.DELETE_CC, f'CC{mappings.DELETE_CC}')})"
 
             # Get the current loaded song name for highlighting
             current_song_name = None
@@ -606,9 +713,10 @@ class SongManagerScreen(BaseScreen):
                     if is_selected:
                         # --- Display both rename and delete hints ---
                         hints = []
-                        if rename_hint:
+                        # Only show hints if the corresponding CC is defined
+                        if hasattr(mappings, 'RENAME_CC'):
                             hints.append(rename_hint)
-                        if delete_hint:
+                        if hasattr(mappings, 'DELETE_CC'):
                             hints.append(delete_hint)
 
                         if hints:
@@ -631,13 +739,10 @@ class SongManagerScreen(BaseScreen):
 
 
         # --- Draw Feedback Message (Common) ---
-        self._draw_feedback(screen_surface)
+        # Draw feedback last so it's on top, unless a prompt is active
+        if not self.unsaved_prompt_active and not self.delete_confirmation_active:
+             self._draw_feedback(screen_surface)
 
-        # --- Draw Delete Confirmation UI if active ---
-        # Only draw if not in text input mode AND confirmation is active
-        if self.delete_confirmation_active and not self.text_input_widget.is_active:
-            self._draw_delete_confirmation(screen_surface)
-        # -----------------------------------------
 
     def _draw_feedback(self, surface):
         """Draws the feedback message at the bottom."""
@@ -686,9 +791,65 @@ class SongManagerScreen(BaseScreen):
         song_rect = song_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
         surface.blit(song_surf, song_rect)
 
-        # Instruction
-        instr_text = f""
+        # Instruction using button map
+        yes_btn = mappings.button_map.get(mappings.YES_NAV_CC, f"CC{mappings.YES_NAV_CC}")
+        no_btn = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
+        instr_text = f"Confirm: {yes_btn} | Cancel: {no_btn}"
         instr_surf = self.font.render(instr_text, True, WHITE)
         instr_rect = instr_surf.get_rect(midbottom=(surface.get_width() // 2, box_y + box_height - 15))
         surface.blit(instr_surf, instr_rect)
+
+    def _draw_unsaved_prompt(self, surface):
+        """Draws the unsaved changes prompt overlay."""
+        # Create semi-transparent overlay
+        overlay = pygame.Surface((surface.get_width(), surface.get_height()), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))  # Semi-transparent black
+        surface.blit(overlay, (0, 0))
+
+        # Draw confirmation box
+        box_width, box_height = 400, 180 # Slightly taller
+        box_x = (surface.get_width() - box_width) // 2
+        box_y = (surface.get_height() - box_height) // 2
+
+        # Box background and border
+        pygame.draw.rect(surface, BLACK, (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(surface, BLUE, (box_x, box_y, box_width, box_height), 2) # Blue border
+
+        # Title
+        title_text = "Unsaved Changes"
+        title_surf = self.font_large.render(title_text, True, BLUE)
+        title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
+        surface.blit(title_surf, title_rect)
+
+        # Song name (ensure current_song exists)
+        song_name = "Error: No current song" # Default/fallback text
+        current_song = getattr(self.app, 'current_song', None)
+        if current_song:
+            song_name = current_song.name
+
+        song_text = f"in '{song_name}'"
+        song_surf = self.font.render(song_text, True, WHITE)
+        song_rect = song_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
+        surface.blit(song_surf, song_rect)
+
+        # Instructions using button map
+        save_btn = mappings.button_map.get(mappings.SAVE_CC, f"CC{mappings.SAVE_CC}")
+        discard_btn = mappings.button_map.get(mappings.DELETE_CC, f"CC{mappings.DELETE_CC}") # Using DELETE for discard
+        cancel_btn = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
+
+        instr1_text = f"Save Changes? ({save_btn})"
+        instr2_text = f"Discard Changes? ({discard_btn})"
+        instr3_text = f"Cancel Load? ({cancel_btn})"
+
+        instr1_surf = self.font.render(instr1_text, True, GREEN)
+        instr1_rect = instr1_surf.get_rect(midtop=(surface.get_width() // 2, song_rect.bottom + 20))
+        surface.blit(instr1_surf, instr1_rect)
+
+        instr2_surf = self.font.render(instr2_text, True, RED)
+        instr2_rect = instr2_surf.get_rect(midtop=(surface.get_width() // 2, instr1_rect.bottom + 5))
+        surface.blit(instr2_surf, instr2_rect)
+
+        instr3_surf = self.font.render(instr3_text, True, WHITE)
+        instr3_rect = instr3_surf.get_rect(midtop=(surface.get_width() // 2, instr2_rect.bottom + 5))
+        surface.blit(instr3_surf, instr3_rect)
 

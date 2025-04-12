@@ -103,6 +103,7 @@ def save_song(song: Song, directory: str = SONGS_DIR) -> bool:
         with open(filename, 'w') as f:
             json.dump(data, f, indent=4)
         print(f"Song '{song.name}' saved to {filename}")
+        song.dirty = False # Reset dirty flag after successful save
         return True
     except TypeError as e:
         print(f"Error serializing song '{song.name}': {e}")
@@ -138,6 +139,7 @@ def load_song(basename: str, directory: str = SONGS_DIR) -> Optional[Song]:
         if song.name != basename:
              print(f"Warning: Song name in file ('{song.name}') differs from filename ('{basename}'). Using filename.")
              song.name = basename
+        song.dirty = False # Ensure loaded song starts clean (already done in from_dict, but explicit here is fine)
         print(f"Song '{basename}' loaded successfully.")
         return song
     except json.JSONDecodeError as e:

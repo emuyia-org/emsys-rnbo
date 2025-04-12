@@ -21,3 +21,21 @@ RENAME_CC = 85 # RENAME
 SAVE_CC = 86 # SAVE
 DELETE_CC = 93 # DELETE
 CREATE_CC = 94 # CREATE
+
+# --- Button Name Mapping ---
+# Dictionary to map CC numbers to user-friendly button names
+button_map = {
+    NEXT_CC: "NEXT",
+    PREV_CC: "PREV",
+    UP_NAV_CC: "UP",
+    DOWN_NAV_CC: "DOWN",
+    LEFT_NAV_CC: "LEFT",
+    RIGHT_NAV_CC: "RIGHT",
+    YES_NAV_CC: "YES",
+    NO_NAV_CC: "NO",
+    RENAME_CC: "RENAME",
+    SAVE_CC: "SAVE",
+    DELETE_CC: "DELETE",
+    CREATE_CC: "CREATE",
+    # Add other CCs if they correspond to named buttons
+}

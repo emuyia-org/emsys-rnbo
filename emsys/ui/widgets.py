@@ -250,17 +250,17 @@ class TextInputWidget:
         # Draw Instructions for Unified Mode
         instr_y = title_rect.bottom + 10
 
-        # Get button names from mappings
-        yes_button = "YES"
-        no_button = "NO"
-        save_button = "SAVE"
-        delete_button = "DELETE"
-        up_button = "UP"
-        down_button = "DOWN"
-        left_button = "LEFT"
-        right_button = "RIGHT"
-        prev_button = "PREV" # Now used for caret left
-        next_button = "NEXT" # Now used for caret right
+        # Get button names from mappings using .get() for safety
+        yes_button = mappings.button_map.get(mappings.YES_NAV_CC, f"CC{mappings.YES_NAV_CC}")
+        no_button = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
+        save_button = mappings.button_map.get(mappings.SAVE_CC, f"CC{mappings.SAVE_CC}")
+        delete_button = mappings.button_map.get(mappings.DELETE_CC, f"CC{mappings.DELETE_CC}")
+        up_button = mappings.button_map.get(mappings.UP_NAV_CC, f"CC{mappings.UP_NAV_CC}")
+        down_button = mappings.button_map.get(mappings.DOWN_NAV_CC, f"CC{mappings.DOWN_NAV_CC}")
+        left_button = mappings.button_map.get(mappings.LEFT_NAV_CC, f"CC{mappings.LEFT_NAV_CC}")
+        right_button = mappings.button_map.get(mappings.RIGHT_NAV_CC, f"CC{mappings.RIGHT_NAV_CC}")
+        prev_button = mappings.button_map.get(mappings.PREV_CC, f"CC{mappings.PREV_CC}") # Now used for caret left
+        next_button = mappings.button_map.get(mappings.NEXT_CC, f"CC{mappings.NEXT_CC}") # Now used for caret right
 
         instr_text = f"Kbd Nav: {up_button}/{down_button}/{left_button}/{right_button} | Insert: {yes_button}"
         instr2_text = f"Move Caret: {prev_button}/{next_button} | Backspace: {delete_button}"

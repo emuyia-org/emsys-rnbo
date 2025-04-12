@@ -279,8 +279,11 @@ class SongEditScreen(BaseScreen):
             # Save the song content with the new name
             if file_io.save_song(self.current_song):
                 self.set_feedback(f"Song renamed and saved as '{new_name}'")
+                # self.current_song.dirty should be False now due to save_song
             else:
                 self.set_feedback(f"Renamed file, but failed to save content for '{new_name}'", is_error=True)
+                # If save failed, the song might still be considered dirty if changes were made before rename
+                # save_song doesn't reset the flag on failure.
 
             # Exit rename mode on successful rename (or save failure after rename)
             self.text_input_widget.cancel() # Cancel after attempting save
@@ -400,6 +403,7 @@ class SongEditScreen(BaseScreen):
             key = self.selected_parameter_key
             current_value = getattr(segment, key)
             step = PARAM_STEPS.get(key, 1)
+            original_value = current_value # Store original value
 
             new_value: Any
 
@@ -442,13 +446,20 @@ class SongEditScreen(BaseScreen):
                 self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
                 return
 
-            # Update the song data
-            self.current_song.update_segment(self.selected_segment_index, **{key: new_value})
+            # Update the song data only if the value changed
+            if new_value != original_value:
+                self.current_song.update_segment(self.selected_segment_index, **{key: new_value})
+                # self.current_song.dirty will be set by update_segment if value changed
 
-            # Provide feedback
-            display_name = self.parameter_display_names.get(key, key)
-            value_display = "YES" if isinstance(new_value, bool) and new_value else "NO" if isinstance(new_value, bool) else new_value
-            self.set_feedback(f"{display_name}: {value_display}")
+                # Provide feedback
+                display_name = self.parameter_display_names.get(key, key)
+                value_display = "YES" if isinstance(new_value, bool) and new_value else "NO" if isinstance(new_value, bool) else new_value
+                self.set_feedback(f"{display_name}: {value_display}")
+            else:
+                # Optional: Feedback that value didn't change (e.g., at limit)
+                # self.set_feedback(f"{display_name}: No change")
+                pass
+
 
         except (IndexError, AttributeError, TypeError, ValueError) as e:
             self.set_feedback(f"Error modifying value: {e}", is_error=True)
@@ -460,6 +471,7 @@ class SongEditScreen(BaseScreen):
         if self.current_song:
             if file_io.save_song(self.current_song):
                 self.set_feedback(f"Song '{self.current_song.name}' saved.")
+                # self.current_song.dirty is reset by save_song
             else:
                 self.set_feedback(f"Failed to save song '{self.current_song.name}'", is_error=True)
         else:
@@ -478,6 +490,7 @@ class SongEditScreen(BaseScreen):
 
         try:
             self.current_song.add_segment(new_segment, index=insert_index)
+            # self.current_song.dirty is set by add_segment
             # Select the newly added segment
             self.selected_segment_index = insert_index
             # Reset parameter selection for the new segment
@@ -512,6 +525,7 @@ class SongEditScreen(BaseScreen):
         try:
             deleted_index_for_feedback = self.selected_segment_index + 1
             self.current_song.remove_segment(self.selected_segment_index)
+            # self.current_song.dirty is set by remove_segment
             num_segments = len(self.current_song.segments)
 
             # Adjust selection after deletion

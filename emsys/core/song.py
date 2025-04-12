@@ -58,6 +58,7 @@ class Song:
 
     Provides methods for managing the segments within the song.
     Designed to be manipulated by UI components.
+    Includes a 'dirty' flag to track unsaved changes.
     """
     def __init__(self, name: str, segments: Optional[List[Segment]] = None):
         """
@@ -74,6 +75,7 @@ class Song:
         self.name: str = name
         # Use field for default_factory to ensure each Song instance gets its own list
         self.segments: List[Segment] = segments if segments is not None else []
+        self.dirty: bool = False # Flag to track unsaved changes
 
     def add_segment(self, segment: Segment, index: Optional[int] = None):
         """
@@ -93,6 +95,7 @@ class Song:
             if not (0 <= index <= len(self.segments)):
                  raise IndexError(f"Index {index} out of range for inserting segment.")
             self.segments.insert(index, segment)
+        self.dirty = True # Mark as modified
 
     def remove_segment(self, index: int):
         """
@@ -109,7 +112,9 @@ class Song:
         """
         if not (0 <= index < len(self.segments)):
             raise IndexError(f"Index {index} out of range for removing segment.")
-        return self.segments.pop(index)
+        removed_segment = self.segments.pop(index)
+        self.dirty = True # Mark as modified
+        return removed_segment
 
     def get_segment(self, index: int) -> Segment:
         """
@@ -144,13 +149,19 @@ class Song:
             ValueError: If the value is outside acceptable ranges (if validation is added).
         """
         segment = self.get_segment(index) # Leverage existing method for bounds check
+        modified = False
         for key, value in kwargs.items():
             if hasattr(segment, key):
-                setattr(segment, key, value)
+                # Only set dirty if the value actually changes
+                if getattr(segment, key) != value:
+                    setattr(segment, key, value)
+                    modified = True
                 # Optional: Trigger validation if implemented in Segment
                 # if hasattr(segment, '__post_init__'): segment.__post_init__()
             else:
                 raise AttributeError(f"Segment object has no attribute '{key}'")
+        if modified:
+            self.dirty = True # Mark as modified
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -159,6 +170,7 @@ class Song:
         Returns:
             A dictionary containing the song name and segments.
         """
+        # Note: The 'dirty' flag is runtime state and not saved to the file.
         return {
             "name": self.name,
             "segments": [asdict(segment) for segment in self.segments]
@@ -199,11 +211,15 @@ class Song:
             except TypeError as e:
                 raise TypeError(f"Error creating segment: {e}")
                 
-        return cls(name=name, segments=segments)
+        song = cls(name=name, segments=segments)
+        song.dirty = False # Loaded song starts clean
+        return song
 
     def clear_segments(self):
         """Removes all segments from the song."""
-        self.segments = []
+        if self.segments: # Only mark dirty if there were segments to clear
+            self.segments = []
+            self.dirty = True
 
     def __len__(self) -> int:
         """Returns the number of segments in the song."""
