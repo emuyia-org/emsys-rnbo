@@ -204,43 +204,41 @@ class TextInputWidget:
             keyboard_y = instr_y + 15
             keyboard_line_height = self.font_mono.get_linesize() # Use mono font line height
 
+            # --- Start Changes ---
+            # Calculate grid properties based on monospaced font
+            if not keyboard_layout: # Handle empty layout case
+                return
+
+            # Use width of a common character like space for cell width in monospaced font
+            char_width = self.font_mono.size(' ')[0]
+            if char_width == 0: # Fallback if space width is zero
+                 char_width = self.font_mono.size('M')[0] # Use a wide character
+
+            max_row_len = max(len(row) for row in keyboard_layout) if keyboard_layout else 0
+            keyboard_block_width = max_row_len * char_width
+            keyboard_start_x = (surface.get_width() - keyboard_block_width) // 2
+
             for r_idx, row_str in enumerate(keyboard_layout):
                 row_y = keyboard_y + (r_idx * keyboard_line_height)
-                # Use the monospaced font for the keyboard
-                row_width = self.font_mono.size(row_str)[0]
-                row_start_x = (surface.get_width() - row_width) // 2
 
-                if r_idx == k_row:
-                    # Highlight selected character
-                    if row_str and 0 <= k_col < len(row_str): # Check validity
-                        pre_char = row_str[:k_col]
-                        char = row_str[k_col]
-                        post_char = row_str[k_col+1:]
+                for c_idx, char in enumerate(row_str):
+                    char_x = keyboard_start_x + (c_idx * char_width)
+                    char_render_width, char_render_height = self.font_mono.size(char)
 
-                        pre_surf = self.font_mono.render(pre_char, True, WHITE)
-                        char_surf = self.font_mono.render(char, True, BLACK) # Selected char text
-                        post_surf = self.font_mono.render(post_char, True, WHITE)
+                    # Center character horizontally and vertically within its cell
+                    char_render_x = char_x + (char_width - char_render_width) // 2
+                    char_render_y = row_y + (keyboard_line_height - char_render_height) // 2
 
-                        pre_rect = pre_surf.get_rect(topleft=(row_start_x, row_y))
-                        char_width, char_height = self.font_mono.size(char) # Use mono font size
-                        # Use HIGHLIGHT_COLOR for the background block
-                        # Adjust background rect slightly for mono font appearance
-                        char_bg_rect = pygame.Rect(pre_rect.right, row_y, char_width, keyboard_line_height)
+                    if r_idx == k_row and c_idx == k_col:
+                        # Highlight selected character's cell
+                        char_bg_rect = pygame.Rect(char_x, row_y, char_width, keyboard_line_height)
                         pygame.draw.rect(surface, HIGHLIGHT_COLOR, char_bg_rect)
-                        # Center char vertically within the line height
-                        char_rect = char_surf.get_rect(centerx=char_bg_rect.centerx, top=row_y + (keyboard_line_height - char_height) // 2)
-                        post_rect = post_surf.get_rect(topleft=(char_bg_rect.right, row_y))
-
-                        surface.blit(pre_surf, pre_rect)
-                        surface.blit(char_surf, char_rect)
-                        surface.blit(post_surf, post_rect)
-                    else: # Draw row normally if cursor is invalid (e.g., empty row)
-                         row_surf = self.font_mono.render(row_str, True, WHITE) # Just draw normally
-                         row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
-                         surface.blit(row_surf, row_rect)
-                else:
-                    # Draw normal row
-                    row_surf = self.font_mono.render(row_str, True, WHITE)
-                    row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
-                    surface.blit(row_surf, row_rect)
+                        # Render selected character text
+                        char_surf = self.font_mono.render(char, True, BLACK)
+                        surface.blit(char_surf, (char_render_x, char_render_y))
+                    else:
+                        # Render normal character text
+                        char_surf = self.font_mono.render(char, True, WHITE)
+                        surface.blit(char_surf, (char_render_x, char_render_y))
+            # --- End Changes ---
 
