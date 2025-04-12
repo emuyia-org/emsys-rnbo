@@ -161,7 +161,7 @@ class App:
                 self.is_searching = False
                 self.midi_error_message = None
                 self.last_connection_check_time = time.time() # Start checking connection
-            except (IOError, ValueError, OSError, mido.MidiError) as e:
+            except (IOError, ValueError, OSError) as e:
                 error_info = f"Found '{self.midi_port_name}', but failed to open: {e}"
                 print(error_info)
                 self.midi_port = None
@@ -230,7 +230,7 @@ class App:
                 self.is_searching = False # Stop searching
                 self.last_connection_check_time = time.time() # Reset connection check timer
                 self.notify_status(f"MIDI OK: Reconnected to {self.midi_port_name}")
-            except (IOError, ValueError, OSError, mido.MidiError) as e:
+            except (IOError, ValueError, OSError) as e:
                 error_msg = f"Found '{found_port_name}', but failed to open: {e}"
                 print(f"[Reconnect Check] Error opening MIDI port '{found_port_name}': {e}")
                 # Keep searching, update error message if it changed
