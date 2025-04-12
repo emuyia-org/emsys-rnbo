@@ -408,20 +408,35 @@ class SongEditScreen(BaseScreen):
                 new_value = not current_value
             elif isinstance(current_value, int):
                 new_value = current_value + direction * step
-                # Apply constraints
+                # Apply constraints with wraparound
                 if key in ('program_message_1', 'program_message_2'):
-                    new_value = max(MIN_PROGRAM_MSG, min(MAX_PROGRAM_MSG, new_value))
+                    if new_value > MAX_PROGRAM_MSG:
+                        new_value = MIN_PROGRAM_MSG
+                    elif new_value < MIN_PROGRAM_MSG:
+                        new_value = MAX_PROGRAM_MSG
                 elif key == 'loop_length':
-                    new_value = max(MIN_LOOP_LENGTH, min(MAX_LOOP_LENGTH, new_value))
+                    if new_value > MAX_LOOP_LENGTH:
+                        new_value = MIN_LOOP_LENGTH
+                    elif new_value < MIN_LOOP_LENGTH:
+                        new_value = MAX_LOOP_LENGTH
                 elif key == 'repetitions':
-                    new_value = max(MIN_REPETITIONS, min(MAX_REPETITIONS, new_value))
+                    if new_value > MAX_REPETITIONS:
+                        new_value = MIN_REPETITIONS
+                    elif new_value < MIN_REPETITIONS:
+                        new_value = MAX_REPETITIONS
             elif isinstance(current_value, float):
                 new_value = current_value + direction * step
-                # Apply constraints
+                # Apply constraints with wraparound
                 if key == 'tempo':
-                    new_value = max(MIN_TEMPO, min(MAX_TEMPO, new_value))
+                    if new_value > MAX_TEMPO:
+                        new_value = MIN_TEMPO
+                    elif new_value < MIN_TEMPO:
+                        new_value = MAX_TEMPO
                 elif key == 'tempo_ramp':
-                    new_value = max(MIN_RAMP, min(MAX_RAMP, new_value))
+                    if new_value > MAX_RAMP:
+                        new_value = MIN_RAMP
+                    elif new_value < MIN_RAMP:
+                        new_value = MAX_RAMP
                 new_value = round(new_value, 2) # Keep precision reasonable
             else:
                 self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
