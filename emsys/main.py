@@ -478,30 +478,41 @@ class App:
         """
         Determines and executes the action associated with a MIDI message.
         This is called for initial presses and subsequent repeats.
+        Prevents global screen switching if TextInputWidget is active.
         """
         # Optional: Log the dispatch
         # print(f"Dispatching action for: {msg}")
+
+        # --- Check if TextInputWidget is active ---
+        widget_active = False
+        if (hasattr(self.active_screen, 'text_input_widget') and
+                self.active_screen.text_input_widget is not None and
+                self.active_screen.text_input_widget.is_active):
+            widget_active = True
+            # print("TextInputWidget is active, bypassing global actions for relevant CCs.") # Debug
 
         # --- Handle Control Change Messages ---
         if msg.type == 'control_change':
             control = msg.control
             value = msg.value # Value might be relevant for some actions
 
-            # --- Global Actions (only trigger on specific values if needed, e.g., 127 for buttons) ---
-            # Check NEXT_CC (typically requires value 127)
-            if control == NEXT_CC and value == 127:
-                print(f"Next screen action triggered by CC #{NEXT_CC}")
-                self.next_screen()
-                return # Screen navigation handled
+            # --- Global Actions (only if widget is NOT active) ---
+            if not widget_active:
+                # Check NEXT_CC (typically requires value 127)
+                if control == NEXT_CC and value == 127:
+                    print(f"Next screen action triggered by CC #{NEXT_CC}")
+                    self.next_screen()
+                    return # Screen navigation handled
 
-            # Check PREV_CC (typically requires value 127)
-            elif control == PREV_CC and value == 127:
-                print(f"Previous screen action triggered by CC #{PREV_CC}")
-                self.previous_screen()
-                return # Screen navigation handled
+                # Check PREV_CC (typically requires value 127)
+                elif control == PREV_CC and value == 127:
+                    print(f"Previous screen action triggered by CC #{PREV_CC}")
+                    self.previous_screen()
+                    return # Screen navigation handled
 
-            # --- Pass to Active Screen ---
-            # If not a handled global CC, pass it to the active screen's handler
+            # --- Pass to Active Screen (Always, unless handled by global action above) ---
+            # If widget is active, NEXT/PREV CCs will fall through to here.
+            # If widget is inactive, other CCs will fall through to here.
             if self.active_screen and hasattr(self.active_screen, 'handle_midi'):
                 try:
                     # print(f"Passing CC {control} (Value: {value}) to screen: {self.active_screen.__class__.__name__}") # Debug

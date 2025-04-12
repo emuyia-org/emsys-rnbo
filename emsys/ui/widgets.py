@@ -58,12 +58,31 @@ class TextInputWidget:
         self.prompt: str = "Enter Text" # Default prompt
 
     def start(self, initial_text: str, prompt: str = "Rename"):
-        """Activate the widget to edit the given text."""
+        """Activate the widget to edit the given text, starting in keyboard mode."""
         print(f"TextInputWidget activated with text: '{initial_text}'")
         self.is_active = True
         self.initial_text = initial_text
         self.prompt = prompt
         self.renamer_instance = SongRenamer(initial_text)
+
+        # --- Start and Force Keyboard Mode ---
+        if self.renamer_instance:
+            # Ensure we are in a state where 'yes' enters keyboard mode.
+            # If the initial text is empty, 'yes' should work directly.
+            # If not empty, move to end first.
+            current_len = len(self.renamer_instance.get_current_title())
+            if current_len > 0:
+                 # Move caret to end - assumes 'right' works in initial caret mode
+                 current_mode_info = self.renamer_instance.get_display_info()
+                 if current_mode_info['mode'] == RenameMode.CARET:
+                     for _ in range(current_len):
+                         self.renamer_instance.handle_input('right')
+
+            # Enter keyboard mode
+            self.renamer_instance.handle_input('yes')
+            print(f"TextInputWidget forced to Keyboard Mode. Current state: {self.renamer_instance.get_display_info()}")
+        # --- End Start and Force Keyboard Mode ---
+
 
     def cancel(self):
         """Deactivate the widget without confirming changes."""
@@ -80,73 +99,81 @@ class TextInputWidget:
     def handle_input(self, cc: int) -> TextInputStatus:
         """
         Processes MIDI CC input when the widget is active.
-        Returns the status after handling the input.
+        Unified mode: Always presents keyboard, simulates caret actions.
         """
         if not self.is_active or not self.renamer_instance:
             return TextInputStatus.INACTIVE
 
-        # Check the current mode to handle buttons correctly
-        if self.renamer_instance and hasattr(self.renamer_instance, 'get_display_info'):
-            current_mode = self.renamer_instance.get_display_info()['mode']
-        else:
-            current_mode = None  # Fallback if we can't determine mode
+        # We assume the renamer is kept in KEYBOARD mode visually,
+        # but simulate actions requiring CARET mode internally.
 
-        # Map CCs to renamer button names
-        button_map = {
-            mappings.YES_NAV_CC: 'yes',
-            mappings.UP_NAV_CC: 'up',
-            mappings.DOWN_NAV_CC: 'down',
-            mappings.LEFT_NAV_CC: 'left',
-            mappings.RIGHT_NAV_CC: 'right',
-        }
-        
-        # Add DELETE_CC to button map only if not in keyboard mode
-        if current_mode != RenameMode.KEYBOARD:
-            button_map[mappings.DELETE_CC] = 'no'  # DELETE_CC acts as backspace ('no' button) only in caret mode
-        
-        button_name = button_map.get(cc)
+        action_taken = False # Flag to track if any action was performed
 
-        if button_name:
-            state_changed = self.renamer_instance.handle_input(button_name)
-            # We just need to know it's still active after valid input
-            return TextInputStatus.ACTIVE
-        # Use SAVE_CC (or a dedicated confirm CC) to confirm
+        # --- Unified CC Mapping ---
+        if cc == mappings.UP_NAV_CC:
+            self.renamer_instance.handle_input('up') # Keyboard nav
+            action_taken = True
+        elif cc == mappings.DOWN_NAV_CC:
+            self.renamer_instance.handle_input('down') # Keyboard nav
+            action_taken = True
+        elif cc == mappings.LEFT_NAV_CC:
+            self.renamer_instance.handle_input('left') # Keyboard nav
+            action_taken = True
+        elif cc == mappings.RIGHT_NAV_CC:
+            self.renamer_instance.handle_input('right') # Keyboard nav
+            action_taken = True
+        elif cc == mappings.YES_NAV_CC:
+            print("Inserting character...")
+            self.renamer_instance.handle_input('yes') # Insert character (switches renamer to CARET)
+            self.renamer_instance.handle_input('yes') # Immediately re-enter KEYBOARD mode
+            action_taken = True
+            print("...Insertion done, back in KEYBOARD mode.")
+        elif cc == mappings.PREV_CC: # Move Caret Left (Simulation)
+            print("Simulating Caret Left...")
+            self.renamer_instance.handle_input('no')   # Exit keyboard
+            self.renamer_instance.handle_input('left') # Move caret left
+            self.renamer_instance.handle_input('yes')  # Re-enter keyboard
+            action_taken = True
+            print("...Simulation done.")
+        elif cc == mappings.NEXT_CC: # Move Caret Right (Simulation)
+            print("Simulating Caret Right...")
+            self.renamer_instance.handle_input('no')   # Exit keyboard
+            self.renamer_instance.handle_input('right')# Move caret right
+            self.renamer_instance.handle_input('yes')  # Re-enter keyboard
+            action_taken = True
+            print("...Simulation done.")
+        elif cc == mappings.DELETE_CC: # Backspace (Simulation)
+            print("Simulating Backspace...")
+            self.renamer_instance.handle_input('no')   # Exit keyboard
+            self.renamer_instance.handle_input('no')   # Backspace (in caret mode)
+            self.renamer_instance.handle_input('yes')  # Re-enter keyboard
+            action_taken = True
+            print("...Simulation done.")
         elif cc == mappings.SAVE_CC:
+            # Confirm action
             final_text = self.renamer_instance.get_current_title().strip()
             if not final_text:
-                 # Optionally provide feedback via app_ref or return ERROR?
-                 # For now, let the calling screen handle empty validation
                  print("TextInputWidget: Confirmation attempted with empty text.")
-                 # Keep active? Or return ERROR? Let's return CONFIRMED and let caller validate.
-                 # self.is_active = False # Deactivate on confirm
-                 # self.renamer_instance = None
-                 return TextInputStatus.CONFIRMED # Caller must check if empty
+                 # Return CONFIRMED and let caller validate.
+                 return TextInputStatus.CONFIRMED
             else:
                  print(f"TextInputWidget confirmed with text: '{final_text}'")
-                 # self.is_active = False # Deactivate on confirm
-                 # self.renamer_instance = None
                  return TextInputStatus.CONFIRMED
-        # Use NO_NAV_CC differently based on mode
         elif cc == mappings.NO_NAV_CC:
-             # If in keyboard mode, treat NO button like DELETE button (exit keyboard mode)
-             if current_mode == RenameMode.KEYBOARD:
-                 # Handle it like the DELETE button - send 'no' to exit keyboard mode
-                 self.renamer_instance.handle_input('no')
-                 return TextInputStatus.ACTIVE
-             else:
-                 # In caret mode, cancel the entire widget as before
-                 self.cancel()  # Deactivates the widget
-                 return TextInputStatus.CANCELLED
-        # Ignore DELETE_CC in keyboard mode (it's already excluded from button_map above)
-        elif cc == mappings.DELETE_CC and current_mode == RenameMode.KEYBOARD:
-            # Do nothing in keyboard mode when DELETE is pressed
+            # Cancel action
+            self.cancel()
+            return TextInputStatus.CANCELLED
+
+        # If any action was taken (or ignored), remain active
+        if action_taken:
             return TextInputStatus.ACTIVE
         else:
-            # Ignore unmapped buttons while active
+            # Ignore unmapped buttons
             return TextInputStatus.ACTIVE
 
+
     def draw(self, surface: pygame.Surface):
-        """Draws the text input interface."""
+        """Draws the text input interface (always showing keyboard)."""
         if not self.is_active or not self.renamer_instance:
             return
 
@@ -155,7 +182,7 @@ class TextInputWidget:
         # surface.fill(BLACK) # Optional: Fill background if needed
 
         rename_info = self.renamer_instance.get_display_info()
-        mode = rename_info['mode']
+        # We ignore rename_info['mode'] for drawing decisions now, assume keyboard always shown
         title_with_caret = rename_info['title_with_caret']
         keyboard_layout = rename_info['keyboard_layout']
         k_row, k_col = rename_info['keyboard_cursor']
@@ -170,24 +197,25 @@ class TextInputWidget:
              title_rect.centerx = surface.get_width() // 2
         surface.blit(title_surf, title_rect)
 
-        # Draw Instructions
+        # Draw Instructions for Unified Mode
         instr_y = title_rect.bottom + 10
-        
-        # Get button names from mappings instead of CC numbers
-        yes_button = "YES"  # From YES_NAV_CC comment in mappings.py
-        no_button = "NO"    # From NO_NAV_CC comment in mappings.py
-        save_button = "SAVE"  # From SAVE_CC comment in mappings.py
-        delete_button = "DELETE"  # From DELETE_CC comment in mappings.py
 
-        if mode == RenameMode.CARET:
-            instr_text = f"Insert: {yes_button} | Backspace: {delete_button}"
-            instr2_text = f"Save: {save_button} | Exit: {no_button}"
-        elif mode == RenameMode.KEYBOARD:
-            instr_text = f"Insert: {yes_button} | Exit: {no_button}"
-            instr2_text = f""
-        else: # Should not happen
-            instr_text = "Unknown Mode"
-            instr2_text = ""
+        # Get button names from mappings
+        yes_button = "YES"
+        no_button = "NO"
+        save_button = "SAVE"
+        delete_button = "DELETE"
+        up_button = "UP"
+        down_button = "DOWN"
+        left_button = "LEFT"
+        right_button = "RIGHT"
+        prev_button = "PREV" # Now used for caret left
+        next_button = "NEXT" # Now used for caret right
+
+        instr_text = f"Kbd Nav: {up_button}/{down_button}/{left_button}/{right_button} | Insert: {yes_button}"
+        instr2_text = f"Move Caret: {prev_button}/{next_button} | Backspace: {delete_button}"
+        instr3_text = f"Save: {save_button} | Cancel: {no_button}"
+
 
         instr_surf = self.font_small.render(instr_text, True, WHITE)
         instr_rect = instr_surf.get_rect(centerx=surface.get_width() // 2, top=instr_y)
@@ -197,48 +225,50 @@ class TextInputWidget:
         instr2_rect = instr2_surf.get_rect(centerx=surface.get_width() // 2, top=instr_rect.bottom + 2)
         surface.blit(instr2_surf, instr2_rect)
 
-        instr_y = instr2_rect.bottom
+        instr3_surf = self.font_small.render(instr3_text, True, WHITE)
+        instr3_rect = instr3_surf.get_rect(centerx=surface.get_width() // 2, top=instr2_rect.bottom + 2)
+        surface.blit(instr3_surf, instr3_rect)
 
-        # Draw Keyboard (if in Keyboard mode)
-        if mode == RenameMode.KEYBOARD:
-            keyboard_y = instr_y + 15
-            keyboard_line_height = self.font_mono.get_linesize() # Use mono font line height
 
-            # --- Start Changes ---
-            # Calculate grid properties based on monospaced font
-            if not keyboard_layout: # Handle empty layout case
-                return
+        instr_y = instr3_rect.bottom # Update bottom y coordinate
 
-            # Use width of a common character like space for cell width in monospaced font
-            char_width = self.font_mono.size(' ')[0]
-            if char_width == 0: # Fallback if space width is zero
-                 char_width = self.font_mono.size('M')[0] # Use a wide character
+        # Draw Keyboard (Always)
+        keyboard_y = instr_y + 15 # Position below instructions
+        keyboard_line_height = self.font_mono.get_linesize()
 
-            max_row_len = max(len(row) for row in keyboard_layout) if keyboard_layout else 0
-            keyboard_block_width = max_row_len * char_width
-            keyboard_start_x = (surface.get_width() - keyboard_block_width) // 2
+        # Calculate grid properties based on monospaced font
+        if not keyboard_layout: # Handle empty layout case
+            return
 
-            for r_idx, row_str in enumerate(keyboard_layout):
-                row_y = keyboard_y + (r_idx * keyboard_line_height)
+        # Use width of a common character like space for cell width in monospaced font
+        char_width = self.font_mono.size(' ')[0]
+        if char_width == 0: # Fallback if space width is zero
+             char_width = self.font_mono.size('M')[0] # Use a wide character
 
-                for c_idx, char in enumerate(row_str):
-                    char_x = keyboard_start_x + (c_idx * char_width)
-                    char_render_width, char_render_height = self.font_mono.size(char)
+        max_row_len = max(len(row) for row in keyboard_layout) if keyboard_layout else 0
+        keyboard_block_width = max_row_len * char_width
+        keyboard_start_x = (surface.get_width() - keyboard_block_width) // 2
 
-                    # Center character horizontally and vertically within its cell
-                    char_render_x = char_x + (char_width - char_render_width) // 2
-                    char_render_y = row_y + (keyboard_line_height - char_render_height) // 2
+        for r_idx, row_str in enumerate(keyboard_layout):
+            row_y = keyboard_y + (r_idx * keyboard_line_height)
 
-                    if r_idx == k_row and c_idx == k_col:
-                        # Highlight selected character's cell
-                        char_bg_rect = pygame.Rect(char_x, row_y, char_width, keyboard_line_height)
-                        pygame.draw.rect(surface, HIGHLIGHT_COLOR, char_bg_rect)
-                        # Render selected character text
-                        char_surf = self.font_mono.render(char, True, BLACK)
-                        surface.blit(char_surf, (char_render_x, char_render_y))
-                    else:
-                        # Render normal character text
-                        char_surf = self.font_mono.render(char, True, WHITE)
-                        surface.blit(char_surf, (char_render_x, char_render_y))
-            # --- End Changes ---
+            for c_idx, char in enumerate(row_str):
+                char_x = keyboard_start_x + (c_idx * char_width)
+                char_render_width, char_render_height = self.font_mono.size(char)
+
+                # Center character horizontally and vertically within its cell
+                char_render_x = char_x + (char_width - char_render_width) // 2
+                char_render_y = row_y + (keyboard_line_height - char_render_height) // 2
+
+                if r_idx == k_row and c_idx == k_col:
+                    # Highlight selected character's cell
+                    char_bg_rect = pygame.Rect(char_x, row_y, char_width, keyboard_line_height)
+                    pygame.draw.rect(surface, HIGHLIGHT_COLOR, char_bg_rect)
+                    # Render selected character text
+                    char_surf = self.font_mono.render(char, True, BLACK)
+                    surface.blit(char_surf, (char_render_x, char_render_y))
+                else:
+                    # Render normal character text
+                    char_surf = self.font_mono.render(char, True, WHITE)
+                    surface.blit(char_surf, (char_render_x, char_render_y))
 
