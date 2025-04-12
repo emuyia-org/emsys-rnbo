@@ -552,7 +552,7 @@ class SongEditScreen(BaseScreen):
         # --- Draw Normal Edit Interface ---
         elif not self.current_song:
             # Display message if no song is loaded
-            no_song_text = "No Song Loaded. Use File Manager."
+            no_song_text = "No Song Loaded."
             no_song_surf = self.font_large.render(no_song_text, True, WHITE)
             no_song_rect = no_song_surf.get_rect(center=(screen_surface.get_width() // 2, screen_surface.get_height() // 2))
             screen_surface.blit(no_song_surf, no_song_rect)
