@@ -79,22 +79,31 @@ class TextInputWidget:
         if not self.is_active or not self.renamer_instance:
             return TextInputStatus.INACTIVE
 
+        # Check the current mode to handle buttons correctly
+        if self.renamer_instance and hasattr(self.renamer_instance, 'get_display_info'):
+            current_mode = self.renamer_instance.get_display_info()['mode']
+        else:
+            current_mode = None  # Fallback if we can't determine mode
+
         # Map CCs to renamer button names
         button_map = {
             mappings.YES_NAV_CC: 'yes',
-            mappings.DELETE_CC: 'no',  # Changed: DELETE_CC now acts as backspace ('no' button)
             mappings.UP_NAV_CC: 'up',
             mappings.DOWN_NAV_CC: 'down',
             mappings.LEFT_NAV_CC: 'left',
             mappings.RIGHT_NAV_CC: 'right',
         }
+        
+        # Add DELETE_CC to button map only if not in keyboard mode
+        if current_mode != RenameMode.KEYBOARD:
+            button_map[mappings.DELETE_CC] = 'no'  # DELETE_CC acts as backspace ('no' button) only in caret mode
+        
         button_name = button_map.get(cc)
 
         if button_name:
             state_changed = self.renamer_instance.handle_input(button_name)
             # We just need to know it's still active after valid input
             return TextInputStatus.ACTIVE
-
         # Use SAVE_CC (or a dedicated confirm CC) to confirm
         elif cc == mappings.SAVE_CC:
             final_text = self.renamer_instance.get_current_title().strip()
@@ -111,12 +120,21 @@ class TextInputWidget:
                  # self.is_active = False # Deactivate on confirm
                  # self.renamer_instance = None
                  return TextInputStatus.CONFIRMED
-
-        # Use NO_NAV_CC (or a dedicated cancel CC) to cancel - changed from DELETE_CC
+        # Use NO_NAV_CC differently based on mode
         elif cc == mappings.NO_NAV_CC:
-             self.cancel() # Deactivates the widget
-             return TextInputStatus.CANCELLED
-
+             # If in keyboard mode, treat NO button like DELETE button (exit keyboard mode)
+             if current_mode == RenameMode.KEYBOARD:
+                 # Handle it like the DELETE button - send 'no' to exit keyboard mode
+                 self.renamer_instance.handle_input('no')
+                 return TextInputStatus.ACTIVE
+             else:
+                 # In caret mode, cancel the entire widget as before
+                 self.cancel()  # Deactivates the widget
+                 return TextInputStatus.CANCELLED
+        # Ignore DELETE_CC in keyboard mode (it's already excluded from button_map above)
+        elif cc == mappings.DELETE_CC and current_mode == RenameMode.KEYBOARD:
+            # Do nothing in keyboard mode when DELETE is pressed
+            return TextInputStatus.ACTIVE
         else:
             # Ignore unmapped buttons while active
             return TextInputStatus.ACTIVE
@@ -148,21 +166,22 @@ class TextInputWidget:
 
         # Draw Instructions
         instr_y = title_rect.bottom + 10
-        yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
-        no_cc = getattr(mappings, 'NO_NAV_CC', '?') 
-        save_cc = getattr(mappings, 'SAVE_CC', '?')
-        delete_cc = getattr(mappings, 'DELETE_CC', '?') 
+        
+        # Get button names from mappings instead of CC numbers
+        yes_button = "YES"  # From YES_NAV_CC comment in mappings.py
+        no_button = "NO"    # From NO_NAV_CC comment in mappings.py
+        save_button = "SAVE"  # From SAVE_CC comment in mappings.py
+        delete_button = "DELETE"  # From DELETE_CC comment in mappings.py
 
         if mode == RenameMode.CARET:
-            instr_text = f"Arrows: Move | {delete_cc}: Backspace | {yes_cc}: Keyboard"  # Changed: DELETE_CC for backspace
-            instr2_text = f"{save_cc}: Confirm | {no_cc}: Cancel"  # Changed: NO_NAV_CC for cancel
+            instr_text = f"Insert: {yes_button} | Backspace: {delete_button}"
+            instr2_text = f"Save: {save_button} | Exit: {no_button}"
         elif mode == RenameMode.KEYBOARD:
-            instr_text = f"Arrows: Select | {yes_cc}: Insert Char"
-            instr2_text = f"{delete_cc}: Back to Caret"  # Changed: DELETE_CC for back to caret
+            instr_text = f"Insert: {yes_button} | Exit: {no_button}"
+            instr2_text = f""
         else: # Should not happen
             instr_text = "Unknown Mode"
             instr2_text = ""
-
 
         instr_surf = self.font_small.render(instr_text, True, WHITE)
         instr_rect = instr_surf.get_rect(centerx=surface.get_width() // 2, top=instr_y)

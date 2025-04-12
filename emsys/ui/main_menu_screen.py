@@ -35,8 +35,8 @@ class MainMenuScreen(BaseScreen):
             rect = surf.get_rect(center=(self.app.screen.get_width() // 2, 120 + i * 45))
             self.option_surfs.append((surf, rect))
             
-        # Navigation hint
-        self.nav_text = "Use CC 32 (next) / CC 40 (prev) to navigate screens"
+        # Navigation hint - Replace CC numbers with button names
+        self.nav_text = "Use NEXT / PREV buttons to navigate screens"
         self.nav_surf = self.font_small.render(self.nav_text, True, (150, 150, 150))
         self.nav_rect = self.nav_surf.get_rect(center=(self.app.screen.get_width() // 2, 
                                                       self.app.screen.get_height() - 30))

@@ -559,9 +559,8 @@ class SongEditScreen(BaseScreen):
         else:
             # Draw Song Title
             title_text = f"Editing: {self.current_song.name}"
-            rename_cc = getattr(mappings, 'RENAME_CC', None)
-            if rename_cc:
-                 title_text += f" (Rename: CC {rename_cc})"
+            # Replace CC number with button name
+            title_text += ""
 
             title_surf = self.font_large.render(title_text, True, WHITE)
             title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))

@@ -347,8 +347,8 @@ class SongManagerScreen(BaseScreen):
         try:
             song_name = self.song_list[self.selected_index]
             self.delete_confirmation_active = True
-            # Use a more specific feedback message for confirmation
-            self.set_feedback(f"Delete '{song_name}'? CC{mappings.YES_NAV_CC}=YES, CC{mappings.NO_NAV_CC}=NO", is_error=True, duration=10.0) # Longer duration
+            # Replace CC numbers with button names
+            self.set_feedback(f"Delete '{song_name}'?", is_error=True, duration=10.0) # Longer duration
         except IndexError:
             self.set_feedback("Selection error, cannot delete.", is_error=True)
             self.selected_index = 0 if self.song_list else None  # Reset index
@@ -530,15 +530,9 @@ class SongManagerScreen(BaseScreen):
             list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
             y_offset = list_area_top
 
-            # Add hint for renaming
-            rename_cc = getattr(mappings, 'RENAME_CC', None)
-            rename_hint = f"(Rename: CC {rename_cc})" if rename_cc else ""
-
-            # --- Add hint for deletion ---
-            # Assuming DELETE_CC is used for song deletion here
-            delete_cc = getattr(mappings, 'DELETE_CC', None)
-            delete_hint = f"(Delete: CC {delete_cc})" if delete_cc else ""
-            # --------------------------
+            # Replace CC references with button names for hints
+            rename_hint = "" 
+            delete_hint = ""
 
             # Get the current loaded song name for highlighting
             current_song_name = None
@@ -546,7 +540,6 @@ class SongManagerScreen(BaseScreen):
                 current_song_name = self.app.current_song.name
 
             if not self.song_list:
-                create_cc = getattr(mappings, 'CREATE_CC', '?')
                 no_songs_text = f"No songs found."
                 no_songs_surf = self.font.render(no_songs_text, True, WHITE)
                 no_songs_rect = no_songs_surf.get_rect(centerx=screen_surface.get_width() // 2, top=y_offset + 20)
@@ -692,8 +685,6 @@ class SongManagerScreen(BaseScreen):
         surface.blit(song_surf, song_rect)
 
         # Instruction
-        yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
-        no_cc = getattr(mappings, 'NO_NAV_CC', '?')
         instr_text = f""
         instr_surf = self.font.render(instr_text, True, WHITE)
         instr_rect = instr_surf.get_rect(midbottom=(surface.get_width() // 2, box_y + box_height - 15))
