@@ -45,6 +45,12 @@ class TextInputWidget:
         self.font_large = pygame.font.Font(None, 48)
         self.font = pygame.font.Font(None, 32) # Standard font
         self.font_small = pygame.font.Font(None, 24)
+        # Try loading a common monospaced font
+        try:
+            self.font_mono = pygame.font.SysFont('monospace', 28) # Use a system monospaced font
+        except pygame.error:
+            print("Warning: Monospace font not found, falling back to default.")
+            self.font_mono = pygame.font.Font(None, 28) # Fallback
 
         self.is_active: bool = False
         self.renamer_instance: Optional[SongRenamer] = None
@@ -196,12 +202,12 @@ class TextInputWidget:
         # Draw Keyboard (if in Keyboard mode)
         if mode == RenameMode.KEYBOARD:
             keyboard_y = instr_y + 15
-            keyboard_line_height = LINE_HEIGHT # Use widget's line height
+            keyboard_line_height = self.font_mono.get_linesize() # Use mono font line height
 
             for r_idx, row_str in enumerate(keyboard_layout):
                 row_y = keyboard_y + (r_idx * keyboard_line_height)
-                # Use the widget's standard font for the keyboard
-                row_width = self.font.size(row_str)[0]
+                # Use the monospaced font for the keyboard
+                row_width = self.font_mono.size(row_str)[0]
                 row_start_x = (surface.get_width() - row_width) // 2
 
                 if r_idx == k_row:
@@ -211,28 +217,30 @@ class TextInputWidget:
                         char = row_str[k_col]
                         post_char = row_str[k_col+1:]
 
-                        pre_surf = self.font.render(pre_char, True, WHITE)
-                        char_surf = self.font.render(char, True, BLACK) # Selected char text
-                        post_surf = self.font.render(post_char, True, WHITE)
+                        pre_surf = self.font_mono.render(pre_char, True, WHITE)
+                        char_surf = self.font_mono.render(char, True, BLACK) # Selected char text
+                        post_surf = self.font_mono.render(post_char, True, WHITE)
 
                         pre_rect = pre_surf.get_rect(topleft=(row_start_x, row_y))
-                        char_width, char_height = self.font.size(char)
+                        char_width, char_height = self.font_mono.size(char) # Use mono font size
                         # Use HIGHLIGHT_COLOR for the background block
-                        char_bg_rect = pygame.Rect(pre_rect.right, row_y - 2, char_width + 4, keyboard_line_height)
+                        # Adjust background rect slightly for mono font appearance
+                        char_bg_rect = pygame.Rect(pre_rect.right, row_y, char_width, keyboard_line_height)
                         pygame.draw.rect(surface, HIGHLIGHT_COLOR, char_bg_rect)
-                        char_rect = char_surf.get_rect(center=char_bg_rect.center)
+                        # Center char vertically within the line height
+                        char_rect = char_surf.get_rect(centerx=char_bg_rect.centerx, top=row_y + (keyboard_line_height - char_height) // 2)
                         post_rect = post_surf.get_rect(topleft=(char_bg_rect.right, row_y))
 
                         surface.blit(pre_surf, pre_rect)
                         surface.blit(char_surf, char_rect)
                         surface.blit(post_surf, post_rect)
                     else: # Draw row normally if cursor is invalid (e.g., empty row)
-                         row_surf = self.font.render(row_str, True, WHITE) # Just draw normally
+                         row_surf = self.font_mono.render(row_str, True, WHITE) # Just draw normally
                          row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
                          surface.blit(row_surf, row_rect)
                 else:
                     # Draw normal row
-                    row_surf = self.font.render(row_str, True, WHITE)
+                    row_surf = self.font_mono.render(row_str, True, WHITE)
                     row_rect = row_surf.get_rect(topleft=(row_start_x, row_y))
                     surface.blit(row_surf, row_rect)
 
