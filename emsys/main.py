@@ -41,7 +41,11 @@ BUTTON_REPEAT_DELAY_S = getattr(settings_module, 'BUTTON_REPEAT_DELAY_MS', 500) 
 BUTTON_REPEAT_INTERVAL_S = getattr(settings_module, 'BUTTON_REPEAT_INTERVAL_MS', 100) / 1000.0
 
 
-from emsys.config.mappings import NEXT_CC, PREV_CC
+# --- Import specific CCs ---
+from emsys.config.mappings import NEXT_CC, PREV_CC, FADER_SELECT_CC # Keep FADER_SELECT_CC if used elsewhere directly
+# --- Import the set of non-repeatable CCs ---
+from emsys.config.mappings import NON_REPEATABLE_CCS
+# -------------------------------------------
 from emsys.utils.midi import find_midi_port
 
 # UI Imports
@@ -365,23 +369,24 @@ class App:
             # Iterate over a copy of keys in case the dict changes during iteration
             pressed_controls = list(self.pressed_buttons.keys())
             for control in pressed_controls:
-                if control not in self.pressed_buttons: continue # Check if released since loop start
+                if control not in self.pressed_buttons: continue # Check if button was released during iteration
+
+                # --- Skip repeat for controls defined as non-repeatable ---
+                if control in NON_REPEATABLE_CCS:
+                    # print(f"Skipping repeat for Non-Repeatable CC {control}") # Optional debug
+                    continue # Don't repeat faders, knobs, etc.
+                # ----------------------------------------------------------
 
                 state = self.pressed_buttons[control]
                 time_held = current_time - state['press_time']
 
                 # Check if initial delay has passed
                 if time_held >= BUTTON_REPEAT_DELAY_S:
-                    time_since_last_repeat = current_time - state['last_repeat_time']
-                    # Check if repeat interval has passed
-                    if time_since_last_repeat >= BUTTON_REPEAT_INTERVAL_S:
-                        # Trigger the action using the stored original message
+                    # Check if repeat interval has passed since last repeat/press
+                    if (current_time - state['last_repeat_time']) >= BUTTON_REPEAT_INTERVAL_S:
                         print(f"Repeat Action for CC {control} (Msg: {state['message']})")
-                        self._dispatch_action(state['message'])
-
-                        # Update last repeat time *only if still pressed*
-                        if control in self.pressed_buttons:
-                             self.pressed_buttons[control]['last_repeat_time'] = current_time
+                        self._dispatch_action(state['message']) # Dispatch the original press message again
+                        state['last_repeat_time'] = current_time # Update last repeat time
 
 
             # --- Update Active Screen ---
@@ -430,6 +435,7 @@ class App:
         """
         Process incoming MIDI messages, tracking CC button presses/releases
         for the universal repeat mechanism and dispatching the initial action.
+        Only treats CC value 127 as a button press for repeat.
         """
         self.last_midi_message_str = str(msg) # Store for potential display
         current_time = time.time() # Get time for press tracking
@@ -438,8 +444,8 @@ class App:
             control = msg.control
             value = msg.value
 
-            # --- Handle CC Press (value > 0, typically 127) ---
-            if value > 0:
+            # --- Handle CC Button Press (value == 127) ---
+            if value == 127: # Treat only value 127 as a button press
                 # Check if this button is *not* already considered pressed
                 if control not in self.pressed_buttons:
                     print(f"Button Press Detected: CC {control} (Value: {value})")
@@ -455,23 +461,31 @@ class App:
                 # The repeat logic in the main loop will handle continued holding.
                 return # Handled (or ignored if already pressed)
 
-            # --- Handle CC Release (value == 0) ---
-            else: # value == 0
+            # --- Handle CC Button Release (value == 0) ---
+            elif value == 0: # Treat value 0 as button release
                 # Check if this button *was* considered pressed
                 if control in self.pressed_buttons:
                     print(f"Button Release Detected: CC {control}")
                     # Remove the button from the tracking dictionary
                     del self.pressed_buttons[control]
                 # If not in dict, ignore (e.g., release msg without prior press)
+                # Still dispatch the release message in case a screen needs it
+                self._dispatch_action(msg)
                 return # Handled release
 
-        # --- Handle Non-CC Messages or CCs not handled above (e.g., continuous) ---
-        # If the message wasn't a CC press/release handled above, dispatch it directly.
-        # This allows non-button CCs or other message types (notes, etc.) to be processed.
-        # Note: This currently means non-button CCs won't repeat. If that's needed,
-        # the logic here and in _dispatch_action would need further refinement.
-        # print(f"Dispatching non-button-press/release message: {msg}") # Optional debug
-        self._dispatch_action(msg)
+            # --- Handle Other CC Values (e.g., Faders, Encoders) ---
+            else:
+                # Dispatch directly without adding to pressed_buttons
+                # This allows screens to handle continuous values like faders
+                # print(f"Dispatching continuous CC: {msg}") # Optional debug
+                self._dispatch_action(msg)
+                return # Handled continuous CC
+
+        # --- Handle Non-CC Messages (Notes, etc.) ---
+        else:
+            # Dispatch other message types directly
+            # print(f"Dispatching non-CC message: {msg}") # Optional debug
+            self._dispatch_action(msg)
 
 
     def _dispatch_action(self, msg):

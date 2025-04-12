@@ -22,6 +22,9 @@ from ..config import settings, mappings
 # --- Import the TextInputWidget ---
 from .widgets import TextInputWidget, TextInputStatus
 # ------------------------------------
+# --- Import the specific Fader CC ---
+from ..config.mappings import FADER_SELECT_CC
+# ------------------------------------
 
 # Define colors (can also be imported from settings)
 WHITE = settings.WHITE
@@ -172,14 +175,21 @@ class SongEditScreen(BaseScreen):
 
     def handle_midi(self, msg):
         """Handle MIDI messages delegated from the main app."""
-        if msg.type != 'control_change' or msg.value != 127: # Process only CC on messages
-            return
+        # Process all CC messages, not just value 127, to handle fader
+        if msg.type != 'control_change':
+             return
 
         cc = msg.control
-        print(f"SongEditScreen received CC: {cc} | Focus: {self.focused_column} | TextInput Active: {self.text_input_widget.is_active}")
+        value = msg.value # Get value for all CC types
+
+        # Optional: More detailed logging including value
+        # print(f"SongEditScreen received CC: {cc} Value: {value} | Focus: {self.focused_column} | TextInput Active: {self.text_input_widget.is_active}")
 
         # --- Handle Text Input Mode FIRST ---
         if self.text_input_widget.is_active:
+            # Text input only responds to button presses (value 127)
+            if value != 127:
+                return # Ignore non-presses during text input
             status = self.text_input_widget.handle_input(cc)
             if status == TextInputStatus.CONFIRMED:
                 self._confirm_song_rename() # Call the confirmation logic
@@ -189,7 +199,63 @@ class SongEditScreen(BaseScreen):
             return # Don't process other actions while text input is active
         # ----------------------------------
 
-        # --- Normal Edit Mode Handling (Column-Based) ---
+        # --- Handle Fader Selection (CC 65) ---
+        if cc == FADER_SELECT_CC:
+            if not self.current_song: return # No song loaded
+
+            reversed_value = 127 - value
+
+            if self.focused_column == FocusColumn.SEGMENT_LIST:
+                if not self.current_song.segments: return # No segments
+
+                num_segments = len(self.current_song.segments)
+                target_index = int((reversed_value / 128.0) * num_segments)
+                target_index = max(0, min(num_segments - 1, target_index))
+
+                current_selected = self.selected_segment_index
+                print(f"[Fader Debug Seg] Value={value} (Rev={reversed_value}), NumSeg={num_segments} -> TargetIdx={target_index}, CurrentSel={current_selected}")
+
+                if target_index != current_selected:
+                    print(f"          Updating segment selection: {current_selected} -> {target_index}")
+                    self.selected_segment_index = target_index
+                    # Basic scroll handling (can be improved like in SongManagerScreen)
+                    # This just ensures the first parameter is selected when segment changes via fader
+                    if self.parameter_keys:
+                        self.selected_parameter_key = self.parameter_keys[0]
+                    else:
+                        self.selected_parameter_key = None
+                    self.clear_feedback()
+
+            elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                if self.selected_segment_index is None or not self.parameter_keys:
+                    return # No segment selected or no parameters defined
+
+                num_params = len(self.parameter_keys)
+                target_param_index = int((reversed_value / 128.0) * num_params)
+                target_param_index = max(0, min(num_params - 1, target_param_index))
+
+                target_key = self.parameter_keys[target_param_index]
+                current_key = self.selected_parameter_key
+
+                print(f"[Fader Debug Param] Value={value} (Rev={reversed_value}), NumParam={num_params} -> TargetIdx={target_param_index} ('{target_key}'), CurrentKey='{current_key}'")
+
+                if target_key != current_key:
+                    print(f"          Updating parameter selection: '{current_key}' -> '{target_key}'")
+                    self.selected_parameter_key = target_key
+                    self.clear_feedback()
+
+            return # Fader handled, don't process as button press below
+        # --- End Fader Handling ---
+
+
+        # --- Normal Edit Mode Handling (Button Presses Only) ---
+        # Process remaining CCs only if they are button presses (value 127)
+        if value != 127:
+            return
+
+        # --- Now handle button presses based on focus ---
+        # (Existing button logic follows, unchanged)
+        # ...
 
         # Navigation - Behavior depends on focused column
         if cc == mappings.DOWN_NAV_CC:

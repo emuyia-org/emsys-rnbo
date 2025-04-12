@@ -16,6 +16,9 @@ from emsys.ui.base_screen import BaseScreen
 # Utilities and Config
 from emsys.utils import file_io
 from emsys.config import settings, mappings
+# --- Import the specific Fader CC ---
+from emsys.config.mappings import FADER_SELECT_CC
+# ------------------------------------
 
 # --- Import the TextInputWidget ---
 from .widgets import TextInputWidget, TextInputStatus
@@ -159,49 +162,113 @@ class SongManagerScreen(BaseScreen):
 
     def handle_midi(self, msg):
         """Handle MIDI messages for list navigation, selection, creation, and renaming."""
-        if msg.type != 'control_change' or msg.value != 127: # Process only CC on messages
+        # --- Only process Control Change messages ---
+        if msg.type != 'control_change':
             return
 
         cc = msg.control
-        print(f"SongManagerScreen received CC: {cc} | TextInput: {self.text_input_widget.is_active} | DeleteConfirm: {self.delete_confirmation_active} | UnsavedPrompt: {self.unsaved_prompt_active}")
+        value = msg.value # Get value for all CC types
+
+        # --- Debug Logging ---
+        # Limit logging for fader to avoid spamming console - KEEPING THIS FOR NOW
+        log_msg = True
+        if cc == FADER_SELECT_CC:
+            if not hasattr(self, '_last_fader_value'): self._last_fader_value = -1
+            if abs(value - self._last_fader_value) > 5 or value in (0, 127):
+                 self._last_fader_value = value
+            else:
+                 log_msg = False # Suppress log for small fader changes
+
+        # Always log if not fader, or if fader meets criteria
+        # if log_msg: # Modified this slightly to ensure fader debug below always runs
+        #     print(f"SongManagerScreen received CC: {cc} Value: {value} | TextInput: {self.text_input_widget.is_active} | DeleteConfirm: {self.delete_confirmation_active} | UnsavedPrompt: {self.unsaved_prompt_active}")
+        # --- End Debug Logging ---
+
 
         # --- Handle Text Input Mode FIRST ---
         if self.text_input_widget.is_active:
-            status = self.text_input_widget.handle_input(cc)
-            if status == TextInputStatus.CONFIRMED:
-                self._confirm_song_rename() # Call the confirmation logic
-            elif status == TextInputStatus.CANCELLED:
-                self._cancel_song_rename() # Call the cancellation logic
+            # Text input only responds to button presses (value 127)
+            if value == 127:
+                status = self.text_input_widget.handle_input(cc)
+                if status == TextInputStatus.CONFIRMED:
+                    self._confirm_song_rename() # Call the confirmation logic
+                elif status == TextInputStatus.CANCELLED:
+                    self._cancel_song_rename() # Call the cancellation logic
             # If ACTIVE or ERROR, the widget handles drawing, we just wait
             return # Don't process other actions while text input is active
         # ----------------------------------
 
         # --- Handle Delete Confirmation Mode ---
         if self.delete_confirmation_active:
-            if cc == mappings.YES_NAV_CC:
-                self._perform_delete()
-                return
-            elif cc == mappings.NO_NAV_CC:
-                self.delete_confirmation_active = False
-                self.set_feedback("Delete cancelled.")
-                return
-            # Ignore other buttons during delete confirmation
+            # Delete confirmation only responds to button presses (value 127)
+            if value == 127:
+                if cc == mappings.YES_NAV_CC:
+                    self._perform_delete()
+                    return
+                elif cc == mappings.NO_NAV_CC:
+                    self.delete_confirmation_active = False
+                    self.set_feedback("Delete cancelled.")
+                    return
+            # Ignore other buttons/values during delete confirmation
             return
         # -------------------------------------
 
         # --- Handle Unsaved Changes Prompt Mode ---
         if self.unsaved_prompt_active:
-            if cc == mappings.SAVE_CC: # Use SAVE button to save
-                self._save_current_and_load_selected()
-            elif cc == mappings.DELETE_CC: # Use DELETE button to discard
-                self._discard_changes_and_load_selected()
-            elif cc == mappings.NO_NAV_CC: # Use NO button to cancel loading
-                self._cancel_load_due_to_unsaved()
-            # Ignore other buttons during this prompt
+            # Unsaved prompt only responds to button presses (value 127)
+            if value == 127:
+                if cc == mappings.SAVE_CC: # Use SAVE button to save
+                    self._save_current_and_load_selected()
+                elif cc == mappings.DELETE_CC: # Use DELETE button to discard
+                    self._discard_changes_and_load_selected()
+                elif cc == mappings.NO_NAV_CC: # Use NO button to cancel loading
+                    self._cancel_load_due_to_unsaved()
+            # Ignore other buttons/values during this prompt
             return
         # ------------------------------------------
 
-        # --- Normal Song Management Mode ---
+        # --- Handle Fader Selection (CC 65) ---
+        if cc == FADER_SELECT_CC:
+            if not self.song_list:
+                return # No songs to select
+
+            num_songs = len(self.song_list)
+            # Map 127->0, 0->(num_songs-1)
+            # Ensure floating point division and proper scaling
+            reversed_value = 127 - value
+            target_index = int((reversed_value / 128.0) * num_songs)
+            # Clamp index to valid range [0, num_songs-1]
+            target_index = max(0, min(num_songs - 1, target_index))
+
+            # --- Add Detailed Logging Here ---
+            current_selected = self.selected_index
+            # Print this log regardless of the log_msg suppression above for debugging
+            print(f"[Fader Debug] Value={value} (Reversed={reversed_value}), NumSongs={num_songs} -> TargetIdx={target_index}, CurrentSelected={current_selected}")
+            # --- End Detailed Logging ---
+
+
+            if target_index != current_selected:
+                # Use the more verbose logging only if the selection actually changes
+                print(f"          Updating selection: {current_selected} -> {target_index}")
+                self.selected_index = target_index
+                # Update scroll offset based on new selection
+                max_visible = self._get_max_visible_items()
+                # If selection is below visible area
+                if self.selected_index >= self.scroll_offset + max_visible:
+                    self.scroll_offset = self.selected_index - max_visible + 1
+                # If selection is above visible area
+                elif self.selected_index < self.scroll_offset:
+                    self.scroll_offset = self.selected_index
+                self.clear_feedback()
+            # else: # Optional: Log when no update occurs
+            #     print(f"          No selection change needed (TargetIdx == CurrentSelected)")
+
+            return # Fader handled, don't process as button press below
+
+        # --- Normal Song Management Mode (Button Presses Only) ---
+        # Process remaining CCs only if they are button presses (value 127)
+        if value != 127:
+            return
 
         # Handle CREATE_CC
         if cc == mappings.CREATE_CC:
@@ -219,7 +286,7 @@ class SongManagerScreen(BaseScreen):
             return
         # ----------------------------------
 
-        # --- List Navigation/Selection (only if list exists) ---
+        # --- List Navigation/Selection (Buttons - only if list exists) ---
         if not self.song_list:
             # No songs, only allow exit/screen change and creation/rename (handled above)
             if cc in (mappings.UP_NAV_CC, mappings.DOWN_NAV_CC, mappings.YES_NAV_CC):
