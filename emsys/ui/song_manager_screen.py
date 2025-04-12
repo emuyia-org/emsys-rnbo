@@ -176,18 +176,18 @@ class SongManagerScreen(BaseScreen):
 
         # --- Normal Song Management Mode ---
 
-        # Handle CREATE_SONG_CC
-        if cc == mappings.CREATE_SONG_CC:
+        # Handle CREATE_CC
+        if cc == mappings.CREATE_CC:
             self._create_new_song()
             return
 
-        # Handle RENAME_SONG_CC
-        elif cc == mappings.RENAME_SONG_CC:
+        # Handle RENAME_CC
+        elif cc == mappings.RENAME_CC:
             self._start_song_rename()
             return
 
-        # --- Add DELETE_SEGMENT_CC handling ---
-        elif cc == mappings.DELETE_SEGMENT_CC: # Note: Using DELETE_SEGMENT_CC for song deletion
+        # --- Add DELETE_CC handling ---
+        elif cc == mappings.DELETE_CC: # Note: Using DELETE_CC for song deletion
             self._delete_selected_song()
             return
         # ----------------------------------
@@ -531,12 +531,12 @@ class SongManagerScreen(BaseScreen):
             y_offset = list_area_top
 
             # Add hint for renaming
-            rename_cc = getattr(mappings, 'RENAME_SONG_CC', None)
+            rename_cc = getattr(mappings, 'RENAME_CC', None)
             rename_hint = f"(Rename: CC {rename_cc})" if rename_cc else ""
 
             # --- Add hint for deletion ---
-            # Assuming DELETE_SEGMENT_CC is used for song deletion here
-            delete_cc = getattr(mappings, 'DELETE_SEGMENT_CC', None)
+            # Assuming DELETE_CC is used for song deletion here
+            delete_cc = getattr(mappings, 'DELETE_CC', None)
             delete_hint = f"(Delete: CC {delete_cc})" if delete_cc else ""
             # --------------------------
 
@@ -546,7 +546,7 @@ class SongManagerScreen(BaseScreen):
                 current_song_name = self.app.current_song.name
 
             if not self.song_list:
-                create_cc = getattr(mappings, 'CREATE_SONG_CC', '?')
+                create_cc = getattr(mappings, 'CREATE_CC', '?')
                 no_songs_text = f"No songs found."
                 no_songs_surf = self.font.render(no_songs_text, True, WHITE)
                 no_songs_rect = no_songs_surf.get_rect(centerx=screen_surface.get_width() // 2, top=y_offset + 20)

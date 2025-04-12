@@ -41,7 +41,7 @@ BUTTON_REPEAT_DELAY_S = getattr(settings_module, 'BUTTON_REPEAT_DELAY_MS', 500) 
 BUTTON_REPEAT_INTERVAL_S = getattr(settings_module, 'BUTTON_REPEAT_INTERVAL_MS', 100) / 1000.0
 
 
-from emsys.config.mappings import EXIT_CC, NEXT_SCREEN_CC, PREV_SCREEN_CC
+from emsys.config.mappings import NEXT_CC, PREV_CC
 from emsys.utils.midi import find_midi_port
 
 # UI Imports
@@ -488,25 +488,15 @@ class App:
             value = msg.value # Value might be relevant for some actions
 
             # --- Global Actions (only trigger on specific values if needed, e.g., 127 for buttons) ---
-            # Check EXIT_CC (typically requires value 127)
-            if control == EXIT_CC and value == 127:
-                print(f"Exit action triggered by CC #{EXIT_CC}")
-                self.notify_status("Exit command received...")
-                self.running = False
-                # Ensure exit button isn't stuck in pressed state if it was somehow added
-                if control in self.pressed_buttons:
-                    del self.pressed_buttons[control]
-                return # Exit action takes precedence
-
-            # Check NEXT_SCREEN_CC (typically requires value 127)
-            elif control == NEXT_SCREEN_CC and value == 127:
-                print(f"Next screen action triggered by CC #{NEXT_SCREEN_CC}")
+            # Check NEXT_CC (typically requires value 127)
+            if control == NEXT_CC and value == 127:
+                print(f"Next screen action triggered by CC #{NEXT_CC}")
                 self.next_screen()
                 return # Screen navigation handled
 
-            # Check PREV_SCREEN_CC (typically requires value 127)
-            elif control == PREV_SCREEN_CC and value == 127:
-                print(f"Previous screen action triggered by CC #{PREV_SCREEN_CC}")
+            # Check PREV_CC (typically requires value 127)
+            elif control == PREV_CC and value == 127:
+                print(f"Previous screen action triggered by CC #{PREV_CC}")
                 self.previous_screen()
                 return # Screen navigation handled
 

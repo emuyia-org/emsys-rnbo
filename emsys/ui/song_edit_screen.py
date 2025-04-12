@@ -214,13 +214,13 @@ class SongEditScreen(BaseScreen):
             self._modify_selected_parameter(-1)
 
         # Actions (Generally independent of focus, but act on selection)
-        elif cc == mappings.SAVE_SONG_CC:
+        elif cc == mappings.SAVE_CC:
             self._save_current_song()
-        elif cc == mappings.ADD_SEGMENT_CC:
+        elif cc == mappings.CREATE_CC:
             self._add_new_segment()
-        elif cc == mappings.DELETE_SEGMENT_CC:
+        elif cc == mappings.DELETE_CC:
             self._delete_selected_segment()
-        elif cc == mappings.RENAME_SONG_CC: # CC 85
+        elif cc == mappings.RENAME_CC: # CC 85
              self._start_song_rename()
 
     # --- NEW: Methods using TextInputWidget ---
@@ -559,7 +559,7 @@ class SongEditScreen(BaseScreen):
         else:
             # Draw Song Title
             title_text = f"Editing: {self.current_song.name}"
-            rename_cc = getattr(mappings, 'RENAME_SONG_CC', None)
+            rename_cc = getattr(mappings, 'RENAME_CC', None)
             if rename_cc:
                  title_text += f" (Rename: CC {rename_cc})"
 

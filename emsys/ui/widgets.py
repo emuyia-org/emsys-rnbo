@@ -82,7 +82,7 @@ class TextInputWidget:
         # Map CCs to renamer button names
         button_map = {
             mappings.YES_NAV_CC: 'yes',
-            mappings.DELETE_SEGMENT_CC: 'no',  # Changed: DELETE_SEGMENT_CC now acts as backspace ('no' button)
+            mappings.DELETE_CC: 'no',  # Changed: DELETE_CC now acts as backspace ('no' button)
             mappings.UP_NAV_CC: 'up',
             mappings.DOWN_NAV_CC: 'down',
             mappings.LEFT_NAV_CC: 'left',
@@ -95,8 +95,8 @@ class TextInputWidget:
             # We just need to know it's still active after valid input
             return TextInputStatus.ACTIVE
 
-        # Use SAVE_SONG_CC (or a dedicated confirm CC) to confirm
-        elif cc == mappings.SAVE_SONG_CC:
+        # Use SAVE_CC (or a dedicated confirm CC) to confirm
+        elif cc == mappings.SAVE_CC:
             final_text = self.renamer_instance.get_current_title().strip()
             if not final_text:
                  # Optionally provide feedback via app_ref or return ERROR?
@@ -112,7 +112,7 @@ class TextInputWidget:
                  # self.renamer_instance = None
                  return TextInputStatus.CONFIRMED
 
-        # Use NO_NAV_CC (or a dedicated cancel CC) to cancel - changed from DELETE_SEGMENT_CC
+        # Use NO_NAV_CC (or a dedicated cancel CC) to cancel - changed from DELETE_CC
         elif cc == mappings.NO_NAV_CC:
              self.cancel() # Deactivates the widget
              return TextInputStatus.CANCELLED
@@ -150,15 +150,15 @@ class TextInputWidget:
         instr_y = title_rect.bottom + 10
         yes_cc = getattr(mappings, 'YES_NAV_CC', '?')
         no_cc = getattr(mappings, 'NO_NAV_CC', '?') 
-        save_cc = getattr(mappings, 'SAVE_SONG_CC', '?')
-        delete_cc = getattr(mappings, 'DELETE_SEGMENT_CC', '?') 
+        save_cc = getattr(mappings, 'SAVE_CC', '?')
+        delete_cc = getattr(mappings, 'DELETE_CC', '?') 
 
         if mode == RenameMode.CARET:
-            instr_text = f"Arrows: Move | {delete_cc}: Backspace | {yes_cc}: Keyboard"  # Changed: DELETE_SEGMENT_CC for backspace
+            instr_text = f"Arrows: Move | {delete_cc}: Backspace | {yes_cc}: Keyboard"  # Changed: DELETE_CC for backspace
             instr2_text = f"{save_cc}: Confirm | {no_cc}: Cancel"  # Changed: NO_NAV_CC for cancel
         elif mode == RenameMode.KEYBOARD:
             instr_text = f"Arrows: Select | {yes_cc}: Insert Char"
-            instr2_text = f"{delete_cc}: Back to Caret"  # Changed: DELETE_SEGMENT_CC for back to caret
+            instr2_text = f"{delete_cc}: Back to Caret"  # Changed: DELETE_CC for back to caret
         else: # Should not happen
             instr_text = "Unknown Mode"
             instr2_text = ""
