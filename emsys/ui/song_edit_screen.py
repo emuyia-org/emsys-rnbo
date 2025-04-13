@@ -8,6 +8,7 @@ import pygame
 import time
 from typing import List, Optional, Tuple, Any
 from enum import Enum, auto
+import math # Needed for ceiling function
 
 # Core components
 from .base_screen import BaseScreen
@@ -124,36 +125,26 @@ class SongEditScreen(BaseScreen):
 
         # Initialize selection state
         if self.current_song and self.current_song.segments:
-            # If no segment is selected or index is invalid, select the first one
-            if self.selected_segment_index is None or self.selected_segment_index >= len(self.current_song.segments):
-                self.selected_segment_index = 0
-            # If no parameter is selected or invalid, select the first one
-            if not self.parameter_keys:
-                self.selected_parameter_key = None
-            elif self.selected_parameter_key not in self.parameter_keys:
-                self.selected_parameter_key = self.parameter_keys[0]
+            self.selected_segment_index = 0
+            # Select first parameter by default if available
+            self.selected_parameter_key = self.parameter_keys[0] if self.parameter_keys else None
         else:
             self.selected_segment_index = None
             self.selected_parameter_key = None
 
-        # --- Reset text input widget state on init ---
         self.text_input_widget.cancel()
-        # ---------------------------------------------
-        # --- Reset focus state on init ---
         self.focused_column = FocusColumn.SEGMENT_LIST
-        # ---------------------------------
-        self.clear_feedback() # Clear any old feedback
+        self.clear_feedback()
+        self._update_encoder_led() # <<< RE-ENABLED
 
     def cleanup(self):
         """Called when the screen becomes inactive."""
         super().cleanup()
         print(f"{self.__class__.__name__} is being deactivated.")
-        # --- Ensure text input widget is cleared on exit ---
         self.text_input_widget.cancel()
-        # --------------------------------------------------
-        # --- Reset focus state on cleanup ---
-        self.focused_column = FocusColumn.SEGMENT_LIST
-        # ----------------------------------
+        # Optionally turn off the LED when leaving the screen
+        # if hasattr(self.app, 'send_midi_cc'):
+        #     self.app.send_midi_cc(control=16, value=0, channel=15) # CC 16 (Knob 8), Value 0 (Off), Channel 16
         self.clear_feedback()
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
@@ -175,15 +166,16 @@ class SongEditScreen(BaseScreen):
 
     def handle_midi(self, msg):
         """Handle MIDI messages delegated from the main app."""
-        # Process all CC messages, not just value 127, to handle fader
         if msg.type != 'control_change':
              return
 
         cc = msg.control
-        value = msg.value # Get value for all CC types
+        value = msg.value
 
-        # Optional: More detailed logging including value
-        # print(f"SongEditScreen received CC: {cc} Value: {value} | Focus: {self.focused_column} | TextInput Active: {self.text_input_widget.is_active}")
+        # <<< --- REMOVE VERY EARLY DEBUG PRINT FOR KNOB B8 --- >>>
+        # if cc == mappings.KNOB_B8_CC:
+        #     print(f"--- KNOB B8 (CC {cc}) RAW VALUE RECEIVED: {value} ---")
+        # <<< --- END EARLY DEBUG PRINT REMOVAL --- >>>
 
         # --- Handle Text Input Mode FIRST ---
         if self.text_input_widget.is_active:
@@ -199,6 +191,18 @@ class SongEditScreen(BaseScreen):
             return # Don't process other actions while text input is active
         # ----------------------------------
 
+        # --- Handle Universal Encoder Parameter Adjustment (KNOB_B8_CC) ---
+        if cc == mappings.KNOB_B8_CC:
+            direction = 0
+            if 1 <= value <= 63:
+                direction = 1
+            elif 65 <= value <= 127:
+                direction = -1
+
+            if direction != 0:
+                self._modify_parameter_via_encoder(direction)
+            return # Encoder handled
+
         # --- Handle Fader Selection (CC 65) ---
         if cc == FADER_SELECT_CC:
             if not self.current_song: return # No song loaded
@@ -213,10 +217,10 @@ class SongEditScreen(BaseScreen):
                 target_index = max(0, min(num_segments - 1, target_index))
 
                 current_selected = self.selected_segment_index
-                print(f"[Fader Debug Seg] Value={value} (Rev={reversed_value}), NumSeg={num_segments} -> TargetIdx={target_index}, CurrentSel={current_selected}")
+                # print(f"[Fader Debug Seg] Value={value} (Rev={reversed_value}), NumSeg={num_segments} -> TargetIdx={target_index}, CurrentSel={current_selected}")
 
                 if target_index != current_selected:
-                    print(f"          Updating segment selection: {current_selected} -> {target_index}")
+                    # print(f"          Updating segment selection: {current_selected} -> {target_index}")
                     self.selected_segment_index = target_index
                     # Basic scroll handling (can be improved like in SongManagerScreen)
                     # This just ensures the first parameter is selected when segment changes via fader
@@ -237,16 +241,15 @@ class SongEditScreen(BaseScreen):
                 target_key = self.parameter_keys[target_param_index]
                 current_key = self.selected_parameter_key
 
-                print(f"[Fader Debug Param] Value={value} (Rev={reversed_value}), NumParam={num_params} -> TargetIdx={target_param_index} ('{target_key}'), CurrentKey='{current_key}'")
+                # print(f"[Fader Debug Param] Value={value} (Rev={reversed_value}), NumParam={num_params} -> TargetIdx={target_param_index} ('{target_key}'), CurrentKey='{current_key}'")
 
                 if target_key != current_key:
-                    print(f"          Updating parameter selection: '{current_key}' -> '{target_key}'")
+                    # print(f"          Updating parameter selection: '{current_key}' -> '{target_key}'")
                     self.selected_parameter_key = target_key
                     self.clear_feedback()
 
             return # Fader handled, don't process as button press below
         # --- End Fader Handling ---
-
 
         # --- Normal Edit Mode Handling (Button Presses Only) ---
         # Process remaining CCs only if they are button presses (value 127)
@@ -289,7 +292,7 @@ class SongEditScreen(BaseScreen):
         elif cc == mappings.RENAME_CC: # CC 85
              self._start_song_rename()
 
-    # --- NEW: Methods using TextInputWidget ---
+    # --- Renaming Methods ---
     def _start_song_rename(self):
         """Initiates the song renaming process using the widget."""
         if self.current_song:
@@ -368,14 +371,13 @@ class SongEditScreen(BaseScreen):
         print("Cancelled song rename mode.")
         self.text_input_widget.cancel()
 
-    # --- End of Renaming Methods ---
-
-
-    # --- Internal Helper Methods for Actions (Modified for Focus) ---
+    # --- Internal Helper Methods ---
 
     def _navigate_focus(self, direction: int):
         """Change the focused column."""
         if self.text_input_widget.is_active: return # Prevent action during text input
+
+        old_focus = self.focused_column # Store old focus for feedback LED update
 
         if direction > 0: # Move Right
             if self.focused_column == FocusColumn.SEGMENT_LIST:
@@ -398,8 +400,12 @@ class SongEditScreen(BaseScreen):
                 print("Focus moved to Segments")
             # else: Already in the leftmost column
 
+        if old_focus != self.focused_column:
+            self.clear_feedback()
+            self._update_encoder_led() # <<< RE-ENABLED
+
     def _change_selected_segment(self, direction: int):
-        """Move segment selection up or down (only when segment list is focused)."""
+        """Move segment selection up or down."""
         if self.text_input_widget.is_active: return # Prevent action during text input
         if self.focused_column != FocusColumn.SEGMENT_LIST: return # Only act if focused
 
@@ -423,10 +429,10 @@ class SongEditScreen(BaseScreen):
             else:
                 self.selected_parameter_key = None
         self.clear_feedback()
-
+        self._update_encoder_led() # <<< RE-ENABLED
 
     def _change_selected_parameter_vertically(self, direction: int):
-        """Move parameter selection up or down (only when parameter details are focused)."""
+        """Move parameter selection up or down."""
         if self.text_input_widget.is_active: return # Prevent action during text input
         if self.focused_column != FocusColumn.PARAMETER_DETAILS: return # Only act if focused
 
@@ -444,12 +450,18 @@ class SongEditScreen(BaseScreen):
         try:
             current_param_index = self.parameter_keys.index(self.selected_parameter_key)
             next_param_index = (current_param_index + direction) % len(self.parameter_keys)
-            self.selected_parameter_key = self.parameter_keys[next_param_index]
-            self.clear_feedback()
+            new_key = self.parameter_keys[next_param_index]
+
+            if new_key != self.selected_parameter_key:
+                self.selected_parameter_key = new_key
+                self.clear_feedback()
+                self._update_encoder_led() # <<< RE-ENABLED
+
         except (ValueError, AttributeError):
             # Fallback if current key isn't found (shouldn't happen ideally)
             self.selected_parameter_key = self.parameter_keys[0] if self.parameter_keys else None
-
+            self.clear_feedback()
+            self._update_encoder_led() # <<< RE-ENABLED (fallback)
 
     def _modify_selected_parameter(self, direction: int):
         """Increment or decrement the value of the selected parameter (only if parameter details are focused)."""
@@ -460,75 +472,90 @@ class SongEditScreen(BaseScreen):
             return
         # -----------------------
         if self.selected_segment_index is None or self.selected_parameter_key is None:
+            # <<< --- ADDED DETAIL --- >>>
+            print("Debug: Modification aborted - No segment or parameter selected.")
             self.set_feedback("Select segment and parameter first", is_error=True)
             return
-        if not self.current_song: return
+        if not self.current_song:
+            # <<< --- ADDED DETAIL --- >>>
+            print("Debug: Modification aborted - No current song.")
+            return
 
         try:
             segment = self.current_song.get_segment(self.selected_segment_index)
             key = self.selected_parameter_key
             current_value = getattr(segment, key)
             step = PARAM_STEPS.get(key, 1)
-            original_value = current_value # Store original value
+            original_value = current_value
+
+            # <<< --- ADD DEBUG PRINT 5 --- >>>
+            print(f"Debug: Modifying '{key}'. Current={current_value}, Step={step}")
 
             new_value: Any
+            min_val, max_val = None, None # Define min/max constraints
+            if key == 'program_message_1' or key == 'program_message_2':
+                min_val, max_val = MIN_PROGRAM_MSG, MAX_PROGRAM_MSG
+            elif key == 'tempo':
+                min_val, max_val = MIN_TEMPO, MAX_TEMPO
+            elif key == 'tempo_ramp':
+                min_val, max_val = MIN_RAMP, MAX_RAMP
+            elif key == 'loop_length':
+                min_val, max_val = MIN_LOOP_LENGTH, MAX_LOOP_LENGTH
+            elif key == 'repetitions':
+                min_val, max_val = MIN_REPETITIONS, MAX_REPETITIONS
 
+            # Calculate new value based on type
             if isinstance(current_value, bool):
-                # Toggle boolean with either direction
-                new_value = not current_value
-            elif isinstance(current_value, int):
-                new_value = current_value + direction * step
-                # Apply constraints with wraparound
-                if key in ('program_message_1', 'program_message_2'):
-                    if new_value > MAX_PROGRAM_MSG:
-                        new_value = MIN_PROGRAM_MSG
-                    elif new_value < MIN_PROGRAM_MSG:
-                        new_value = MAX_PROGRAM_MSG
-                elif key == 'loop_length':
-                    if new_value > MAX_LOOP_LENGTH:
-                        new_value = MIN_LOOP_LENGTH
-                    elif new_value < MIN_LOOP_LENGTH:
-                        new_value = MAX_LOOP_LENGTH
-                elif key == 'repetitions':
-                    if new_value > MAX_REPETITIONS:
-                        new_value = MIN_REPETITIONS
-                    elif new_value < MIN_REPETITIONS:
-                        new_value = MAX_REPETITIONS
-            elif isinstance(current_value, float):
-                new_value = current_value + direction * step
-                # Apply constraints with wraparound
-                if key == 'tempo':
-                    if new_value > MAX_TEMPO:
-                        new_value = MIN_TEMPO
-                    elif new_value < MIN_TEMPO:
-                        new_value = MAX_TEMPO
-                elif key == 'tempo_ramp':
-                    if new_value > MAX_RAMP:
-                        new_value = MIN_RAMP
-                    elif new_value < MIN_RAMP:
-                        new_value = MAX_RAMP
-                new_value = round(new_value, 2) # Keep precision reasonable
+                new_value = not current_value if direction != 0 else current_value
+            elif isinstance(current_value, (int, float)): # Combine int and float logic
+                new_value = current_value + (direction * step)
+                # Clamp integer/float value
+                if min_val is not None: new_value = max(min_val, new_value)
+                if max_val is not None: new_value = min(max_val, new_value)
+                if isinstance(new_value, float):
+                    new_value = round(new_value, 2) # Round floats
             else:
                 self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
                 return
 
-            # Update the song data only if the value changed
+            # <<< --- ADD DEBUG PRINT 6 --- >>>
+            print(f"Debug: Calculated New Value={new_value} (Original={original_value})")
+
+            # <<< --- CRITICAL CHANGE: Track if we hit minimum/maximum bounds --- >>>
+            hit_boundary = False
+            if direction < 0 and min_val is not None and new_value == min_val:
+                hit_boundary = True
+                print(f"Debug: Hit minimum bound ({min_val})")
+            elif direction > 0 and max_val is not None and new_value == max_val:
+                hit_boundary = True
+                print(f"Debug: Hit maximum bound ({max_val})")
+
             if new_value != original_value:
-                self.current_song.update_segment(self.selected_segment_index, **{key: new_value})
-                # self.current_song.dirty will be set by update_segment if value changed
-
-                # Provide feedback
+                # Value did change, update as normal
+                print("Debug: Value changed. Updating song object.")
+                setattr(segment, key, new_value)
+                self.current_song.dirty = True
                 display_name = self.parameter_display_names.get(key, key)
-                value_display = "YES" if isinstance(new_value, bool) and new_value else "NO" if isinstance(new_value, bool) else new_value
-                self.set_feedback(f"{display_name}: {value_display}")
+                self.set_feedback(f"{display_name}: {new_value}", duration=0.75)
+                self._update_encoder_led()  # Update LED for changed value
             else:
-                # Optional: Feedback that value didn't change (e.g., at limit)
-                # self.set_feedback(f"{display_name}: No change")
-                pass
-
+                # Value didn't change, but we might need to refresh the LED
+                print("Debug: Value did not change (e.g., at limit or step issue).")
+                
+                # <<< --- CRITICAL CHANGE: Always update LED when at limits --- >>>
+                if hit_boundary:
+                    # Ensure LED is updated when we hit a boundary, even if value didn't change
+                    print("Debug: Updating LED even though value didn't change (at boundary)")
+                    self._update_encoder_led()
+                    # Optional: Show brief feedback that we've hit the limit
+                    display_name = self.parameter_display_names.get(key, key)
+                    limit_type = "min" if direction < 0 else "max"
+                    self.set_feedback(f"{display_name}: at {limit_type}", duration=0.5)
 
         except (IndexError, AttributeError, TypeError, ValueError) as e:
+            print(f"Debug: Error during modification: {e}")
             self.set_feedback(f"Error modifying value: {e}", is_error=True)
+            print(f"Error in _perform_parameter_modification: {e}")
 
 
     def _save_current_song(self):
@@ -628,7 +655,7 @@ class SongEditScreen(BaseScreen):
             self.set_feedback(f"Error deleting segment: {e}", is_error=True)
 
 
-    # --- Drawing Methods (Modified for Focus) ---
+    # --- Drawing Methods ---
 
     def draw(self, screen_surface, midi_status=None):
         """Draws the song editor interface or the text input interface."""
@@ -812,6 +839,159 @@ class SongEditScreen(BaseScreen):
             pygame.draw.rect(surface, color, bg_rect, 1) # Colored border matching text
             surface.blit(feedback_surf, feedback_rect)
 
-    # --- REMOVED: _draw_rename_interface - Handled by widget ---
+    # --- UPDATED: Method for LED Feedback ---
+    def _update_encoder_led(self):
+        """Calculates and sends MIDI CC to update KNOB_B8_CC LED ring (1-13 LEDs)."""
+        # Check if the app has the send method and output port is ready
+        if not hasattr(self.app, 'send_midi_cc') or not self.app.midi_output_port:
+            return # MIDI output not ready
 
-    # --- End of Drawing Methods ---
+        led_value = 1  # <<< CHANGED: Default to first LED instead of 0 (off) >>>
+
+        # Determine the value only if a valid segment and parameter are selected
+        if self.selected_segment_index is not None and self.selected_parameter_key is not None and self.current_song:
+            try:
+                segment = self.current_song.get_segment(self.selected_segment_index)
+                key = self.selected_parameter_key
+                current_value = getattr(segment, key)
+
+                min_val, max_val = None, None
+                # Get min/max for normalization
+                if key == 'program_message_1' or key == 'program_message_2':
+                    min_val, max_val = MIN_PROGRAM_MSG, MAX_PROGRAM_MSG
+                elif key == 'tempo':
+                    min_val, max_val = MIN_TEMPO, MAX_TEMPO
+                elif key == 'tempo_ramp':
+                    min_val, max_val = MIN_RAMP, MAX_RAMP
+                elif key == 'loop_length':
+                    min_val, max_val = MIN_LOOP_LENGTH, MAX_LOOP_LENGTH
+                elif key == 'repetitions':
+                    min_val, max_val = MIN_REPETITIONS, MAX_REPETITIONS
+                elif key == 'automatic_transport_interrupt':
+                    # <<< CHANGED: Use LED 1 and 13 for boolean (never completely off) >>>
+                    led_value = 13 if current_value else 1  # LED 1 for False, LED 13 for True
+                    min_val, max_val = 0, 1  # Set dummy range to skip normalization below
+
+                # Normalize if we have a valid range
+                if min_val is not None and max_val is not None and max_val > min_val:
+                    # Normalize current_value to 0.0 - 1.0
+                    normalized = (current_value - min_val) / (max_val - min_val)
+                    # Clamp just in case value is slightly outside range due to float precision
+                    normalized = max(0.0, min(1.0, normalized))
+                    
+                    # <<< CHANGED: Map to 1-13 range (never use 0) >>>
+                    # Scale to 1-13 range. Use 1 for minimum value.
+                    if normalized == 0.0:
+                        led_value = 1  # Always show at least LED 1
+                    else:
+                        # Map 0.0-1.0 to 1-13 range (1 + normalized*12)
+                        led_value = 1 + math.floor(normalized * 12)
+                        # Ensure max value is 13
+                        if normalized >= 0.999:  # Handle floating point imprecision
+                            led_value = 13
+
+            except (IndexError, AttributeError, TypeError, ValueError) as e:
+                print(f"Error calculating LED value for {self.selected_parameter_key}: {e}")
+                led_value = 1  # <<< CHANGED: Default to first LED on error
+
+        # Send the MIDI CC message for Knob 8 LED
+        # Knob 8 LED is CC 16 (9 + 7)
+        # Channel is 16 (index 15)
+        # Value is 1-13 (never 0)
+        self.app.send_midi_cc(control=16, value=int(led_value), channel=15)
+
+    def _modify_parameter_via_encoder(self, direction: int):
+        """
+        Increment/decrement selected parameter value (used by ENCODER).
+        Works regardless of focus.
+        """
+        # <<< --- REMOVE DEBUG PRINT 3 --- >>>
+        # print(f"Debug: _modify_parameter_via_encoder called with direction: {direction}")
+        if self.text_input_widget.is_active: return
+        self._perform_parameter_modification(direction)
+
+    def _perform_parameter_modification(self, direction: int):
+        """Core logic to modify the selected parameter's value."""
+        # <<< --- REMOVE DEBUG PRINT --- >>>
+        # print(f"Debug: _perform_parameter_modification: Dir={direction}, SegIdx={self.selected_segment_index}, ParamKey={self.selected_parameter_key}")
+
+        if self.selected_segment_index is None or self.selected_parameter_key is None:
+            # print("Debug: Modification aborted - No segment or parameter selected.") # REMOVE
+            self.set_feedback("Select segment and parameter first", is_error=True)
+            return
+        if not self.current_song:
+            # print("Debug: Modification aborted - No current song.") # REMOVE
+            return
+
+        try:
+            segment = self.current_song.get_segment(self.selected_segment_index)
+            key = self.selected_parameter_key
+            current_value = getattr(segment, key)
+            step = PARAM_STEPS.get(key, 1)
+            original_value = current_value
+
+            # <<< --- REMOVE DEBUG PRINT --- >>>
+            # print(f"Debug: Modifying '{key}'. Current={current_value}, Step={step}")
+
+            new_value: Any
+            min_val, max_val = None, None # Define min/max constraints
+            # Get min/max constraints for this parameter
+            if key == 'program_message_1' or key == 'program_message_2':
+                min_val, max_val = MIN_PROGRAM_MSG, MAX_PROGRAM_MSG
+            elif key == 'tempo':
+                min_val, max_val = MIN_TEMPO, MAX_TEMPO
+            elif key == 'tempo_ramp':
+                min_val, max_val = MIN_RAMP, MAX_RAMP
+            elif key == 'loop_length':
+                min_val, max_val = MIN_LOOP_LENGTH, MAX_LOOP_LENGTH
+            elif key == 'repetitions':
+                min_val, max_val = MIN_REPETITIONS, MAX_REPETITIONS
+
+            # Calculate new value based on type
+            if isinstance(current_value, bool):
+                new_value = not current_value if direction != 0 else current_value
+            elif isinstance(current_value, (int, float)): # Combine int and float logic
+                new_value = current_value + (direction * step)
+                # Clamp integer/float value
+                if min_val is not None: new_value = max(min_val, new_value)
+                if max_val is not None: new_value = min(max_val, new_value)
+                if isinstance(new_value, float):
+                    new_value = round(new_value, 2) # Round floats
+            else:
+                self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
+                return
+
+            # <<< --- REMOVE DEBUG PRINT --- >>>
+            # print(f"Debug: Calculated New Value={new_value} (Original={original_value})")
+
+            hit_boundary = False
+            if direction < 0 and min_val is not None and new_value == min_val:
+                hit_boundary = True
+                # print(f"Debug: Hit minimum bound ({min_val})") # REMOVE
+            elif direction > 0 and max_val is not None and new_value == max_val:
+                hit_boundary = True
+                # print(f"Debug: Hit maximum bound ({max_val})") # REMOVE
+
+            if new_value != original_value:
+                # print("Debug: Value changed. Updating song object.") # REMOVE
+                setattr(segment, key, new_value)
+                self.current_song.dirty = True
+                display_name = self.parameter_display_names.get(key, key)
+                self.set_feedback(f"{display_name}: {new_value}", duration=0.75)
+                self._update_encoder_led()
+            else:
+                # print("Debug: Value did not change (e.g., at limit or step issue).") # REMOVE
+                if hit_boundary:
+                    # print("Debug: Updating LED even though value didn't change (at boundary)") # REMOVE
+                    self._update_encoder_led()
+                    display_name = self.parameter_display_names.get(key, key)
+                    limit_type = "min" if direction < 0 else "max"
+                    self.set_feedback(f"{display_name}: at {limit_type}", duration=0.5)
+
+        except (IndexError, AttributeError, TypeError, ValueError) as e:
+            # print(f"Debug: Error during modification: {e}") # REMOVE
+            self.set_feedback(f"Error modifying value: {e}", is_error=True)
+            print(f"Error in _perform_parameter_modification: {e}") # Keep this one? Optional.
+
+
+# ... rest of the file ...

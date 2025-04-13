@@ -7,13 +7,14 @@ Handles exit via MIDI CC 47. Includes MIDI device auto-reconnection.
 Implements universal button hold-repeat for MIDI CC messages.
 """
 
-import sys
-import os
-import time # Needed for timers
-import traceback # Needed for detailed error logs
-import sdnotify
 import pygame
 import mido
+import mido.backends.rtmidi # Explicitly import backend if needed
+import time
+import sys
+import os
+import sdnotify # For systemd notification
+import traceback # For detailed error logs
 
 # Add the project root directory to the path to enable absolute imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -99,7 +100,9 @@ class App:
         # MIDI State
         self.midi_port = None
         self.midi_port_name = None
-        self.midi_error_message = None # To display status on screen if needed
+        self.midi_output_port = None # <<< ADDED: MIDI Output Port
+        self.midi_output_port_name = None # <<< ADDED: MIDI Output Port Name
+        self.midi_error_message = None
         self.is_searching = False
         self.last_scan_time = 0
         self.last_connection_check_time = 0
@@ -112,8 +115,9 @@ class App:
         # Dictionary mapping control_number to {'press_time': float, 'last_repeat_time': float, 'message': mido.Message}
         self.pressed_buttons = {}
 
-        self._initialize_midi() # Attempt initial connection
+        self._initialize_midi() # Attempt initial connection (Input and Output)
         self.initialize_screens()
+        self._initial_led_update() # <<< ADDED: Update LEDs on startup
 
     def initialize_screens(self):
         """Initialize all application screens."""
@@ -150,121 +154,153 @@ class App:
         print("Screens initialized.")
 
     def _initialize_midi(self):
-        """Finds and attempts to open the MIDI port initially."""
+        """Finds and attempts to open the MIDI input and output ports initially."""
         self.notify_status(f"Initializing MIDI: Searching for '{MIDI_DEVICE_NAME}'...")
         # Use verbose=True for initial search
-        found_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=True)
-        if found_port_name:
-            self.midi_port_name = found_port_name
-            print(f"Attempting to open MIDI port: '{self.midi_port_name}'")
+        found_input_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=True, port_type='input')
+        found_output_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=True, port_type='output') # <<< ADDED: Search for output
+
+        # --- Handle Input Port ---
+        if found_input_port_name:
             try:
-                self.midi_port = mido.open_input(self.midi_port_name)
-                print(f"Successfully opened MIDI port: {self.midi_port_name}")
-                self.notify_status(f"MIDI OK: {self.midi_port_name}. Notifying READY=1")
-                self.notifier.notify("READY=1")
-                self.is_searching = False
+                self.midi_port = mido.open_input(found_input_port_name)
+                self.midi_port_name = found_input_port_name
                 self.midi_error_message = None
-                self.last_connection_check_time = time.time() # Start checking connection
-            except (IOError, ValueError, OSError) as e:
-                error_info = f"Found '{self.midi_port_name}', but failed to open: {e}"
-                print(error_info)
+                self.is_searching = False
+                print(f"Successfully opened MIDI Input: '{self.midi_port_name}'")
+                self.notify_status(f"MIDI Input Connected: '{self.midi_port_name}'")
+            except (IOError, OSError) as e:
                 self.midi_port = None
                 self.midi_port_name = None
-                self.midi_error_message = error_info + " Will retry..."
-                self.is_searching = True # Start searching
-                self.last_scan_time = time.time()
-                self.notify_status(f"MIDI FAIL: {error_info}. Retrying...")
-                self.notifier.notify("READY=1") # Notify ready even if MIDI fails initially
+                self.midi_error_message = f"Error opening Input '{found_input_port_name}': {e}"
+                print(self.midi_error_message)
+                self.notify_status(f"Error opening MIDI Input: {e}")
+                self._start_search_mode() # Start searching if initial open fails
         else:
-            error_info = f"MIDI Device '{MIDI_DEVICE_NAME}' not found."
-            print(error_info)
-            self.midi_port = None
-            self.midi_port_name = None
-            self.midi_error_message = error_info + " Will retry..."
-            self.is_searching = True # Start searching
-            self.last_scan_time = time.time()
-            self.notify_status(f"MIDI FAIL: {error_info}. Retrying...")
-            self.notifier.notify("READY=1") # Notify ready even if MIDI fails initially
+            self.midi_error_message = f"MIDI Input '{MIDI_DEVICE_NAME}' not found."
+            print(self.midi_error_message)
+            self.notify_status(f"MIDI Input '{MIDI_DEVICE_NAME}' not found. Searching...")
+            self._start_search_mode()
+
+        # --- Handle Output Port ---
+        if found_output_port_name:
+            try:
+                # Add use_virtual=False if you encounter issues with virtual ports on Linux
+                self.midi_output_port = mido.open_output(found_output_port_name)
+                self.midi_output_port_name = found_output_port_name
+                print(f"Successfully opened MIDI Output: '{self.midi_output_port_name}'")
+                self.notify_status(f"MIDI Output Connected: '{self.midi_output_port_name}'")
+            except (IOError, OSError) as e:
+                self.midi_output_port = None
+                self.midi_output_port_name = None
+                # Don't necessarily set midi_error_message here, input status is primary
+                print(f"Warning: Error opening Output '{found_output_port_name}': {e}")
+                self.notify_status(f"Warning: Error opening MIDI Output: {e}")
+                # We might still be able to run without output, don't force search mode just for output failure
+        else:
+             print(f"Warning: MIDI Output '{MIDI_DEVICE_NAME}' not found.")
+             self.notify_status(f"Warning: MIDI Output '{MIDI_DEVICE_NAME}' not found.")
+             # No output port found, LED feedback won't work
 
     def _handle_disconnection(self, reason="Disconnected"):
         """Handles the state change when a MIDI disconnection is detected."""
-        if self.midi_port is None and not self.is_searching:
-             # Avoid handling disconnection multiple times if already disconnected and searching
-             return
+        if self.midi_port is None and self.midi_output_port is None and not self.is_searching:
+             return # Already disconnected and searching
 
         print(f"\n--- Handling MIDI Disconnection (Reason: {reason}) ---")
-        current_name = self.midi_port_name or MIDI_DEVICE_NAME # Use last known name or base name
-        self.midi_error_message = f"{reason} from '{current_name}'. Searching..."
-        self.notify_status(f"MIDI WARN: {self.midi_error_message}")
-        print(f"Setting error message: {self.midi_error_message}")
-
-        port_to_close = self.midi_port
-        self.midi_port = None # Set to None immediately
-        self.midi_port_name = None
-        self.pressed_buttons.clear() # Clear held buttons on disconnect
-
-        if port_to_close:
+        if self.midi_port:
             try:
-                print(f"Attempting to close port: {current_name}")
-                port_to_close.close()
-                print(f"Port {current_name} closed.")
-            except Exception as close_err:
-                print(f"Error closing MIDI port (might be expected on disconnect): {close_err}")
+                self.midi_port.close()
+                print("MIDI Input port closed.")
+            except Exception as e:
+                print(f"Error closing MIDI Input port: {e}")
+            self.midi_port = None
+            self.midi_port_name = None
 
-        self.is_searching = True
-        self.last_scan_time = time.time() # Start scan timer immediately
-        print(f"Set midi_port=None, is_searching=True. Starting scan timer.")
-        print("----------------------------------------------------\n")
+        if self.midi_output_port: # <<< ADDED: Close output port
+            try:
+                self.midi_output_port.close()
+                print("MIDI Output port closed.")
+            except Exception as e:
+                print(f"Error closing MIDI Output port: {e}")
+            self.midi_output_port = None
+            self.midi_output_port_name = None
+
+        self.midi_error_message = f"MIDI Disconnected ({reason}). Searching..."
+        self.notify_status(self.midi_error_message)
+        self._start_search_mode()
 
     def _attempt_reconnect(self):
-        """Attempts to find and reopen the MIDI port during runtime."""
-        print(f"[Reconnect Check] Attempting to find and open '{MIDI_DEVICE_NAME}'...")
-        # Use verbose=False for reconnect attempts to reduce log spam
-        found_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=False)
-        if found_port_name:
-            print(f"[Reconnect Check] Device '{MIDI_DEVICE_NAME}' found as '{found_port_name}'. Attempting to open...")
+        """Attempts to find and reopen the MIDI input and output ports."""
+        if not self.is_searching:
+             return # Should not happen, but safety check
+
+        current_time = time.time()
+        if current_time - self.last_scan_time < RESCAN_INTERVAL_SECONDS:
+            return # Wait before scanning again
+
+        self.last_scan_time = current_time
+        print(f"Scanning for MIDI device '{MIDI_DEVICE_NAME}'...")
+        self.notify_status(f"Scanning for '{MIDI_DEVICE_NAME}'...")
+
+        # Use verbose=False during reconnection attempts to reduce log noise
+        found_input_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=False, port_type='input')
+        found_output_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=False, port_type='output') # <<< ADDED: Search output
+
+        reconnected_input = False
+        reconnected_output = False
+
+        # --- Reconnect Input ---
+        if found_input_port_name:
             try:
-                # Optional small delay
-                # time.sleep(0.1)
-                new_port = mido.open_input(found_port_name)
-                print(f"[Reconnect Check] SUCCESS! Reconnected to '{found_port_name}'.")
-                self.midi_port = new_port
-                self.midi_port_name = found_port_name
-                self.midi_error_message = None # Clear error
-                self.is_searching = False # Stop searching
-                self.last_connection_check_time = time.time() # Reset connection check timer
-                self.notify_status(f"MIDI OK: Reconnected to {self.midi_port_name}")
-            except (IOError, ValueError, OSError) as e:
-                error_msg = f"Found '{found_port_name}', but failed to open: {e}"
-                print(f"[Reconnect Check] Error opening MIDI port '{found_port_name}': {e}")
-                # Keep searching, update error message if it changed
-                new_error_display = error_msg + " Retrying..."
-                if new_error_display != self.midi_error_message:
-                    self.midi_error_message = new_error_display
-                    self.notify_status(f"MIDI WARN: {error_msg}. Retrying...")
-                self.midi_port = None # Ensure port is None
+                self.midi_port = mido.open_input(found_input_port_name)
+                self.midi_port_name = found_input_port_name
+                self.midi_error_message = None
+                self.is_searching = False # Stop searching once input is found
+                reconnected_input = True
+                print(f"\nSuccessfully Reconnected MIDI Input: '{self.midi_port_name}'")
+                self.notify_status(f"MIDI Input Reconnected: '{self.midi_port_name}'")
+            except (IOError, OSError) as e:
+                # Failed to open even though found, keep searching
+                self.midi_port = None
                 self.midi_port_name = None
-                self.is_searching = True # Ensure searching continues
-            except Exception as e:
-                 error_msg = f"Found '{found_port_name}', unexpected error opening: {e}"
-                 print(f"[Reconnect Check] Unexpected error opening '{found_port_name}': {e}")
-                 traceback.print_exc()
-                 new_error_display = error_msg + " Retrying..."
-                 if new_error_display != self.midi_error_message:
-                     self.midi_error_message = new_error_display
-                     self.notify_status(f"MIDI WARN: {error_msg}. Retrying...")
-                 self.midi_port = None
-                 self.midi_port_name = None
-                 self.is_searching = True # Continue searching even on unexpected open error
-        else:
-            # Device not found during this scan
-            error_msg = f"Device '{MIDI_DEVICE_NAME}' not found."
-            # print(f"[Reconnect Check] {error_msg}") # Less verbose
-            new_error_display = error_msg + " Retrying..."
-            if new_error_display != self.midi_error_message:
-                 self.midi_error_message = new_error_display
-                 # No need to notify status every time it's not found, handled by initial disconnect message
-            self.is_searching = True # Ensure searching continues
+                self.midi_error_message = f"Found Input '{found_input_port_name}', but open failed: {e}. Retrying..."
+                print(self.midi_error_message)
+                # Keep is_searching = True
+        # else: # No need for else, if not found, is_searching remains True
+
+        # --- Reconnect Output (only if input reconnected successfully) ---
+        # We prioritize input being available. Output is secondary.
+        if reconnected_input and found_output_port_name:
+             if not self.midi_output_port: # Only try if not already open
+                try:
+                    self.midi_output_port = mido.open_output(found_output_port_name)
+                    self.midi_output_port_name = found_output_port_name
+                    reconnected_output = True
+                    print(f"Successfully Reconnected MIDI Output: '{self.midi_output_port_name}'")
+                    self.notify_status(f"MIDI Output Reconnected: '{self.midi_output_port_name}'")
+                except (IOError, OSError) as e:
+                    self.midi_output_port = None
+                    self.midi_output_port_name = None
+                    print(f"Warning: Reconnected Input, but failed to reopen Output '{found_output_port_name}': {e}")
+                    self.notify_status(f"Warning: Failed to reopen MIDI Output: {e}")
+        elif reconnected_input and not found_output_port_name:
+             print(f"Warning: Reconnected Input, but MIDI Output '{MIDI_DEVICE_NAME}' not found.")
+             self.notify_status(f"Warning: MIDI Output '{MIDI_DEVICE_NAME}' not found.")
+
+
+        if not reconnected_input:
+            # If input still not found after scan interval
+            self.midi_error_message = f"MIDI Input '{MIDI_DEVICE_NAME}' not found. Still searching..."
+            self.notify_status(self.midi_error_message) # Update status
+
+    # <<< --- ADDED: Missing method --- >>>
+    def _start_search_mode(self):
+        """Sets the application state to actively search for MIDI devices."""
+        print("Starting MIDI search mode...")
+        self.is_searching = True
+        self.last_scan_time = 0 # Reset scan timer to allow immediate scan attempt
+        self.notify_status(self.midi_error_message or "MIDI Searching...") # Update status
 
     def notify_status(self, status_message):
         """Helper function to print status and notify systemd."""
@@ -280,213 +316,137 @@ class App:
 
     def run(self):
         """Main application loop."""
-        if not self.active_screen:
-             print("ERROR: No active screen set during initialization. Exiting.")
-             self.cleanup()
-             return
-
         self.running = True
-        # Initial status depends on MIDI state
-        if self.midi_port:
-             self.notify_status(f"Running. Screen: {self.active_screen.__class__.__name__}. MIDI: {self.midi_port_name}")
-        else:
-             self.notify_status(f"Running. Screen: {self.active_screen.__class__.__name__}. MIDI: Searching...")
+        self.notify_status("Application Running")
+        self.notifier.notify("READY=1")
+        print("Application loop started.")
+
+        loop_counter = 0 # Optional: Counter for loop iterations
 
         while self.running:
-            current_time = time.time()
+            loop_start_time = time.time() # <<< Timing Start
 
-            # --- Event Handling (Pygame) ---
-            events = pygame.event.get()
-            for event in events:
+            current_time = time.time() # Used for button repeats and connection checks
+
+            # --- MIDI Connection Management ---
+            if self.is_searching:
+                self._attempt_reconnect()
+            elif self.midi_port and current_time - self.last_connection_check_time > CONNECTION_CHECK_INTERVAL_SECONDS:
+                # Periodically check if the connected port still exists
+                self.last_connection_check_time = current_time
+                available_inputs = mido.get_input_names()
+                # Also check output port if it was opened
+                output_ok = True
+                if self.midi_output_port:
+                    available_outputs = mido.get_output_names()
+                    if self.midi_output_port_name not in available_outputs:
+                        output_ok = False
+                        print(f"MIDI Output port '{self.midi_output_port_name}' disappeared.")
+
+                if self.midi_port_name not in available_inputs or not output_ok:
+                    reason = "Port disappeared" if self.midi_port_name not in available_inputs else "Output port disappeared"
+                    self._handle_disconnection(reason=reason)
+                # else: print("Connection check OK") # Debug
+
+            # --- Process MIDI Input ---
+            if self.midi_port and not self.is_searching:
+                try:
+                    for msg in self.midi_port.iter_pending():
+                        self.handle_midi_message(msg)
+                except (IOError, OSError) as e:
+                    print(f"\nMIDI Read Error: {e}")
+                    self._handle_disconnection(reason=f"Read Error: {e}")
+                except Exception as e: # Catch other potential errors during read
+                    print(f"\nUnexpected Error processing MIDI: {e}")
+                    traceback.print_exc() # Log the full traceback
+                    self._handle_disconnection(reason=f"Unexpected Error: {e}")
+
+            # --- Process Pygame Events ---
+            for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
-                # Pass other events to the active screen
+                # Pass event to active screen if it has a handler
                 if self.active_screen and hasattr(self.active_screen, 'handle_event'):
-                    try:
-                        self.active_screen.handle_event(event)
-                    except Exception as e:
-                        print(f"Error in screen {self.active_screen.__class__.__name__} handling event {event}: {e}")
-                        traceback.print_exc()
-
-            # --- MIDI Reconnection Attempt ---
-            if self.midi_port is None and self.is_searching:
-                if (current_time - self.last_scan_time) >= RESCAN_INTERVAL_SECONDS:
-                    self.last_scan_time = current_time
-                    # Status update is handled within _attempt_reconnect if needed
-                    self._attempt_reconnect()
-                    # Update status after attempt regardless of success/fail
-                    if self.midi_port:
-                         self.notify_status(f"Screen: {self.active_screen.__class__.__name__}. MIDI: {self.midi_port_name}")
-                    elif self.midi_error_message:
-                         self.notify_status(f"Screen: {self.active_screen.__class__.__name__}. MIDI: {self.midi_error_message}")
-                    else: # Should have an error message if searching
-                         self.notify_status(f"Screen: {self.active_screen.__class__.__name__}. MIDI: Searching...")
-
-
-            # --- MIDI Input Handling & Active Check ---
-            if self.midi_port:
-                # --- Active Connection Check ---
-                if (current_time - self.last_connection_check_time) >= CONNECTION_CHECK_INTERVAL_SECONDS:
-                    self.last_connection_check_time = current_time
-                    try:
-                        # Use verbose=False for background checks
-                        if not find_midi_port(self.midi_port_name, verbose=False):
-                            print(f"[Active Check] Port '{self.midi_port_name}' is GONE.")
-                            self._handle_disconnection("Device not listed")
-                            continue # Skip reading this frame
-                    except Exception as check_err:
-                         print(f"[Active Check] Error while checking available ports: {check_err}")
-                         self._handle_disconnection(f"Port check error: {check_err}")
-                         continue
-
-                # --- Process MIDI Messages ---
-                try:
-                    while True: # Use non-blocking receive
-                        msg = self.midi_port.receive(block=False)
-                        if msg is None:
-                            break # No more messages pending
-                        self.handle_midi_message(msg) # Process the message
-
-                except (OSError, mido.MidiError) as e: # Catch specific read errors
-                    print(f"MIDI Read Error: {e}.")
-                    self._handle_disconnection(f"Read error: {e}")
-                    continue # Skip rest of frame
-
-                except Exception as e: # Catch unexpected errors during receive
-                    print(f"\n--- Unexpected MIDI Error During Receive ---")
-                    print(f"Error type: {type(e)}")
-                    print(f"Error details: {e}")
-                    traceback.print_exc()
-                    self._handle_disconnection(f"Unexpected error: {e}")
-                    # Decide whether to keep searching or stop on unexpected errors
-                    self.is_searching = False # Stop searching on truly unexpected errors
-                    self.midi_error_message = f"Unexpected MIDI Error: {e}. Stopped."
-                    self.notify_status(f"MIDI FATAL: Unexpected error {e}. Stopped.")
-                    # Optionally stop the app: self.running = False
-                    continue
+                    self.active_screen.handle_event(event)
 
             # --- Handle Button Repeats ---
-            # Iterate over a copy of keys in case the dict changes during iteration
-            pressed_controls = list(self.pressed_buttons.keys())
-            for control in pressed_controls:
-                if control not in self.pressed_buttons: continue # Check if button was released during iteration
-
-                # --- Skip repeat for controls defined as non-repeatable ---
-                if control in NON_REPEATABLE_CCS:
-                    # print(f"Skipping repeat for Non-Repeatable CC {control}") # Optional debug
-                    continue # Don't repeat faders, knobs, etc.
-                # ----------------------------------------------------------
-
-                state = self.pressed_buttons[control]
-                time_held = current_time - state['press_time']
-
-                # Check if initial delay has passed
-                if time_held >= BUTTON_REPEAT_DELAY_S:
-                    # Check if repeat interval has passed since last repeat/press
-                    if (current_time - state['last_repeat_time']) >= BUTTON_REPEAT_INTERVAL_S:
-                        print(f"Repeat Action for CC {control} (Msg: {state['message']})")
-                        self._dispatch_action(state['message']) # Dispatch the original press message again
-                        state['last_repeat_time'] = current_time # Update last repeat time
-
+            self._handle_button_repeats(current_time)
 
             # --- Update Active Screen ---
-            if self.active_screen:
-                 try:
-                     self.active_screen.update() # Assuming screens have this method
-                 except Exception as screen_update_err:
-                      print(f"Error updating screen {self.active_screen.__class__.__name__}: {screen_update_err}")
-                      traceback.print_exc()
-                      # Handle screen error? Switch screen? Exit?
-                      # For now, just log it.
+            if self.active_screen and hasattr(self.active_screen, 'update'):
+                self.active_screen.update()
 
-            # --- Draw ---
+            # --- Drawing ---
             self.screen.fill(BLACK)
-            if self.active_screen:
-                try:
-                    # Pass MIDI status info to the draw method if needed
-                    midi_status = self.midi_error_message or (f"Connected: {self.midi_port_name}" if self.midi_port else "Initializing MIDI...")
-                    self.active_screen.draw(self.screen, midi_status=midi_status) # Modify draw signature if needed
-                except Exception as screen_draw_err:
-                     print(f"Error drawing screen {self.active_screen.__class__.__name__}: {screen_draw_err}")
-                     traceback.print_exc()
-                     # Draw a fallback error message?
-                     try:
-                         font = pygame.font.Font(None, 24)
-                         err_surf = font.render(f"Screen Draw Error!", True, RED)
-                         self.screen.blit(err_surf, (10, 10))
-                     except: pass # Ignore errors during error drawing
-            else:
-                 # Draw something if no screen is active
-                 try:
-                     font = pygame.font.Font(None, 36)
-                     err_surf = font.render("No Active Screen!", True, RED)
-                     self.screen.blit(err_surf, (self.screen.get_width()//2 - err_surf.get_width()//2, self.screen.get_height()//2 - err_surf.get_height()//2))
-                 except: pass
+            if self.active_screen and hasattr(self.active_screen, 'draw'):
+                # Determine MIDI status string
+                midi_status_str = "MIDI: Searching..." if self.is_searching else \
+                                  f"MIDI In: {self.midi_port_name or 'N/A'}"
+                if self.midi_output_port_name: # Add output status if available
+                    midi_status_str += f" | Out: {self.midi_output_port_name}"
+                elif not self.is_searching and find_midi_port(MIDI_DEVICE_NAME, verbose=False, port_type='output'):
+                     midi_status_str += " | Out: Ready" # Indicate if found but not opened/reopened yet
+                elif not self.is_searching:
+                     midi_status_str += " | Out: N/A"
+
+                if self.midi_error_message and self.is_searching:
+                     midi_status_str = self.midi_error_message # Show specific error during search
+
+                self.active_screen.draw(self.screen, midi_status=midi_status_str)
 
             pygame.display.flip()
-
-            # --- Frame Rate Control ---
             self.clock.tick(FPS)
 
-        # --- Exit ---
+        print("Application loop finished.")
         self.cleanup()
 
     def handle_midi_message(self, msg):
         """
-        Process incoming MIDI messages, tracking CC button presses/releases
-        for the universal repeat mechanism and dispatching the initial action.
-        Only treats CC value 127 as a button press for repeat.
+        Process incoming MIDI messages.
+        Handles button press/release/repeat logic for momentary buttons.
+        Directly dispatches messages for non-repeatable controls (encoders/faders).
         """
-        self.last_midi_message_str = str(msg) # Store for potential display
-        current_time = time.time() # Get time for press tracking
+        self.last_midi_message_str = str(msg)
+        current_time = time.time()
 
         if msg.type == 'control_change':
             control = msg.control
             value = msg.value
 
-            # --- Handle CC Button Press (value == 127) ---
-            if value == 127: # Treat only value 127 as a button press
-                # Check if this button is *not* already considered pressed
+            # Check if this CC is an encoder/fader
+            if control in NON_REPEATABLE_CCS:
+                # Directly dispatch non-repeatable controls (encoders, faders)
+                self._dispatch_action(msg)
+                return # Handled non-repeatable CC
+
+            # Handle MOMENTARY Button Press (value == 127)
+            if value == 127:
                 if control not in self.pressed_buttons:
-                    print(f"Button Press Detected: CC {control} (Value: {value})")
-                    # Record the press time, initial repeat time, and the message itself
+                    # print(f"Button Press Detected: CC {control} (Value: {value})") # Keep this one? Optional.
                     self.pressed_buttons[control] = {
                         'press_time': current_time,
-                        'last_repeat_time': current_time, # Set to press time initially
-                        'message': msg # Store the original message for repeats
+                        'last_repeat_time': current_time,
+                        'message': msg
                     }
-                    # --- Trigger the INITIAL action ---
                     self._dispatch_action(msg)
-                # If already pressed, do nothing (prevents re-triggering initial action)
-                # The repeat logic in the main loop will handle continued holding.
-                return # Handled (or ignored if already pressed)
+                return # Handled momentary press
 
-            # --- Handle CC Button Release (value == 0) ---
-            elif value == 0: # Treat value 0 as button release
-                # Check if this button *was* considered pressed
+            # Handle MOMENTARY Button Release (value == 0)
+            elif value == 0:
                 if control in self.pressed_buttons:
-                    print(f"Button Release Detected: CC {control}")
-                    # Remove the button from the tracking dictionary
+                    # print(f"Button Release Detected: CC {control}") # Keep this one? Optional.
                     del self.pressed_buttons[control]
-                # If not in dict, ignore (e.g., release msg without prior press)
-                # Still dispatch the release message in case a screen needs it
                 self._dispatch_action(msg)
-                return # Handled release
+                return # Handled momentary release
 
-            # --- Handle Other CC Values (e.g., Faders, Encoders) ---
+            # Handle Other CC Values
             else:
-                # Dispatch directly without adding to pressed_buttons
-                # This allows screens to handle continuous values like faders
-                # print(f"Dispatching continuous CC: {msg}") # Optional debug
-                self._dispatch_action(msg)
-                return # Handled continuous CC
+                 self._dispatch_action(msg)
+                 return
 
-        # --- Handle Non-CC Messages (Notes, etc.) ---
+        # Handle Non-CC Messages
         else:
-            # Dispatch other message types directly
-            # print(f"Dispatching non-CC message: {msg}") # Optional debug
             self._dispatch_action(msg)
-
 
     def _dispatch_action(self, msg):
         """
@@ -494,9 +454,6 @@ class App:
         This is called for initial presses and subsequent repeats.
         Prevents global screen switching if TextInputWidget is active.
         """
-        # Optional: Log the dispatch
-        # print(f"Dispatching action for: {msg}")
-
         # --- Check if TextInputWidget is active ---
         widget_active = False
         if (hasattr(self.active_screen, 'text_input_widget') and
@@ -548,6 +505,82 @@ class App:
                      traceback.print_exc()
             # else: print(f"No active screen or handle_midi method for non-CC message {msg}") # Debug
 
+    def _handle_button_press(self, control, msg, current_time):
+        """Handle the initial press of a button."""
+        print(f"Button Press Detected: CC {control} (Value: {msg.value})")
+        # Record the press time, initial repeat time, and the message itself
+        self.pressed_buttons[control] = {
+            'press_time': current_time,
+            'last_repeat_time': current_time, # Set to press time initially
+            'message': msg # Store the original message for repeats
+        }
+        # --- Trigger the INITIAL action ---
+        self._dispatch_action(msg)
+
+    def _handle_button_release(self, control):
+        """Handle the release of a button."""
+        print(f"Button Release Detected: CC {control}")
+        # Remove the button from the tracking dictionary
+        if control in self.pressed_buttons:
+            del self.pressed_buttons[control]
+
+    def _handle_button_repeats(self, current_time):
+        """Check and handle button repeats based on the current time."""
+        # Iterate over a copy of keys in case the dict changes during iteration
+        pressed_controls = list(self.pressed_buttons.keys())
+        for control in pressed_controls:
+            if control not in self.pressed_buttons: continue # Check if button was released during iteration
+
+            # --- Skip repeat for controls defined as non-repeatable ---
+            if control in NON_REPEATABLE_CCS:
+                # print(f"Skipping repeat for Non-Repeatable CC {control}") # Optional debug
+                continue # Don't repeat faders, knobs, etc.
+            # ----------------------------------------------------------
+
+            state = self.pressed_buttons[control]
+            time_held = current_time - state['press_time']
+
+            # Check if initial delay has passed
+            if time_held >= BUTTON_REPEAT_DELAY_S:
+                # Check if repeat interval has passed since last repeat/press
+                if (current_time - state['last_repeat_time']) >= BUTTON_REPEAT_INTERVAL_S:
+                    print(f"Repeat Action for CC {control} (Msg: {state['message']})")
+                    self._dispatch_action(state['message']) # Dispatch the original press message again
+                    state['last_repeat_time'] = current_time # Update last repeat time
+
+    # <<< --- ADDED: Method to send MIDI CC --- >>>
+    def send_midi_cc(self, control: int, value: int, channel: int = 0):
+        """Sends a MIDI Control Change message to the output port."""
+        if self.midi_output_port and not self.midi_output_port.closed:
+            try:
+                # Ensure values are within MIDI range
+                control = max(0, min(127, control))
+                value = max(0, min(127, value))
+                channel = max(0, min(15, channel))
+                msg = mido.Message('control_change', control=control, value=value, channel=channel)
+                # print(f"MIDI Out: {msg}") # Debug: Log outgoing messages
+                self.midi_output_port.send(msg)
+            except (IOError, OSError) as e:
+                print(f"Error sending MIDI CC ({control}={value} Ch={channel}): {e}")
+                # Consider handling disconnection if send fails repeatedly
+                # self._handle_disconnection(reason=f"Send Error: {e}")
+            except Exception as e:
+                 print(f"Unexpected error sending MIDI CC: {e}")
+                 traceback.print_exc()
+        # else:
+            # print(f"Debug: Cannot send MIDI CC - Output port not available or closed.") # Optional debug
+
+    # <<< --- ADDED: Method to update LEDs initially --- >>>
+    def _initial_led_update(self):
+        """Send initial LED values (e.g., turn them off or set defaults)."""
+        print("Sending initial LED states...")
+        # Example: Turn off LEDs for all 8 knobs (CC 9-16) on Channel 16
+        for i in range(8):
+            knob_cc = 9 + i
+            self.send_midi_cc(control=knob_cc, value=0, channel=15) # Channel 15 is MIDI channel 16
+        # Optionally, call the active screen's update method if it sets LEDs
+        if self.active_screen and hasattr(self.active_screen, '_update_encoder_led'):
+             self.active_screen._update_encoder_led()
 
     def next_screen(self):
         """Switch to the next available screen."""
@@ -601,35 +634,31 @@ class App:
         current_midi_status = self.midi_error_message or (self.midi_port_name if self.midi_port else "Searching...")
         self.notify_status(f"Screen: {self.active_screen.__class__.__name__}. MIDI: {current_midi_status}")
 
-
     def cleanup(self):
         """Clean up resources before exiting."""
-        current_status = "Cleaning up..."
-        self.notify_status(current_status)
-        print(current_status)
-
-        if self.active_screen and hasattr(self.active_screen, 'cleanup'):
-            print(f"Cleaning up final screen: {self.active_screen.__class__.__name__}")
-            try: self.active_screen.cleanup()
-            except Exception as e: print(f"Error during final screen cleanup: {e}")
-
-        # Ensure MIDI port is closed if it exists
+        print("Cleaning up application...")
+        self.notify_status("Application Shutting Down")
         if self.midi_port:
-            print(f"Closing MIDI port: {self.midi_port_name}")
-            try: self.midi_port.close()
-            except Exception as e: print(f"Error closing MIDI port: {e}")
-        self.midi_port = None # Ensure it's None after closing
-        self.pressed_buttons.clear() # Clear button state on cleanup
+            try:
+                self.midi_port.close()
+                print("MIDI Input port closed.")
+            except Exception as e:
+                print(f"Error closing MIDI Input port during cleanup: {e}")
+        if self.midi_output_port: # <<< ADDED: Close output port
+             try:
+                 # Optionally send message to turn off LEDs before closing
+                 self._initial_led_update() # Reuse to turn off LEDs
+                 time.sleep(0.1) # Short pause to allow message sending
+                 self.midi_output_port.close()
+                 print("MIDI Output port closed.")
+             except Exception as e:
+                 print(f"Error closing MIDI Output port during cleanup: {e}")
 
+        pygame.font.quit()
         pygame.quit()
         print("Pygame quit.")
-        current_status = "Exited."
-        print(current_status)
-        try:
-            self.notifier.notify(f"STATUS={current_status}")
-            self.notifier.notify("STOPPING=1")
-        except Exception as e:
-            print(f"Could not notify systemd on exit: {e}")
+        self.notifier.notify("STOPPING=1")
+        print("Cleanup finished.")
 
 
 # Script Entry Point
@@ -679,4 +708,6 @@ def main():
         sys.exit(1) # Exit with error code
 
 if __name__ == '__main__':
+    # Optional: Add backend selection if needed, e.g., for ALSA specific settings
+    # mido.set_backend('mido.backends.rtmidi/LINUX_ALSA')
     main()
