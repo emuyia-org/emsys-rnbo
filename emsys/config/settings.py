@@ -31,6 +31,7 @@ BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
 CYAN = (0, 255, 255)
 MAGENTA = (255, 0, 255)
+GREY = (128, 128, 128)
 
 # UI Specific Colors
 HIGHLIGHT_COLOR = GREEN         # For selected items in lists
