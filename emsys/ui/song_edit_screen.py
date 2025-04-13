@@ -8,7 +8,7 @@ import pygame
 import time
 from typing import List, Optional, Tuple, Any
 from enum import Enum, auto
-import math # Needed for ceiling function
+import math # Needed for ceiling function and curve calculations
 
 # Core components
 from .base_screen import BaseScreen
@@ -66,6 +66,32 @@ class FocusColumn(Enum):
     PARAMETER_DETAILS = auto()
 # ---------------------------
 
+# --- Define LED Curve Types ---
+class CurveType(Enum):
+    LINEAR = auto()
+    LOG = auto()      # Moderate curve (e.g., for Tempo)
+    STRONG_LOG = auto() # Harsher curve (e.g., for Ramp, Length, Repeats)
+# ----------------------------
+
+# --- Curve Scaling Functions ---
+# These take a normalized value (0.0 to 1.0) and return a scaled normalized value (0.0 to 1.0)
+def scale_linear(norm_val: float) -> float:
+    """Linear scaling (no change)."""
+    return norm_val
+
+def scale_log(norm_val: float, exponent: float = 0.5) -> float:
+    """Logarithmic-like scaling. Grows faster at the start. exponent < 1.0"""
+    # Using power function: x^(1/N) where N > 1. Default is sqrt(x).
+    if norm_val <= 0: return 0.0
+    return norm_val ** exponent
+
+def scale_strong_log(norm_val: float, exponent: float = 0.33) -> float:
+    """Stronger logarithmic-like scaling. Grows even faster at the start. exponent << 1.0"""
+    # Default is cube root(x).
+    if norm_val <= 0: return 0.0
+    return norm_val ** exponent
+# -----------------------------
+
 class SongEditScreen(BaseScreen):
     """Screen for editing song structure and segment parameters."""
 
@@ -110,6 +136,18 @@ class SongEditScreen(BaseScreen):
             'repetitions': "Repeats",
             'automatic_transport_interrupt': "Auto Pause"
         }
+
+        # --- Map Parameters to LED Curve Types ---
+        self.parameter_led_curves: Dict[str, CurveType] = {
+            'program_message_1': CurveType.LINEAR,
+            'program_message_2': CurveType.LINEAR,
+            'tempo': CurveType.LOG, # Moderate curve for tempo
+            'tempo_ramp': CurveType.STRONG_LOG, # Harsher curve
+            'loop_length': CurveType.LOG, # Harsher curve
+            'repetitions': CurveType.LOG, # Harsher curve
+            'automatic_transport_interrupt': CurveType.LINEAR # Boolean is handled separately anyway
+        }
+        # -----------------------------------------
 
     def init(self):
         """Called when the screen becomes active. Load the current song."""
@@ -841,12 +879,12 @@ class SongEditScreen(BaseScreen):
 
     # --- UPDATED: Method for LED Feedback ---
     def _update_encoder_led(self):
-        """Calculates and sends MIDI CC to update KNOB_B8_CC LED ring (1-13 LEDs)."""
+        """Calculates and sends MIDI CC to update KNOB_B8_CC LED ring (1-13 LEDs). Applies scaling curves."""
         # Check if the app has the send method and output port is ready
         if not hasattr(self.app, 'send_midi_cc') or not self.app.midi_output_port:
             return # MIDI output not ready
 
-        led_value = 1  # <<< CHANGED: Default to first LED instead of 0 (off) >>>
+        led_value = 1  # Default to first LED
 
         # Determine the value only if a valid segment and parameter are selected
         if self.selected_segment_index is not None and self.selected_parameter_key is not None and self.current_song:
@@ -868,31 +906,41 @@ class SongEditScreen(BaseScreen):
                 elif key == 'repetitions':
                     min_val, max_val = MIN_REPETITIONS, MAX_REPETITIONS
                 elif key == 'automatic_transport_interrupt':
-                    # <<< CHANGED: Use LED 1 and 13 for boolean (never completely off) >>>
-                    led_value = 13 if current_value else 1  # LED 1 for False, LED 13 for True
-                    min_val, max_val = 0, 1  # Set dummy range to skip normalization below
+                    # Use LED 1 and 13 for boolean (never completely off)
+                    led_value = 13 if current_value else 1
+                    min_val, max_val = 0, 1  # Set dummy range to skip normalization/scaling
 
-                # Normalize if we have a valid range
+                # Normalize and scale if we have a valid range
                 if min_val is not None and max_val is not None and max_val > min_val:
                     # Normalize current_value to 0.0 - 1.0
                     normalized = (current_value - min_val) / (max_val - min_val)
-                    # Clamp just in case value is slightly outside range due to float precision
+                    # Clamp just in case value is slightly outside range
                     normalized = max(0.0, min(1.0, normalized))
-                    
-                    # <<< CHANGED: Map to 1-13 range (never use 0) >>>
-                    # Scale to 1-13 range. Use 1 for minimum value.
-                    if normalized == 0.0:
+
+                    # --- Apply Scaling Curve ---
+                    curve_type = self.parameter_led_curves.get(key, CurveType.LINEAR) # Default to linear
+                    scaled_normalized = normalized # Start with linear assumption
+
+                    if curve_type == CurveType.LOG:
+                        scaled_normalized = scale_log(normalized)
+                    elif curve_type == CurveType.STRONG_LOG:
+                        scaled_normalized = scale_strong_log(normalized)
+                    # No need for explicit linear case, it's the default
+
+                    # --- Map Scaled Value to 1-13 LED Range ---
+                    # Use the scaled_normalized value now
+                    if scaled_normalized <= 0.001: # Handle floating point near zero
                         led_value = 1  # Always show at least LED 1
                     else:
-                        # Map 0.0-1.0 to 1-13 range (1 + normalized*12)
-                        led_value = 1 + math.floor(normalized * 12)
-                        # Ensure max value is 13
-                        if normalized >= 0.999:  # Handle floating point imprecision
+                        # Map 0.0-1.0 to 1-13 range (1 + scaled_normalized*12)
+                        led_value = 1 + math.floor(scaled_normalized * 12)
+                        # Ensure max value is 13, accounting for potential float imprecision near 1.0
+                        if scaled_normalized >= 0.999:
                             led_value = 13
 
             except (IndexError, AttributeError, TypeError, ValueError) as e:
                 print(f"Error calculating LED value for {self.selected_parameter_key}: {e}")
-                led_value = 1  # <<< CHANGED: Default to first LED on error
+                led_value = 1  # Default to first LED on error
 
         # Send the MIDI CC message for Knob 8 LED
         # Knob 8 LED is CC 16 (9 + 7)
