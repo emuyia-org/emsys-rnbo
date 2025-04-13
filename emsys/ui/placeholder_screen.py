@@ -3,6 +3,7 @@
 import pygame
 import time # Import the time module
 import random # Import random module for randomizing animation timing
+import subprocess # Import subprocess to run git command
 from emsys.ui.base_screen import BaseScreen
 # Import necessary colors
 from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY #, SCREEN_WIDTH, SCREEN_HEIGHT
@@ -10,7 +11,7 @@ from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY #, SCREEN_WIDT
 class PlaceholderScreen(BaseScreen):
     """
     A simple placeholder screen displaying basic info, a MIDI status indicator,
-    and a persistent winking animation.
+    a persistent winking animation, and the Git commit ID.
     """
     def __init__(self, app):
         # Initialize the BaseScreen (sets self.app and self.font)
@@ -23,6 +24,14 @@ class PlaceholderScreen(BaseScreen):
         self.title_surf = self.title_font.render(self.title_text, True, GREY)
         self.title_rect = self.title_surf.get_rect()
         # --- End Title ---
+
+        # --- Git Commit ID ---
+        self.commit_id = self._get_git_commit_id()
+        self.commit_font = self.get_pixel_font(22) # Use a small font
+        commit_text = f"{self.commit_id}" if self.commit_id else ""
+        self.commit_surf = self.commit_font.render(commit_text, True, GREY)
+        self.commit_rect = self.commit_surf.get_rect()
+        # --- End Git Commit ID ---
 
         # Indicator properties
         self.indicator_radius = 8
@@ -50,6 +59,26 @@ class PlaceholderScreen(BaseScreen):
 
         # Add any other specific initializations for PlaceholderScreen
         print("PlaceholderScreen initialized")
+
+    def _get_git_commit_id(self):
+        """Attempts to get the short git commit hash."""
+        try:
+            # Run the git command to get the short commit hash
+            result = subprocess.run(
+                ['git', 'rev-parse', '--short', 'HEAD'],
+                capture_output=True,
+                text=True,
+                check=True,
+                cwd='/home/pi/emsys-rnbo' # Ensure running in the correct directory
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            # Handle errors like git not found or not a git repo
+            print(f"Could not get git commit ID: {e}")
+            return None
+        except Exception as e:
+            print(f"An unexpected error occurred while getting git commit ID: {e}")
+            return None
 
     def randomize_animation_timing(self):
         """Randomize the animation cycle and wink durations slightly."""
@@ -128,6 +157,12 @@ class PlaceholderScreen(BaseScreen):
 
         # Draw the indicator circle
         pygame.draw.circle(screen, indicator_color, indicator_pos, self.indicator_radius)
+
+        # --- Draw Git Commit ID ---
+        # Position commit ID in the bottom-left corner
+        self.commit_rect.bottomleft = (self.indicator_padding, screen_height - self.indicator_padding)
+        screen.blit(self.commit_surf, self.commit_rect)
+        # --- End Draw Git Commit ID ---
 
         # Draw other elements as needed
         # ...
