@@ -22,25 +22,33 @@ SAVE_CC = 86 # SAVE
 DELETE_CC = 93 # DELETE
 CREATE_CC = 94 # CREATE
 
-# --- Fader/Encoder CCs (Example) ---
-FADER_SELECT_CC = 65 # Example: Fader on C1 (Layer A or B)
+# --- Encoder CCs (Rotation/Value & Push) ---
+# Assuming standard X-TOUCH MINI mapping for Layer B
+# Knobs B1-B8 Rotation: CC 9-16
+# Knobs B1-B8 Push: CC 73-80 (Incorrect assumption in previous log? Let's stick to 81 for B8 push for now as it was used)
+# Knobs B1-B8 LED Value: CC 9-16
+# Knobs B1-B8 LED Style: CC 25-32
+
+# --- Fader CC ---
+FADER_SELECT_CC = 65 # CC for the fader (Layer B, Fader 9)
+
 # --- Placeholder Knob CCs (Add your actual CCs here later) ---
-KNOB_A1_CC = 10 # Example C1 Knob
-KNOB_A2_CC = 11 # Example C2 Knob
-KNOB_A3_CC = 12 # Example C3 Knob
-KNOB_A4_CC = 13 # Example C4 Knob
-KNOB_A5_CC = 14 # Example C5 Knob
-KNOB_A6_CC = 15 # Example C6 Knob
-KNOB_A7_CC = 16 # Example C7 Knob
-KNOB_A8_CC = 17 # Example C8 Knob
-KNOB_B1_CC = 74 # Example C1 Knob
-KNOB_B2_CC = 75 # Example C2 Knob
-KNOB_B3_CC = 76 # Example C3 Knob
-KNOB_B4_CC = 77 # Example C4 Knob
-KNOB_B5_CC = 78 # Example C5 Knob
-KNOB_B6_CC = 79 # Example C6 Knob
-KNOB_B7_CC = 80 # Example C7 Knob
-KNOB_B8_CC = 81 # Example C8 Knob
+KNOB_A1_CC = 10
+KNOB_A2_CC = 11
+KNOB_A3_CC = 12
+KNOB_A4_CC = 13
+KNOB_A5_CC = 14
+KNOB_A6_CC = 15
+KNOB_A7_CC = 16
+KNOB_A8_CC = 17
+KNOB_B1_CC = 74
+KNOB_B2_CC = 75
+KNOB_B3_CC = 76
+KNOB_B4_CC = 77
+KNOB_B5_CC = 78
+KNOB_B6_CC = 79
+KNOB_B7_CC = 80
+KNOB_B8_CC = 81
 # --- End Placeholder Knobs ---
 
 # --- Set of CCs that should NOT trigger the repeat mechanism ---

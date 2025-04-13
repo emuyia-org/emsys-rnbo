@@ -551,24 +551,31 @@ class App:
     # <<< --- ADDED: Method to send MIDI CC --- >>>
     def send_midi_cc(self, control: int, value: int, channel: int = 0):
         """Sends a MIDI Control Change message to the output port."""
+        port_status = "Not Initialized"
+        if self.midi_output_port:
+            port_status = "Closed" if self.midi_output_port.closed else "Open"
+
+        # --- DEBUG PRINT ---
+        print(f"[MIDI Send Debug] Attempting to send CC: Ch={channel+1}, CC={control}, Val={value}. Port Status: {port_status}")
+        # --- END DEBUG ---
+
         if self.midi_output_port and not self.midi_output_port.closed:
             try:
-                # Ensure values are within MIDI range
-                control = max(0, min(127, control))
-                value = max(0, min(127, value))
-                channel = max(0, min(15, channel))
-                msg = mido.Message('control_change', control=control, value=value, channel=channel)
-                # print(f"MIDI Out: {msg}") # Debug: Log outgoing messages
+                msg = mido.Message('control_change', channel=channel, control=control, value=value)
+                # --- DEBUG PRINT ---
+                print(f"[MIDI Send Debug]   Sending message: {msg}")
+                # --- END DEBUG ---
                 self.midi_output_port.send(msg)
             except (IOError, OSError) as e:
-                print(f"Error sending MIDI CC ({control}={value} Ch={channel}): {e}")
-                # Consider handling disconnection if send fails repeatedly
-                # self._handle_disconnection(reason=f"Send Error: {e}")
+                print(f"MIDI Send Error (IOError/OSError): {e}")
+                self._handle_disconnection(reason=f"Send Error: {e}")
             except Exception as e:
-                 print(f"Unexpected error sending MIDI CC: {e}")
-                 traceback.print_exc()
-        # else:
-            # print(f"Debug: Cannot send MIDI CC - Output port not available or closed.") # Optional debug
+                 print(f"MIDI Send Error (Unexpected): {e}")
+        else:
+            # --- DEBUG PRINT ---
+            print(f"[MIDI Send Debug]   Cannot send MIDI CC - Output port not available or closed.")
+            # --- END DEBUG ---
+            pass # Already printed status above
 
     # <<< --- ADDED: Method to update LEDs initially --- >>>
     def _initial_led_update(self):

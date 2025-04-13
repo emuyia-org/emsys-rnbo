@@ -12,15 +12,15 @@ from enum import Enum, auto
 from ..core.song_renamer import SongRenamer, RenameMode
 from ..config import settings, mappings
 
-# Define colors (can also be imported from settings)
+# Define colors (imported from settings)
 WHITE = settings.WHITE
 BLACK = settings.BLACK
 GREEN = settings.GREEN
 RED = settings.RED
 BLUE = settings.BLUE
-HIGHLIGHT_COLOR = GREEN # Color for selected items
-FOCUS_BORDER_COLOR = BLUE # Color for the border around the focused column - reusing for consistency
-ERROR_COLOR = RED
+HIGHLIGHT_COLOR = settings.HIGHLIGHT_COLOR
+FOCUS_BORDER_COLOR = settings.FOCUS_BORDER_COLOR # Use setting
+ERROR_COLOR = settings.ERROR_COLOR
 
 # Define layout constants (can be adjusted or passed in)
 TOP_MARGIN = 15
@@ -33,6 +33,13 @@ class TextInputStatus(Enum):
     CONFIRMED = auto()
     CANCELLED = auto()
     ERROR = auto()
+
+# --- Add FocusColumn Enum ---
+class FocusColumn(Enum):
+    """Represents which major UI column has focus."""
+    SEGMENT_LIST = auto()
+    PARAMETER_DETAILS = auto()
+# --------------------------
 
 class TextInputWidget:
     """

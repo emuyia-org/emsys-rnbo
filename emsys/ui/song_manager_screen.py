@@ -22,17 +22,17 @@ from emsys.config.mappings import FADER_SELECT_CC
 
 # --- Import the TextInputWidget ---
 from .widgets import TextInputWidget, TextInputStatus
-# ------------------------------------
 
-# Define colors (reuse or import from settings)
+# --- Define colors (imported from settings) ---
 WHITE = settings.WHITE
 BLACK = settings.BLACK
 GREEN = settings.GREEN
 RED = settings.RED
 BLUE = settings.BLUE
-HIGHLIGHT_COLOR = GREEN # Color for selected item
-FEEDBACK_COLOR = BLUE   # Color for feedback messages
-ERROR_COLOR = RED       # Color for error messages
+HIGHLIGHT_COLOR = settings.HIGHLIGHT_COLOR
+FEEDBACK_COLOR = settings.FEEDBACK_COLOR
+ERROR_COLOR = settings.ERROR_COLOR
+# ---------------------------------------------
 
 # Define layout constants
 LEFT_MARGIN = 15
@@ -255,9 +255,11 @@ class SongManagerScreen(BaseScreen):
                 max_visible = self._get_max_visible_items()
                 # If selection is below visible area
                 if self.selected_index >= self.scroll_offset + max_visible:
+                    print(f"          Scrolling DOWN: Offset {self.scroll_offset} -> {self.selected_index - max_visible + 1}") # DEBUG
                     self.scroll_offset = self.selected_index - max_visible + 1
                 # If selection is above visible area
                 elif self.selected_index < self.scroll_offset:
+                    print(f"          Scrolling UP: Offset {self.scroll_offset} -> {self.selected_index}") # DEBUG
                     self.scroll_offset = self.selected_index
                 self.clear_feedback()
             # else: # Optional: Log when no update occurs

@@ -6,9 +6,9 @@ Uses column-based navigation (Segments <-> Parameters).
 """
 import pygame
 import time
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional, Tuple, Any, Dict
 from enum import Enum, auto
-import math # Needed for ceiling function and curve calculations
+import math # Needed for curve calculations and floor
 
 # Core components
 from .base_screen import BaseScreen
@@ -20,34 +20,25 @@ from ..core.song import (MIN_TEMPO, MAX_TEMPO, MIN_RAMP, MAX_RAMP,
 from ..utils import file_io # Import the file I/O utilities
 from ..config import settings, mappings
 
-# --- Import the TextInputWidget ---
-from .widgets import TextInputWidget, TextInputStatus
+# --- Import the TextInputWidget and FocusColumn ---
+from .widgets import TextInputWidget, TextInputStatus, FocusColumn # <<< Added FocusColumn
 # ------------------------------------
-# --- Import the specific Fader CC ---
-from ..config.mappings import FADER_SELECT_CC
-# ------------------------------------
-
-# Define colors (can also be imported from settings)
-WHITE = settings.WHITE
-BLACK = settings.BLACK
-GREEN = settings.GREEN
-RED = settings.RED
-BLUE = settings.BLUE
-HIGHLIGHT_COLOR = GREEN # Color for selected items
-PARAM_COLOR = WHITE     # Color for parameter names/values
-VALUE_COLOR = WHITE     # Color for parameter values (can be different)
-FEEDBACK_COLOR = BLUE   # Color for feedback messages
-ERROR_COLOR = RED       # Color for error messages
-FOCUS_BORDER_COLOR = BLUE # Color for the border around the focused column
+from emsys.core.song import Segment # <<< Added for default values
+from emsys.config.mappings import FADER_SELECT_CC, DELETE_CC # <<< Added DELETE_CC etc.
+# --- Import colors from settings ---
+from emsys.config.settings import ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR, BLACK, WHITE, FOCUS_BORDER_COLOR # <<< Use settings
+# -----------------------------------
 
 # Define layout constants
 LEFT_MARGIN = 15
 TOP_MARGIN = 15
-LINE_HEIGHT = 25
+LINE_HEIGHT = 36 # <<< Increased line height for larger fonts
 PARAM_INDENT = 30
 SEGMENT_LIST_WIDTH = 180 # Width for the segment list area
 PARAM_AREA_X = LEFT_MARGIN + SEGMENT_LIST_WIDTH + 15 # Start X for parameter details
 COLUMN_BORDER_WIDTH = 2 # Width of the focus border
+LIST_TOP_PADDING = 10 # Padding above lists
+FEEDBACK_AREA_HEIGHT = 40 # Space at the bottom for feedback
 
 # Define parameter editing steps
 PARAM_STEPS = {
@@ -60,20 +51,21 @@ PARAM_STEPS = {
     'automatic_transport_interrupt': 1, # Special handling for bool
 }
 
-# --- Define Focus Columns ---
-class FocusColumn(Enum):
-    SEGMENT_LIST = auto()
-    PARAMETER_DETAILS = auto()
-# ---------------------------
-
 # --- Define LED Curve Types ---
+# (Defined locally for now)
 class CurveType(Enum):
     LINEAR = auto()
     LOG = auto()      # Moderate curve (e.g., for Tempo)
     STRONG_LOG = auto() # Harsher curve (e.g., for Ramp, Length, Repeats)
 # ----------------------------
 
-# --- Curve Scaling Functions ---
+# --- Curve Scaling Function ---
+# (Defined locally for now)
+# --- REMOVED NEW scale_value_to_led ---
+# def scale_value_to_led(value, min_val, max_val, curve: CurveType = CurveType.LINEAR) -> int:
+#    ...
+
+# --- ADDED OLD Curve Scaling Functions ---
 # These take a normalized value (0.0 to 1.0) and return a scaled normalized value (0.0 to 1.0)
 def scale_linear(norm_val: float) -> float:
     """Linear scaling (no change)."""
@@ -92,6 +84,7 @@ def scale_strong_log(norm_val: float, exponent: float = 0.33) -> float:
     return norm_val ** exponent
 # -----------------------------
 
+
 class SongEditScreen(BaseScreen):
     """Screen for editing song structure and segment parameters."""
 
@@ -99,14 +92,15 @@ class SongEditScreen(BaseScreen):
         """Initialize the song editing screen."""
         super().__init__(app_ref)
         # Define additional fonts needed
-        self.font_large = pygame.font.Font(None, 48)  # Larger font for titles
-        self.font_small = pygame.font.Font(None, 24)  # Smaller font for detailed info
+        self.font_large = pygame.font.Font(None, 48)  # Larger font for titles (unchanged)
+        self.font_small = pygame.font.Font(None, 32)  # <<< Increased font size for lists
+        self.font = pygame.font.Font(None, 36) # <<< Increased standard font size
 
         self.current_song: Optional[Song] = None
         self.selected_segment_index: Optional[int] = None
         self.selected_parameter_key: Optional[str] = None
-        self.feedback_message: Optional[Tuple[str, float, Tuple[int, int, int]]] = None # (message, timestamp, color) - Added color
-        self.feedback_duration: float = 2.0 # seconds
+        self.feedback_message: Optional[Tuple[str, float, Tuple[int, int, int]]] = None
+        self.feedback_duration: float = 2.0
 
         # --- Add instance of TextInputWidget ---
         self.text_input_widget = TextInputWidget(app_ref)
@@ -115,6 +109,11 @@ class SongEditScreen(BaseScreen):
         # --- Add state for column focus ---
         self.focused_column: FocusColumn = FocusColumn.SEGMENT_LIST
         # ---------------------------------
+
+        # --- Add scroll offsets ---
+        self.segment_scroll_offset: int = 0
+        self.parameter_scroll_offset: int = 0
+        # --------------------------
 
         # Define the order and names of editable parameters
         self.parameter_keys: List[str] = [
@@ -172,6 +171,10 @@ class SongEditScreen(BaseScreen):
 
         self.text_input_widget.cancel()
         self.focused_column = FocusColumn.SEGMENT_LIST
+        # --- Reset scroll offsets ---
+        self.segment_scroll_offset = 0
+        self.parameter_scroll_offset = 0
+        # --------------------------
         self.clear_feedback()
         self._update_encoder_led() # <<< RE-ENABLED
 
@@ -210,11 +213,6 @@ class SongEditScreen(BaseScreen):
         cc = msg.control
         value = msg.value
 
-        # <<< --- REMOVE VERY EARLY DEBUG PRINT FOR KNOB B8 --- >>>
-        # if cc == mappings.KNOB_B8_CC:
-        #     print(f"--- KNOB B8 (CC {cc}) RAW VALUE RECEIVED: {value} ---")
-        # <<< --- END EARLY DEBUG PRINT REMOVAL --- >>>
-
         # --- Handle Text Input Mode FIRST ---
         if self.text_input_widget.is_active:
             # Text input only responds to button presses (value 127)
@@ -222,9 +220,12 @@ class SongEditScreen(BaseScreen):
                 return # Ignore non-presses during text input
             status = self.text_input_widget.handle_input(cc)
             if status == TextInputStatus.CONFIRMED:
-                self._confirm_song_rename() # Call the confirmation logic
+                # Renaming is handled by SongManagerScreen, this screen doesn't confirm renames
+                # self._confirm_song_rename() # <<< REMOVED
+                pass
             elif status == TextInputStatus.CANCELLED:
-                self._cancel_song_rename() # Call the cancellation logic
+                # self._cancel_song_rename() # <<< REMOVED
+                self.text_input_widget.cancel() # Just ensure it's cancelled
             # If ACTIVE or ERROR, the widget handles drawing, we just wait
             return # Don't process other actions while text input is active
         # ----------------------------------
@@ -260,13 +261,27 @@ class SongEditScreen(BaseScreen):
                 if target_index != current_selected:
                     # print(f"          Updating segment selection: {current_selected} -> {target_index}")
                     self.selected_segment_index = target_index
-                    # Basic scroll handling (can be improved like in SongManagerScreen)
-                    # This just ensures the first parameter is selected when segment changes via fader
-                    if self.parameter_keys:
-                        self.selected_parameter_key = self.parameter_keys[0]
-                    else:
-                        self.selected_parameter_key = None
+                    # --- ADDED: Scroll Handling for Segments ---
+                    max_visible = self._get_max_visible_segments()
+                    if self.selected_segment_index >= self.segment_scroll_offset + max_visible:
+                        print(f"          [Fader Scroll Seg] Scrolling DOWN: Offset {self.segment_scroll_offset} -> {self.selected_segment_index - max_visible + 1}") # DEBUG
+                        self.segment_scroll_offset = self.selected_segment_index - max_visible + 1
+                    elif self.selected_segment_index < self.segment_scroll_offset:
+                        print(f"          [Fader Scroll Seg] Scrolling UP: Offset {self.segment_scroll_offset} -> {self.selected_segment_index}") # DEBUG
+                        self.segment_scroll_offset = self.selected_segment_index
+                    # --- END ADDED ---
+                    # --- MODIFIED: Preserve parameter selection when segment changes via fader ---
+                    # Only reset if there's no selected parameter or it's not in the parameter list
+                    if not self.selected_parameter_key or (self.parameter_keys and self.selected_parameter_key not in self.parameter_keys):
+                        if self.parameter_keys:
+                            self.selected_parameter_key = self.parameter_keys[0]
+                            self.parameter_scroll_offset = 0 # Reset scroll if parameter is reset
+                        else:
+                            self.selected_parameter_key = None
+                            self.parameter_scroll_offset = 0
+                    # --- END MODIFICATION ---
                     self.clear_feedback()
+                    self._update_encoder_led() # Update LED as focus might implicitly change
 
             elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
                 if self.selected_segment_index is None or not self.parameter_keys:
@@ -284,7 +299,18 @@ class SongEditScreen(BaseScreen):
                 if target_key != current_key:
                     # print(f"          Updating parameter selection: '{current_key}' -> '{target_key}'")
                     self.selected_parameter_key = target_key
+                    # --- ADDED: Scroll Handling for Parameters ---
+                    max_visible = self._get_max_visible_parameters()
+                    current_param_index = self.parameter_keys.index(self.selected_parameter_key) # Get index of the new key
+                    if current_param_index >= self.parameter_scroll_offset + max_visible:
+                        print(f"          [Fader Scroll Param] Scrolling DOWN: Offset {self.parameter_scroll_offset} -> {current_param_index - max_visible + 1}") # DEBUG
+                        self.parameter_scroll_offset = current_param_index - max_visible + 1
+                    elif current_param_index < self.parameter_scroll_offset:
+                        print(f"          [Fader Scroll Param] Scrolling UP: Offset {self.parameter_scroll_offset} -> {current_param_index}") # DEBUG
+                        self.parameter_scroll_offset = current_param_index
+                    # --- END ADDED ---
                     self.clear_feedback()
+                    self._update_encoder_led() # Update LED for new parameter
 
             return # Fader handled, don't process as button press below
         # --- End Fader Handling ---
@@ -292,13 +318,25 @@ class SongEditScreen(BaseScreen):
         # --- Normal Edit Mode Handling (Button Presses Only) ---
         # Process remaining CCs only if they are button presses (value 127)
         if value != 127:
-            return
+            return # Ignore releases or other values for the buttons below
 
-        # --- Now handle button presses based on focus ---
-        # (Existing button logic follows, unchanged)
-        # ...
+        # --- REMOVE RENAME_CC Handling ---
+        # if cc == mappings.RENAME_CC:
+        #     # Renaming is handled by SongManagerScreen
+        #     return
+        # --- End RENAME_CC Removal ---
 
-        # Navigation - Behavior depends on focused column
+        # --- Handle DELETE_CC based on focus ---
+        if cc == DELETE_CC:
+            if self.focused_column == FocusColumn.SEGMENT_LIST:
+                self._delete_current_segment() # <<< Direct deletion
+            elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                self._reset_or_copy_parameter() # Reset/copy parameter value
+            return # DELETE handled
+        # ---------------------------------------
+
+        # --- Now handle other button presses based on focus ---
+        # Navigation
         if cc == mappings.DOWN_NAV_CC:
             if self.focused_column == FocusColumn.SEGMENT_LIST:
                 self._change_selected_segment(1)
@@ -325,597 +363,454 @@ class SongEditScreen(BaseScreen):
             self._save_current_song()
         elif cc == mappings.CREATE_CC:
             self._add_new_segment()
-        elif cc == mappings.DELETE_CC:
-            self._delete_selected_segment()
-        elif cc == mappings.RENAME_CC: # CC 85
-             self._start_song_rename()
+        # DELETE is handled above based on focus
+        # RENAME is removed
 
-    # --- Renaming Methods ---
-    def _start_song_rename(self):
-        """Initiates the song renaming process using the widget."""
-        if self.current_song:
-            self.text_input_widget.start(self.current_song.name, prompt="Rename Song")
-            self.clear_feedback() # Clear other feedback
-            print("Starting song rename mode via widget.")
-            self.set_feedback("Renaming Song...", duration=1.0) # Brief indicator
-        else:
-            self.set_feedback("No song loaded to rename", is_error=True)
-
-    def _confirm_song_rename(self):
-        """Confirms the rename, updates the song, and saves."""
-        # Check if widget is active *now* - it should be if CONFIRMED was returned correctly
-        if not self.text_input_widget.is_active or not self.current_song:
-            # This path should ideally not be hit if CONFIRMED was returned correctly
-            self.text_input_widget.cancel() # Ensure widget is inactive anyway
+    # --- Segment Deletion Method (Direct) ---
+    def _delete_current_segment(self):
+        """Performs the actual segment deletion directly."""
+        if self.selected_segment_index is None or not self.current_song or not self.current_song.segments:
+            self.set_feedback("No segment selected to delete", is_error=True)
             return
 
-        new_name = self.text_input_widget.get_text()
-        if new_name is None: # Should not happen if CONFIRMED, but safety check
-             self.set_feedback("Error getting new name from widget.", is_error=True)
-             self.text_input_widget.cancel() # Cancel on error
-             return
+        try:
+            index_to_delete = self.selected_segment_index
+            num_segments_before = len(self.current_song.segments)
 
-        new_name = new_name.strip()
-        old_name = self.current_song.name
+            removed_segment = self.current_song.remove_segment(index_to_delete)
+            self.set_feedback(f"Deleted Segment {index_to_delete + 1}")
 
-        if not new_name:
-            self.set_feedback("Song name cannot be empty. Rename cancelled.", is_error=True)
-            self.text_input_widget.cancel() # Cancel on validation failure
-            return
+            num_segments_after = len(self.current_song.segments)
 
-        if new_name == old_name:
-            self.set_feedback("Name unchanged. Exiting rename.")
-            self.text_input_widget.cancel() # Cancel if name is the same
-            return
-
-        print(f"Attempting to rename song from '{old_name}' to '{new_name}'")
-
-        # --- File Renaming Logic ---
-        if not hasattr(file_io, 'rename_song'):
-             self.set_feedback("Error: File renaming function not implemented!", is_error=True)
-             self.text_input_widget.cancel() # Cancel on missing function
-             return
-
-        # Use the rename_song function from file_io
-        if file_io.rename_song(old_name, new_name):
-            # Update the in-memory song object's name
-            self.current_song.name = new_name
-            self.set_feedback(f"Renamed to '{new_name}'. Saving...")
-            pygame.display.flip() # Show feedback immediately
-
-            # Save the song content with the new name
-            if file_io.save_song(self.current_song):
-                self.set_feedback(f"Song renamed and saved as '{new_name}'")
-                # self.current_song.dirty should be False now due to save_song
+            # Adjust selection
+            if num_segments_after == 0:
+                # No segments left
+                self.selected_segment_index = None
+                self.selected_parameter_key = None
+                self.focused_column = FocusColumn.SEGMENT_LIST # Reset focus
             else:
-                self.set_feedback(f"Renamed file, but failed to save content for '{new_name}'", is_error=True)
-                # If save failed, the song might still be considered dirty if changes were made before rename
-                # save_song doesn't reset the flag on failure.
+                # Select the segment that is now at the deleted index,
+                # or the last segment if the deleted one was the last.
+                self.selected_segment_index = min(index_to_delete, num_segments_after - 1)
 
-            # Exit rename mode on successful rename (or save failure after rename)
-            self.text_input_widget.cancel() # Cancel after attempting save
+            # Update LED if selection changed
+            self._update_encoder_led()
 
+        except IndexError:
+            self.set_feedback("Error deleting segment (index out of bounds).", is_error=True)
+            self._reset_selection_on_error()
+        except Exception as e:
+            self.set_feedback(f"Error deleting segment: {e}", is_error=True)
+            print(f"Unexpected error during segment delete: {e}")
+
+    def _reset_selection_on_error(self):
+        """Resets selection state, e.g., after an index error."""
+        if self.current_song and self.current_song.segments:
+            self.selected_segment_index = 0
+            self.selected_parameter_key = self.parameter_keys[0] if self.parameter_keys else None
         else:
-            # file_io.rename_song failed
-            self.set_feedback(f"Failed to rename file (see console)", is_error=True)
-            # Cancel on rename failure
-            self.text_input_widget.cancel()
+            self.selected_segment_index = None
+            self.selected_parameter_key = None
+        self.focused_column = FocusColumn.SEGMENT_LIST
+        self._update_encoder_led()
 
-    def _cancel_song_rename(self):
-        """Cancels the renaming process initiated by the widget."""
-        # Widget should already be inactive if CANCELLED status was returned,
-        # but call cancel() again for safety.
-        self.set_feedback("Rename cancelled.")
-        print("Cancelled song rename mode.")
-        self.text_input_widget.cancel()
+    # --- Parameter Reset/Copy Method ---
+    def _reset_or_copy_parameter(self):
+        """Resets the selected parameter to default or copies from the previous segment."""
+        if (self.selected_segment_index is None or
+                self.selected_parameter_key is None or
+                not self.current_song or
+                not self.current_song.segments):
+            self.set_feedback("No parameter selected", is_error=True)
+            return
 
-    # --- Internal Helper Methods ---
+        try:
+            current_index = self.selected_segment_index
+            key = self.selected_parameter_key
+            current_segment = self.current_song.get_segment(current_index)
+            current_value = getattr(current_segment, key)
 
-    def _navigate_focus(self, direction: int):
-        """Change the focused column."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
-
-        old_focus = self.focused_column # Store old focus for feedback LED update
-
-        if direction > 0: # Move Right
-            if self.focused_column == FocusColumn.SEGMENT_LIST:
-                # Check if navigation to parameters is possible
-                if self.current_song and self.current_song.segments and self.selected_segment_index is not None and self.parameter_keys:
-                    self.focused_column = FocusColumn.PARAMETER_DETAILS
-                    # Ensure a parameter is selected (select first if needed)
-                    if self.selected_parameter_key not in self.parameter_keys:
-                        self.selected_parameter_key = self.parameter_keys[0]
-                    self.clear_feedback()
-                    print("Focus moved to Parameters")
+            if current_index > 0:
+                # Copy from previous segment
+                prev_segment = self.current_song.get_segment(current_index - 1)
+                prev_value = getattr(prev_segment, key)
+                if prev_value != current_value:
+                    # Use the song's update method which handles validation and dirty flag
+                    self.current_song.update_segment(current_index, **{key: prev_value})
+                    self.set_feedback(f"'{self.parameter_display_names.get(key, key)}' copied from previous")
+                    self._update_encoder_led() # Update LED to reflect new value
                 else:
-                    self.set_feedback("Cannot focus parameters (no segment/params?)", is_error=True)
-            # else: Already in the rightmost column
+                    self.set_feedback(f"Value already matches previous segment")
 
-        elif direction < 0: # Move Left
+            else:
+                # Reset to default
+                default_segment = Segment() # Create a temporary default segment
+                default_value = getattr(default_segment, key)
+                if default_value != current_value:
+                    # Use the song's update method
+                    self.current_song.update_segment(current_index, **{key: default_value})
+                    self.set_feedback(f"'{self.parameter_display_names.get(key, key)}' reset to default")
+                    self._update_encoder_led() # Update LED to reflect new value
+                else:
+                     self.set_feedback(f"Value already at default")
+
+        except IndexError:
+            self.set_feedback("Segment index error.", is_error=True)
+            self._reset_selection_on_error()
+        except AttributeError:
+            self.set_feedback(f"Parameter '{key}' error.", is_error=True)
+        except Exception as e:
+            self.set_feedback(f"Error resetting parameter: {e}", is_error=True)
+            print(f"Unexpected error during parameter reset/copy: {e}")
+
+    # --- Navigation Methods ---
+    def _navigate_focus(self, direction: int):
+        """Change focus between columns."""
+        if direction > 0: # Move right
+            if self.focused_column == FocusColumn.SEGMENT_LIST:
+                self.focused_column = FocusColumn.PARAMETER_DETAILS
+        elif direction < 0: # Move left
             if self.focused_column == FocusColumn.PARAMETER_DETAILS:
                 self.focused_column = FocusColumn.SEGMENT_LIST
-                self.clear_feedback()
-                print("Focus moved to Segments")
-            # else: Already in the leftmost column
 
-        if old_focus != self.focused_column:
-            self.clear_feedback()
-            self._update_encoder_led() # <<< RE-ENABLED
+        self.clear_feedback()
+        self._update_encoder_led() # Update LED based on new focus
 
     def _change_selected_segment(self, direction: int):
-        """Move segment selection up or down."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
-        if self.focused_column != FocusColumn.SEGMENT_LIST: return # Only act if focused
-
+        """Change the selected segment index and handle scrolling."""
         if not self.current_song or not self.current_song.segments:
-            self.set_feedback("No segments to select", is_error=True)
+            self.selected_segment_index = None
             return
 
         num_segments = len(self.current_song.segments)
         if self.selected_segment_index is None:
-            self.selected_segment_index = 0
+            self.selected_segment_index = 0 if direction > 0 else num_segments - 1
         else:
-            new_index = (self.selected_segment_index + direction) % num_segments
-            # Handle wrap-around explicitly if needed, or rely on modulo
-            self.selected_segment_index = new_index
+            self.selected_segment_index = (self.selected_segment_index + direction + num_segments) % num_segments
 
-        # Preserve the currently selected parameter when changing segments
+        # --- Restore old behavior: Preserve parameter selection ---
         # Only reset if there's no selected parameter or it's not in the parameter list
         if not self.selected_parameter_key or (self.parameter_keys and self.selected_parameter_key not in self.parameter_keys):
             if self.parameter_keys:
                 self.selected_parameter_key = self.parameter_keys[0]
+                self.parameter_scroll_offset = 0 # Reset scroll if parameter is reset
             else:
                 self.selected_parameter_key = None
+                self.parameter_scroll_offset = 0
+        # --- End restored behavior ---
+        # Note: Parameter scroll offset is still reset if the parameter itself is reset,
+        # but not if the parameter is preserved.
+
+        # Adjust segment scroll offset
+        max_visible = self._get_max_visible_segments()
+        if self.selected_segment_index >= self.segment_scroll_offset + max_visible:
+            self.segment_scroll_offset = self.selected_segment_index - max_visible + 1
+        elif self.selected_segment_index < self.segment_scroll_offset:
+            self.segment_scroll_offset = self.selected_segment_index
+
         self.clear_feedback()
-        self._update_encoder_led() # <<< RE-ENABLED
+        self._update_encoder_led() # Update LED
 
     def _change_selected_parameter_vertically(self, direction: int):
-        """Move parameter selection up or down."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
-        if self.focused_column != FocusColumn.PARAMETER_DETAILS: return # Only act if focused
-
+        """Change the selected parameter key and handle scrolling."""
         if self.selected_segment_index is None or not self.parameter_keys:
-            self.set_feedback("No parameters to select", is_error=True)
+            self.selected_parameter_key = None
             return
 
-        # Ensure a parameter is currently selected
+        num_params = len(self.parameter_keys)
         if self.selected_parameter_key is None:
-             if self.parameter_keys:
-                 self.selected_parameter_key = self.parameter_keys[0]
-             else:
-                 return # No parameters available
-
-        try:
-            current_param_index = self.parameter_keys.index(self.selected_parameter_key)
-            next_param_index = (current_param_index + direction) % len(self.parameter_keys)
-            new_key = self.parameter_keys[next_param_index]
-
-            if new_key != self.selected_parameter_key:
-                self.selected_parameter_key = new_key
-                self.clear_feedback()
-                self._update_encoder_led() # <<< RE-ENABLED
-
-        except (ValueError, AttributeError):
-            # Fallback if current key isn't found (shouldn't happen ideally)
-            self.selected_parameter_key = self.parameter_keys[0] if self.parameter_keys else None
-            self.clear_feedback()
-            self._update_encoder_led() # <<< RE-ENABLED (fallback)
-
-    def _modify_selected_parameter(self, direction: int):
-        """Increment or decrement the value of the selected parameter (only if parameter details are focused)."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
-        # --- Add focus check ---
-        if self.focused_column != FocusColumn.PARAMETER_DETAILS:
-            self.set_feedback("Focus parameters to modify (Right Arrow)", is_error=True)
-            return
-        # -----------------------
-        if self.selected_segment_index is None or self.selected_parameter_key is None:
-            # <<< --- ADDED DETAIL --- >>>
-            print("Debug: Modification aborted - No segment or parameter selected.")
-            self.set_feedback("Select segment and parameter first", is_error=True)
-            return
-        if not self.current_song:
-            # <<< --- ADDED DETAIL --- >>>
-            print("Debug: Modification aborted - No current song.")
-            return
-
-        try:
-            segment = self.current_song.get_segment(self.selected_segment_index)
-            key = self.selected_parameter_key
-            current_value = getattr(segment, key)
-            step = PARAM_STEPS.get(key, 1)
-            original_value = current_value
-
-            # <<< --- ADD DEBUG PRINT 5 --- >>>
-            print(f"Debug: Modifying '{key}'. Current={current_value}, Step={step}")
-
-            new_value: Any
-            min_val, max_val = None, None # Define min/max constraints
-            if key == 'program_message_1' or key == 'program_message_2':
-                min_val, max_val = MIN_PROGRAM_MSG, MAX_PROGRAM_MSG
-            elif key == 'tempo':
-                min_val, max_val = MIN_TEMPO, MAX_TEMPO
-            elif key == 'tempo_ramp':
-                min_val, max_val = MIN_RAMP, MAX_RAMP
-            elif key == 'loop_length':
-                min_val, max_val = MIN_LOOP_LENGTH, MAX_LOOP_LENGTH
-            elif key == 'repetitions':
-                min_val, max_val = MIN_REPETITIONS, MAX_REPETITIONS
-
-            # Calculate new value based on type
-            if isinstance(current_value, bool):
-                new_value = not current_value if direction != 0 else current_value
-            elif isinstance(current_value, (int, float)): # Combine int and float logic
-                new_value = current_value + (direction * step)
-                # Clamp integer/float value
-                if min_val is not None: new_value = max(min_val, new_value)
-                if max_val is not None: new_value = min(max_val, new_value)
-                if isinstance(new_value, float):
-                    new_value = round(new_value, 2) # Round floats
-            else:
-                self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
-                return
-
-            # <<< --- ADD DEBUG PRINT 6 --- >>>
-            print(f"Debug: Calculated New Value={new_value} (Original={original_value})")
-
-            # <<< --- CRITICAL CHANGE: Track if we hit minimum/maximum bounds --- >>>
-            hit_boundary = False
-            if direction < 0 and min_val is not None and new_value == min_val:
-                hit_boundary = True
-                print(f"Debug: Hit minimum bound ({min_val})")
-            elif direction > 0 and max_val is not None and new_value == max_val:
-                hit_boundary = True
-                print(f"Debug: Hit maximum bound ({max_val})")
-
-            if new_value != original_value:
-                # Value did change, update as normal
-                print("Debug: Value changed. Updating song object.")
-                setattr(segment, key, new_value)
-                self.current_song.dirty = True
-                display_name = self.parameter_display_names.get(key, key)
-                self.set_feedback(f"{display_name}: {new_value}", duration=0.75)
-                self._update_encoder_led()  # Update LED for changed value
-            else:
-                # Value didn't change, but we might need to refresh the LED
-                print("Debug: Value did not change (e.g., at limit or step issue).")
-                
-                # <<< --- CRITICAL CHANGE: Always update LED when at limits --- >>>
-                if hit_boundary:
-                    # Ensure LED is updated when we hit a boundary, even if value didn't change
-                    print("Debug: Updating LED even though value didn't change (at boundary)")
-                    self._update_encoder_led()
-                    # Optional: Show brief feedback that we've hit the limit
-                    display_name = self.parameter_display_names.get(key, key)
-                    limit_type = "min" if direction < 0 else "max"
-                    self.set_feedback(f"{display_name}: at {limit_type}", duration=0.5)
-
-        except (IndexError, AttributeError, TypeError, ValueError) as e:
-            print(f"Debug: Error during modification: {e}")
-            self.set_feedback(f"Error modifying value: {e}", is_error=True)
-            print(f"Error in _perform_parameter_modification: {e}")
-
-
-    def _save_current_song(self):
-        """Save the current song state to a file."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
-        if self.current_song:
-            if file_io.save_song(self.current_song):
-                self.set_feedback(f"Song '{self.current_song.name}' saved.")
-                # self.current_song.dirty is reset by save_song
-            else:
-                self.set_feedback(f"Failed to save song '{self.current_song.name}'", is_error=True)
+            current_param_index = -1 # Will become 0 or num_params - 1
         else:
-            self.set_feedback("No song loaded to save", is_error=True)
+            try:
+                current_param_index = self.parameter_keys.index(self.selected_parameter_key)
+            except ValueError:
+                current_param_index = -1 # Fallback
 
+        new_param_index = (current_param_index + direction + num_params) % num_params
+        self.selected_parameter_key = self.parameter_keys[new_param_index]
 
-    def _add_new_segment(self):
-        """Add a new segment with default values after the selected one."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
-        if not self.current_song:
-            self.set_feedback("Load a song first", is_error=True)
-            return
+        # Adjust parameter scroll offset
+        max_visible = self._get_max_visible_parameters()
+        if new_param_index >= self.parameter_scroll_offset + max_visible:
+            self.parameter_scroll_offset = new_param_index - max_visible + 1
+        elif new_param_index < self.parameter_scroll_offset:
+            self.parameter_scroll_offset = new_param_index
 
-        new_segment = Segment() # Create a default segment
-        insert_index = (self.selected_segment_index + 1) if self.selected_segment_index is not None else len(self.current_song.segments)
+        self.clear_feedback()
+        self._update_encoder_led() # Update LED for the new parameter
 
-        try:
-            self.current_song.add_segment(new_segment, index=insert_index)
-            # self.current_song.dirty is set by add_segment
-            # Select the newly added segment
-            self.selected_segment_index = insert_index
-            # Reset parameter selection for the new segment
-            if self.parameter_keys:
-                 self.selected_parameter_key = self.parameter_keys[0]
-            else:
-                 self.selected_parameter_key = None
-            # Set focus back to segment list after adding
-            self.focused_column = FocusColumn.SEGMENT_LIST
-            self.set_feedback(f"Added segment {insert_index + 1}")
-        except Exception as e:
-            self.set_feedback(f"Error adding segment: {e}", is_error=True)
+    # --- Helper methods for calculating visible items ---
+    def _get_max_visible_items(self, list_area_rect: pygame.Rect) -> int:
+        """Calculate how many list items fit in a given rect."""
+        available_height = list_area_rect.height - (2 * LIST_TOP_PADDING) # Padding top/bottom
+        if available_height <= 0 or LINE_HEIGHT <= 0:
+            return 0
+        return available_height // LINE_HEIGHT
 
+    def _get_max_visible_segments(self) -> int:
+        """Calculate how many segment items fit."""
+        # Define the rect based on layout constants
+        list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
+        list_area_height = self.app.screen.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT
+        seg_list_rect = pygame.Rect(LEFT_MARGIN, list_area_top, SEGMENT_LIST_WIDTH, list_area_height)
+        return self._get_max_visible_items(seg_list_rect)
 
-    def _delete_selected_segment(self):
-        """Delete the currently selected segment."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
-        # --- Allow deletion only if segment list is focused? Or based on selection? Let's allow based on selection ---
-        # if self.focused_column != FocusColumn.SEGMENT_LIST:
-        #     self.set_feedback("Focus segment list to delete (Left Arrow)", is_error=True)
-        #     return
-        # ----------------------------------------------------------------------------------------------------------
-        if self.selected_segment_index is None or not self.current_song or not self.current_song.segments:
-            self.set_feedback("No segment selected to delete", is_error=True)
-            return
-            
-        # Check if this is the last segment and prevent deletion if it is
-        if len(self.current_song.segments) <= 1:
-            self.set_feedback("Cannot delete the last segment", is_error=True)
-            return
+    def _get_max_visible_parameters(self) -> int:
+        """Calculate how many parameter items fit."""
+        list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
+        list_area_height = self.app.screen.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT
+        param_list_rect = pygame.Rect(PARAM_AREA_X, list_area_top,
+                                      self.app.screen.get_width() - PARAM_AREA_X - LEFT_MARGIN,
+                                      list_area_height)
+        return self._get_max_visible_items(param_list_rect)
+    # ----------------------------------------------------
 
-        try:
-            deleted_index_for_feedback = self.selected_segment_index + 1
-            self.current_song.remove_segment(self.selected_segment_index)
-            # self.current_song.dirty is set by remove_segment
-            num_segments = len(self.current_song.segments)
-
-            # Adjust selection after deletion
-            if num_segments == 0:
-                self.selected_segment_index = None
-                self.selected_parameter_key = None
-            elif self.selected_segment_index >= num_segments:
-                # If last segment was deleted, select the new last one
-                self.selected_segment_index = num_segments - 1
-            # Else: index remains valid, keep it selected
-
-            # Reset parameter selection if segment index changed or became invalid
-            if self.selected_segment_index is not None and self.parameter_keys:
-                 self.selected_parameter_key = self.parameter_keys[0]
-            else:
-                 self.selected_parameter_key = None
-
-            # Ensure focus is on segment list after deletion
-            self.focused_column = FocusColumn.SEGMENT_LIST
-            self.set_feedback(f"Deleted segment {deleted_index_for_feedback}")
-
-        except IndexError:
-             self.set_feedback("Error deleting segment (index out of range?)", is_error=True)
-             # Reset selection safely
-             if self.current_song and self.current_song.segments:
-                 self.selected_segment_index = 0
-                 if self.parameter_keys: self.selected_parameter_key = self.parameter_keys[0]
-                 else: self.selected_parameter_key = None
-             else:
-                 self.selected_segment_index = None
-                 self.selected_parameter_key = None
-             self.focused_column = FocusColumn.SEGMENT_LIST # Reset focus
-        except Exception as e:
-            self.set_feedback(f"Error deleting segment: {e}", is_error=True)
-
-
-    # --- Drawing Methods ---
-
-    def draw(self, screen_surface, midi_status=None):
-        """Draws the song editor interface or the text input interface."""
+    # --- Drawing ---
+    def draw(self, screen, midi_status=None):
+        """Draw the song editing screen."""
         # --- Draw Text Input Interface if active ---
         if self.text_input_widget.is_active:
-            # Optionally clear background first if widget doesn't
-            # screen_surface.fill(BLACK)
-            self.text_input_widget.draw(screen_surface)
-        # --- Draw Normal Edit Interface ---
-        elif not self.current_song:
-            # Display message if no song is loaded
-            no_song_text = "No Song Loaded."
-            no_song_surf = self.font_large.render(no_song_text, True, WHITE)
-            no_song_rect = no_song_surf.get_rect(center=(screen_surface.get_width() // 2, screen_surface.get_height() // 2))
-            screen_surface.blit(no_song_surf, no_song_rect)
+            self.text_input_widget.draw(screen)
+            return # Don't draw anything else
+
+        # --- Draw Normal Content ---
+        self._draw_normal_content(screen, midi_status)
+
+        # --- Draw Feedback ---
+        self._draw_feedback(screen)
+
+    def _draw_normal_content(self, screen, midi_status=None):
+        """Draws the main content of the song edit screen."""
+        # Clear screen or assume it's cleared by main loop
+        # screen.fill(BLACK)
+
+        # Draw Title (Example)
+        title_surf = self.font_large.render("Song Editor", True, WHITE)
+        self.title_rect = title_surf.get_rect(midtop=(screen.get_width() // 2, 10))
+        screen.blit(title_surf, self.title_rect)
+
+        # --- REMOVED MIDI Status Drawing ---
+        # if midi_status:
+        #     status_surf = self.font_small.render(midi_status, True, WHITE)
+        #     status_rect = status_surf.get_rect(topleft=(10, 10))
+        #     screen.blit(status_surf, status_rect)
+        # -----------------------------------
+
+        # --- Placeholder for actual drawing logic ---
+        # This needs to be implemented based on your UI design
+        # It should draw the segment list, parameter details, etc.
+        # and highlight based on self.focused_column, self.selected_segment_index,
+        # and self.selected_parameter_key.
+
+        # Example placeholder text:
+        placeholder_y = self.title_rect.bottom + LIST_TOP_PADDING # Use constant
+        list_area_height = screen.get_height() - placeholder_y - FEEDBACK_AREA_HEIGHT # Use constant
+
+        if self.current_song:
+            song_name_surf = self.font.render(f"Editing: {self.current_song.name}", True, WHITE)
+            screen.blit(song_name_surf, (20, placeholder_y))
+            placeholder_y += 30 # Adjust spacing after song name
+
+            # --- Draw Segment List Column ---
+            seg_list_rect = pygame.Rect(LEFT_MARGIN, placeholder_y, SEGMENT_LIST_WIDTH, list_area_height)
+            border_color = FOCUS_BORDER_COLOR if self.focused_column == FocusColumn.SEGMENT_LIST else WHITE
+            pygame.draw.rect(screen, border_color, seg_list_rect, COLUMN_BORDER_WIDTH)
+
+            if self.current_song.segments:
+                max_visible_segments = self._get_max_visible_segments()
+                num_segments = len(self.current_song.segments)
+
+                # Ensure scroll offset is valid
+                if self.segment_scroll_offset > num_segments - max_visible_segments:
+                    self.segment_scroll_offset = max(0, num_segments - max_visible_segments)
+                if self.segment_scroll_offset < 0: self.segment_scroll_offset = 0
+
+                start_index = self.segment_scroll_offset
+                end_index = min(start_index + max_visible_segments, num_segments)
+
+                # Draw scroll up indicator
+                if self.segment_scroll_offset > 0:
+                    scroll_up_surf = self.font_small.render("^", True, WHITE)
+                    scroll_up_rect = scroll_up_surf.get_rect(centerx=seg_list_rect.centerx, top=seg_list_rect.top + 2)
+                    screen.blit(scroll_up_surf, scroll_up_rect)
+
+                seg_text_y = seg_list_rect.top + LIST_TOP_PADDING # Start below indicator space
+
+                for i in range(start_index, end_index):
+                    seg = self.current_song.segments[i]
+                    is_selected_segment = (i == self.selected_segment_index)
+                    is_segment_column_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
+                    color = HIGHLIGHT_COLOR if (is_selected_segment and is_segment_column_focused) else WHITE
+                    text = f"Seg {i+1}"
+                    surf = self.font_small.render(text, True, color)
+                    item_rect = surf.get_rect(topleft=(seg_list_rect.left + 5, seg_text_y))
+
+                    # Highlight background if selected segment
+                    if is_selected_segment:
+                         highlight_bg_rect = pygame.Rect(item_rect.left - 3, item_rect.top - 1, seg_list_rect.width - 10, LINE_HEIGHT - 4) # Use LINE_HEIGHT
+                         pygame.draw.rect(screen, (40, 80, 40), highlight_bg_rect) # Dim green background
+
+                    screen.blit(surf, item_rect)
+                    seg_text_y += LINE_HEIGHT # Use LINE_HEIGHT
+
+                # Draw scroll down indicator
+                if end_index < num_segments:
+                    scroll_down_surf = self.font_small.render("v", True, WHITE)
+                    scroll_down_rect = scroll_down_surf.get_rect(centerx=seg_list_rect.centerx, bottom=seg_list_rect.bottom - 2)
+                    screen.blit(scroll_down_surf, scroll_down_rect)
+            else:
+                # No segments text
+                no_seg_surf = self.font_small.render("No Segments", True, WHITE)
+                no_seg_rect = no_seg_surf.get_rect(center=seg_list_rect.center)
+                screen.blit(no_seg_surf, no_seg_rect)
+
+
+            # --- Draw Parameter Details Column ---
+            param_detail_rect = pygame.Rect(PARAM_AREA_X, placeholder_y, screen.get_width() - PARAM_AREA_X - LEFT_MARGIN, list_area_height)
+            border_color = FOCUS_BORDER_COLOR if self.focused_column == FocusColumn.PARAMETER_DETAILS else WHITE
+            pygame.draw.rect(screen, border_color, param_detail_rect, COLUMN_BORDER_WIDTH)
+
+            if self.selected_segment_index is not None and self.parameter_keys:
+                try:
+                    segment = self.current_song.get_segment(self.selected_segment_index)
+                    max_visible_params = self._get_max_visible_parameters()
+                    num_params = len(self.parameter_keys)
+
+                    # Ensure scroll offset is valid
+                    if self.parameter_scroll_offset > num_params - max_visible_params:
+                        self.parameter_scroll_offset = max(0, num_params - max_visible_params)
+                    if self.parameter_scroll_offset < 0: self.parameter_scroll_offset = 0
+
+                    start_index = self.parameter_scroll_offset
+                    end_index = min(start_index + max_visible_params, num_params)
+
+                    # Draw scroll up indicator
+                    if self.parameter_scroll_offset > 0:
+                        scroll_up_surf = self.font_small.render("^", True, WHITE)
+                        scroll_up_rect = scroll_up_surf.get_rect(centerx=param_detail_rect.centerx, top=param_detail_rect.top + 2)
+                        screen.blit(scroll_up_surf, scroll_up_rect)
+
+                    param_text_y = param_detail_rect.top + LIST_TOP_PADDING # Start below indicator space
+
+                    for i in range(start_index, end_index):
+                        key = self.parameter_keys[i]
+                        is_the_selected_param = (key == self.selected_parameter_key)
+                        is_param_column_focused = (self.focused_column == FocusColumn.PARAMETER_DETAILS)
+
+                        # Text color: Highlight only if column is focused AND it's the selected param
+                        color = HIGHLIGHT_COLOR if (is_the_selected_param and is_param_column_focused) else WHITE
+
+                        display_name = self.parameter_display_names.get(key, key)
+                        value = getattr(segment, key, "N/A")
+
+                        # Format value (e.g., boolean, float precision)
+                        if isinstance(value, bool):
+                            value_str = "ON" if value else "OFF"
+                        elif isinstance(value, float):
+                            value_str = f"{value:.1f}" # Example: 1 decimal place
+                        else:
+                            value_str = str(value)
+
+                        text = f"{display_name}: {value_str}"
+                        surf = self.font_small.render(text, True, color)
+                        item_rect = surf.get_rect(topleft=(param_detail_rect.left + 5, param_text_y))
+
+                        # Background highlight: Draw if it's the selected param, regardless of focus
+                        if is_the_selected_param:
+                            highlight_bg_rect = pygame.Rect(item_rect.left - 3, item_rect.top - 1, param_detail_rect.width - 10, LINE_HEIGHT - 4) # Use LINE_HEIGHT
+                            pygame.draw.rect(screen, (40, 80, 40), highlight_bg_rect) # Dim green background
+
+                        screen.blit(surf, item_rect)
+                        param_text_y += LINE_HEIGHT # Use LINE_HEIGHT
+
+                    # Draw scroll down indicator
+                    if end_index < num_params:
+                        scroll_down_surf = self.font_small.render("v", True, WHITE)
+                        scroll_down_rect = scroll_down_surf.get_rect(centerx=param_detail_rect.centerx, bottom=param_detail_rect.bottom - 2)
+                        screen.blit(scroll_down_surf, scroll_down_rect)
+
+                except IndexError:
+                    error_surf = self.font_small.render("Segment Error", True, ERROR_COLOR)
+                    error_rect = error_surf.get_rect(center=param_detail_rect.center)
+                    screen.blit(error_surf, error_rect)
+            elif self.selected_segment_index is None:
+                 # No segment selected text
+                 no_sel_surf = self.font_small.render("Select Segment", True, WHITE)
+                 no_sel_rect = no_sel_surf.get_rect(center=param_detail_rect.center)
+                 screen.blit(no_sel_surf, no_sel_rect)
+            # else: No parameters defined (less likely)
+
         else:
-            # Draw Song Title
-            title_text = f"Editing: {self.current_song.name}"
-            # Replace CC number with button name
-            title_text += ""
+            no_song_surf = self.font.render("No Song Loaded", True, ERROR_COLOR)
+            no_song_rect = no_song_surf.get_rect(center=(screen.get_width() // 2, screen.get_height() // 2))
+            screen.blit(no_song_surf, no_song_rect)
+        # --- End Placeholder ---
 
-            title_surf = self.font_large.render(title_text, True, WHITE)
-            title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
-            screen_surface.blit(title_surf, title_rect)
-
-            # Calculate available height for columns
-            content_start_y = title_rect.bottom + 15
-            content_height = screen_surface.get_height() - content_start_y - 40 # Reserve space for feedback
-
-            # Draw Segment List
-            self._draw_segment_list(screen_surface, content_start_y, content_height)
-
-            # Draw Parameter Details
-            self._draw_parameter_details(screen_surface, content_start_y, content_height)
-
-        # --- Draw Feedback Message (Common to both modes) ---
-        # Only draw feedback if text input is NOT active, or allow widget to draw its own?
-        # Let's draw feedback always, it appears at the bottom anyway.
-        self._draw_feedback(screen_surface)
-
-
-    def _draw_segment_list(self, surface, start_y, height):
-        """Draws the list of segments on the left, indicating focus."""
-        list_rect = pygame.Rect(LEFT_MARGIN, start_y, SEGMENT_LIST_WIDTH, height)
-        y_offset = list_rect.top + 5
-
-        # --- Draw Focus Border ---
-        is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
-        if is_focused:
-            pygame.draw.rect(surface, FOCUS_BORDER_COLOR, list_rect, COLUMN_BORDER_WIDTH)
-        # -------------------------
-
-        header_color = FOCUS_BORDER_COLOR if is_focused else WHITE
-        header_surf = self.font.render("Segments:", True, header_color)
-        surface.blit(header_surf, (list_rect.left + 5, y_offset))
-        y_offset += LINE_HEIGHT + 5
-
-        if not self.current_song or not self.current_song.segments:
-            no_segments_surf = self.font_small.render("No segments yet.", True, WHITE)
-            surface.blit(no_segments_surf, (list_rect.left + 10, y_offset))
-            return
-
-        # Basic scrolling logic (can be enhanced later)
-        max_items_to_display = (list_rect.height - (y_offset - list_rect.top)) // LINE_HEIGHT
-        start_index = 0
-        if self.selected_segment_index is not None and self.selected_segment_index >= max_items_to_display:
-            start_index = self.selected_segment_index - max_items_to_display + 1
-
-        for i, segment in enumerate(self.current_song.segments[start_index:]):
-            current_y = y_offset + (i * LINE_HEIGHT)
-            if current_y + LINE_HEIGHT > list_rect.bottom: # Stop drawing if exceeding bounds
-                more_surf = self.font_small.render("...", True, WHITE)
-                surface.blit(more_surf, (list_rect.left + 5, current_y))
-                break
-
-            display_index = start_index + i
-            # Format segment info concisely
-            seg_text = f"{display_index + 1}: T{segment.tempo:.0f} L{segment.loop_length} R{segment.repetitions}"
-            is_selected = (display_index == self.selected_segment_index)
-            color = HIGHLIGHT_COLOR if is_selected else WHITE
-
-            seg_surf = self.font_small.render(seg_text, True, color)
-            seg_rect = seg_surf.get_rect(topleft=(list_rect.left + 10, current_y))
-
-            # Draw selection highlight for the item
-            if is_selected:
-                 # Use a slightly different highlight if the column is NOT focused? Optional.
-                 sel_bg_color = (40, 80, 40) # Standard green highlight
-                 sel_rect = pygame.Rect(list_rect.left + (COLUMN_BORDER_WIDTH if is_focused else 0), current_y - 2,
-                                        list_rect.width - (2 * COLUMN_BORDER_WIDTH if is_focused else 0), LINE_HEIGHT)
-                 pygame.draw.rect(surface, sel_bg_color, sel_rect)
-
-            surface.blit(seg_surf, seg_rect)
-
-
-    def _draw_parameter_details(self, surface, start_y, height):
-        """Draws the parameters of the selected segment on the right, indicating focus."""
-        param_rect = pygame.Rect(PARAM_AREA_X, start_y, surface.get_width() - PARAM_AREA_X - LEFT_MARGIN, height)
-        y_offset = param_rect.top + 5
-
-        # --- Draw Focus Border ---
-        is_focused = (self.focused_column == FocusColumn.PARAMETER_DETAILS)
-        if is_focused:
-            pygame.draw.rect(surface, FOCUS_BORDER_COLOR, param_rect, COLUMN_BORDER_WIDTH)
-        # -------------------------
-
-        if self.selected_segment_index is None or not self.current_song:
-            no_selection_surf = self.font.render("Select segment (<-)", True, WHITE)
-            surface.blit(no_selection_surf, (param_rect.left + 5, y_offset))
-            return
-
-        try:
-            segment = self.current_song.get_segment(self.selected_segment_index)
-        except IndexError:
-             no_selection_surf = self.font.render("Segment not found?", True, ERROR_COLOR)
-             surface.blit(no_selection_surf, (param_rect.left + 5, y_offset))
-             return
-
-        header_color = FOCUS_BORDER_COLOR if is_focused else WHITE
-        header_text = f"Segment {self.selected_segment_index + 1} Params:"
-        header_surf = self.font.render(header_text, True, header_color)
-        surface.blit(header_surf, (param_rect.left + 5, y_offset))
-        y_offset += LINE_HEIGHT + 5
-
-        # Basic scrolling for parameters (can be enhanced)
-        max_items_to_display = (param_rect.height - (y_offset - param_rect.top)) // LINE_HEIGHT
-        start_param_index = 0
-        if self.selected_parameter_key and self.parameter_keys:
-            try:
-                current_param_idx = self.parameter_keys.index(self.selected_parameter_key)
-                if current_param_idx >= max_items_to_display:
-                    start_param_index = current_param_idx - max_items_to_display + 1
-            except ValueError:
-                pass # Keep start_index 0 if key not found
-
-        for i, key in enumerate(self.parameter_keys[start_param_index:]):
-            current_y = y_offset + (i * LINE_HEIGHT)
-            if current_y + LINE_HEIGHT > param_rect.bottom: # Stop drawing if exceeding bounds
-                more_surf = self.font_small.render("...", True, WHITE)
-                surface.blit(more_surf, (param_rect.left + PARAM_INDENT, current_y))
-                break
-
-            display_name = self.parameter_display_names.get(key, key)
-            try:
-                value = getattr(segment, key)
-                # Format value nicely
-                if isinstance(value, bool): value_str = "YES" if value else "NO"
-                elif isinstance(value, float): value_str = f"{value:.1f}" # Show one decimal for floats
-                else: value_str = str(value)
-
-                param_text = f"{display_name}: {value_str}"
-                is_selected = (key == self.selected_parameter_key)
-                color = HIGHLIGHT_COLOR if is_selected else PARAM_COLOR
-
-                param_surf = self.font.render(param_text, True, color)
-                param_draw_rect = param_surf.get_rect(topleft=(param_rect.left + PARAM_INDENT, current_y))
-
-                # Draw selection highlight for the item
-                if is_selected:
-                    sel_bg_color = (40, 80, 40) # Standard green highlight
-                    sel_rect = pygame.Rect(param_rect.left + (COLUMN_BORDER_WIDTH if is_focused else 0), current_y - 2,
-                                           param_rect.width - (2 * COLUMN_BORDER_WIDTH if is_focused else 0), LINE_HEIGHT)
-                    pygame.draw.rect(surface, sel_bg_color, sel_rect)
-
-                surface.blit(param_surf, param_draw_rect)
-
-            except AttributeError:
-                error_surf = self.font_small.render(f"Error: Param '{key}' not found", True, ERROR_COLOR)
-                surface.blit(error_surf, (param_rect.left + PARAM_INDENT, current_y))
-
-
-    def _draw_feedback(self, surface):
+    def _draw_feedback(self, screen):
         """Draws the feedback message at the bottom."""
         if self.feedback_message:
             message, timestamp, color = self.feedback_message
             feedback_surf = self.font.render(message, True, color)
-            feedback_rect = feedback_surf.get_rect(center=(surface.get_width() // 2, surface.get_height() - 25))
-            # Add a background for better visibility
+            feedback_rect = feedback_surf.get_rect(center=(screen.get_width() // 2, screen.get_height() - 25))
+            # Optional: Add a background to make it stand out
             bg_rect = feedback_rect.inflate(10, 5)
-            pygame.draw.rect(surface, BLACK, bg_rect) # Black background
-            pygame.draw.rect(surface, color, bg_rect, 1) # Colored border matching text
-            surface.blit(feedback_surf, feedback_rect)
+            pygame.draw.rect(screen, BLACK, bg_rect)
+            pygame.draw.rect(screen, color, bg_rect, 1) # Border
+            screen.blit(feedback_surf, feedback_rect)
 
-    # --- UPDATED: Method for LED Feedback ---
+    # --- Helper to update encoder LED ---
+    # This method handles sending MIDI CC to update the B8 encoder LED ring
+    # based on the selected parameter's value and curve. It is called
+    # automatically when focus changes, selection changes, or values are modified.
+    # --- REVERTED TO OLD LOGIC ---
     def _update_encoder_led(self):
         """Calculates and sends MIDI CC to update KNOB_B8_CC LED ring (1-13 LEDs). Applies scaling curves."""
         # Check if the app has the send method and output port is ready
         if not hasattr(self.app, 'send_midi_cc') or not self.app.midi_output_port:
+            # --- DEBUG PRINT (Optional) ---
+            # print("[LED Debug] Skipping LED update: MIDI output not ready.")
+            # --- END DEBUG ---
             return # MIDI output not ready
 
-        led_value = 1  # Default to first LED
+        led_value = 1  # Default to first LED (never 0)
+
+        # --- DEBUG PRINT ---
+        # print(f"[LED Debug] _update_encoder_led called. Focus: {self.focused_column.name}, SegIdx: {self.selected_segment_index}, ParamKey: {self.selected_parameter_key}")
+        # --- END DEBUG ---
 
         # Determine the value only if a valid segment and parameter are selected
-        if self.selected_segment_index is not None and self.selected_parameter_key is not None and self.current_song:
+        # --- REMOVED FOCUS CHECK ---
+        if (self.current_song and self.selected_segment_index is not None and
+                self.selected_parameter_key is not None):
+        # --- END REMOVED FOCUS CHECK ---
+
+            # --- DEBUG PRINT ---
+            # print(f"[LED Debug]   Conditions met. Proceeding to calculate LED value.")
+            # --- END DEBUG ---
             try:
                 segment = self.current_song.get_segment(self.selected_segment_index)
                 key = self.selected_parameter_key
                 current_value = getattr(segment, key)
 
-                min_val, max_val = None, None
-                # Get min/max for normalization
-                if key == 'program_message_1' or key == 'program_message_2':
-                    min_val, max_val = MIN_PROGRAM_MSG, MAX_PROGRAM_MSG
-                elif key == 'tempo':
-                    min_val, max_val = MIN_TEMPO, MAX_TEMPO
-                elif key == 'tempo_ramp':
-                    min_val, max_val = MIN_RAMP, MAX_RAMP
-                elif key == 'loop_length':
-                    min_val, max_val = MIN_LOOP_LENGTH, MAX_LOOP_LENGTH
-                elif key == 'repetitions':
-                    min_val, max_val = MIN_REPETITIONS, MAX_REPETITIONS
-                elif key == 'automatic_transport_interrupt':
-                    # Use LED 1 and 13 for boolean (never completely off)
-                    led_value = 13 if current_value else 1
-                    min_val, max_val = 0, 1  # Set dummy range to skip normalization/scaling
+                min_val, max_val, _ = self._get_param_range(key) # Use existing helper
 
-                # Normalize and scale if we have a valid range
-                if min_val is not None and max_val is not None and max_val > min_val:
+                # Handle boolean separately (map to 1 and 13)
+                if isinstance(current_value, bool):
+                    led_value = 13 if current_value else 1
+                    # --- DEBUG PRINT ---
+                    # print(f"[LED Debug]   Boolean value: {current_value} -> LED: {led_value}")
+                    # --- END DEBUG ---
+                    min_val, max_val = 0, 1 # Set dummy range to skip normalization/scaling below
+
+                # Normalize and scale if we have a valid range and it's not boolean
+                if min_val is not None and max_val is not None and max_val > min_val and not isinstance(current_value, bool):
                     # Normalize current_value to 0.0 - 1.0
                     normalized = (current_value - min_val) / (max_val - min_val)
                     # Clamp just in case value is slightly outside range
                     normalized = max(0.0, min(1.0, normalized))
+                    # --- DEBUG PRINT ---
+                    # print(f"[LED Debug]   Value: {current_value}, Range: ({min_val}, {max_val}), Normalized: {normalized:.3f}")
+                    # --- END DEBUG ---
 
                     # --- Apply Scaling Curve ---
                     curve_type = self.parameter_led_curves.get(key, CurveType.LINEAR) # Default to linear
@@ -923,8 +818,14 @@ class SongEditScreen(BaseScreen):
 
                     if curve_type == CurveType.LOG:
                         scaled_normalized = scale_log(normalized)
+                        # --- DEBUG PRINT ---
+                        # print(f"[LED Debug]   Applied LOG curve -> Scaled Norm: {scaled_normalized:.3f}")
+                        # --- END DEBUG ---
                     elif curve_type == CurveType.STRONG_LOG:
                         scaled_normalized = scale_strong_log(normalized)
+                        # --- DEBUG PRINT ---
+                        # print(f"[LED Debug]   Applied STRONG_LOG curve -> Scaled Norm: {scaled_normalized:.3f}")
+                        # --- END DEBUG ---
                     # No need for explicit linear case, it's the default
 
                     # --- Map Scaled Value to 1-13 LED Range ---
@@ -937,109 +838,185 @@ class SongEditScreen(BaseScreen):
                         # Ensure max value is 13, accounting for potential float imprecision near 1.0
                         if scaled_normalized >= 0.999:
                             led_value = 13
+                    # --- DEBUG PRINT ---
+                    # print(f"[LED Debug]   Mapped Scaled Norm to LED value: {led_value}")
+                    # --- END DEBUG ---
 
             except (IndexError, AttributeError, TypeError, ValueError) as e:
-                print(f"Error calculating LED value for {self.selected_parameter_key}: {e}")
+                print(f"[LED Debug] Error calculating LED value for {self.selected_parameter_key}: {e}")
                 led_value = 1  # Default to first LED on error
+
+        else:
+             # --- DEBUG PRINT ---
+             # print(f"[LED Debug]   Conditions NOT met or turning LED 'off' (value 1).")
+             # --- END DEBUG ---
+             led_value = 1 # Set to 1 if conditions not met (e.g., no selection)
+
 
         # Send the MIDI CC message for Knob 8 LED
         # Knob 8 LED is CC 16 (9 + 7)
         # Channel is 16 (index 15)
         # Value is 1-13 (never 0)
+        # --- DEBUG PRINT ---
+        # print(f"[LED Debug]   Final LED value to send: {int(led_value)}")
+        # --- END DEBUG ---
         self.app.send_midi_cc(control=16, value=int(led_value), channel=15)
+    # --- END REVERT ---
 
-    def _modify_parameter_via_encoder(self, direction: int):
-        """
-        Increment/decrement selected parameter value (used by ENCODER).
-        Works regardless of focus.
-        """
-        # <<< --- REMOVE DEBUG PRINT 3 --- >>>
-        # print(f"Debug: _modify_parameter_via_encoder called with direction: {direction}")
-        if self.text_input_widget.is_active: return
-        self._perform_parameter_modification(direction)
+    # --- Ensure _get_param_range exists (it should from previous steps) ---
+    def _get_param_range(self, key: str) -> Tuple[float, float, float]:
+        """Helper to get min, max, default for a parameter key."""
+        # Use constants imported from core.song
+        if key == 'tempo': return (MIN_TEMPO, MAX_TEMPO, 120.0)
+        if key == 'tempo_ramp': return (MIN_RAMP, MAX_RAMP, 0.0)
+        if key == 'loop_length': return (MIN_LOOP_LENGTH, MAX_LOOP_LENGTH, 16)
+        if key == 'repetitions': return (MIN_REPETITIONS, MAX_REPETITIONS, 1)
+        if key == 'program_message_1': return (MIN_PROGRAM_MSG, MAX_PROGRAM_MSG, 0)
+        if key == 'program_message_2': return (MIN_PROGRAM_MSG, MAX_PROGRAM_MSG, 0)
+        # Boolean handled separately in _update_encoder_led
+        if key == 'automatic_transport_interrupt': return (0, 1, False) # Provide range for bool
+        return (0, 1, 0) # Default fallback for unknown
 
-    def _perform_parameter_modification(self, direction: int):
-        """Core logic to modify the selected parameter's value."""
-        # <<< --- REMOVE DEBUG PRINT --- >>>
-        # print(f"Debug: _perform_parameter_modification: Dir={direction}, SegIdx={self.selected_segment_index}, ParamKey={self.selected_parameter_key}")
-
-        if self.selected_segment_index is None or self.selected_parameter_key is None:
-            # print("Debug: Modification aborted - No segment or parameter selected.") # REMOVE
-            self.set_feedback("Select segment and parameter first", is_error=True)
+    # --- Other methods like parameter modification, saving etc. ---
+    def _modify_selected_parameter(self, direction: int):
+        """Modify the selected parameter value using +/- buttons."""
+        # --- REMOVED FOCUS CHECK ---
+        if (self.selected_segment_index is None or
+                self.selected_parameter_key is None or
+                not self.current_song):
+            # Optionally provide feedback if nothing is selected
+            # self.set_feedback("Select segment/parameter first", is_error=True)
             return
-        if not self.current_song:
-            # print("Debug: Modification aborted - No current song.") # REMOVE
-            return
+        # --- END REMOVED FOCUS CHECK ---
+
+        key = self.selected_parameter_key
+        step = PARAM_STEPS.get(key, 1) # Default step is 1
 
         try:
             segment = self.current_song.get_segment(self.selected_segment_index)
-            key = self.selected_parameter_key
             current_value = getattr(segment, key)
-            step = PARAM_STEPS.get(key, 1)
-            original_value = current_value
+            original_value = current_value # Store original for feedback/LED check
 
-            # <<< --- REMOVE DEBUG PRINT --- >>>
-            # print(f"Debug: Modifying '{key}'. Current={current_value}, Step={step}")
-
-            new_value: Any
-            min_val, max_val = None, None # Define min/max constraints
-            # Get min/max constraints for this parameter
-            if key == 'program_message_1' or key == 'program_message_2':
-                min_val, max_val = MIN_PROGRAM_MSG, MAX_PROGRAM_MSG
-            elif key == 'tempo':
-                min_val, max_val = MIN_TEMPO, MAX_TEMPO
-            elif key == 'tempo_ramp':
-                min_val, max_val = MIN_RAMP, MAX_RAMP
-            elif key == 'loop_length':
-                min_val, max_val = MIN_LOOP_LENGTH, MAX_LOOP_LENGTH
-            elif key == 'repetitions':
-                min_val, max_val = MIN_REPETITIONS, MAX_REPETITIONS
-
-            # Calculate new value based on type
+            # Handle boolean toggle
             if isinstance(current_value, bool):
-                new_value = not current_value if direction != 0 else current_value
-            elif isinstance(current_value, (int, float)): # Combine int and float logic
-                new_value = current_value + (direction * step)
-                # Clamp integer/float value
-                if min_val is not None: new_value = max(min_val, new_value)
-                if max_val is not None: new_value = min(max_val, new_value)
-                if isinstance(new_value, float):
-                    new_value = round(new_value, 2) # Round floats
+                new_value = not current_value
+            elif isinstance(current_value, (int, float)):
+                new_value = current_value + (step * direction)
+                # Clamp to min/max if applicable
+                min_val, max_val, _ = self._get_param_range(key)
+                new_value = max(min_val, min(max_val, new_value))
+                # Ensure integer types remain integer
+                if isinstance(current_value, int):
+                    new_value = int(round(new_value))
+                # Round floats to avoid precision issues
+                elif isinstance(new_value, float):
+                    # Round based on step size? e.g., 0.5 step -> 1 decimal
+                    decimals = 0
+                    if isinstance(step, float) and step < 1:
+                        decimals = len(str(step).split('.')[-1])
+                    new_value = round(new_value, decimals if decimals > 0 else 2)
+
             else:
-                self.set_feedback(f"Cannot modify type {type(current_value)}", is_error=True)
+                # Cannot modify this type
+                self.set_feedback(f"Cannot modify '{key}' type", is_error=True)
                 return
 
-            # <<< --- REMOVE DEBUG PRINT --- >>>
-            # print(f"Debug: Calculated New Value={new_value} (Original={original_value})")
-
-            hit_boundary = False
-            if direction < 0 and min_val is not None and new_value == min_val:
-                hit_boundary = True
-                # print(f"Debug: Hit minimum bound ({min_val})") # REMOVE
-            elif direction > 0 and max_val is not None and new_value == max_val:
-                hit_boundary = True
-                # print(f"Debug: Hit maximum bound ({max_val})") # REMOVE
-
+            # Update the song only if the value actually changed
             if new_value != original_value:
-                # print("Debug: Value changed. Updating song object.") # REMOVE
-                setattr(segment, key, new_value)
-                self.current_song.dirty = True
+                # Use the song's update method (handles validation and dirty flag)
+                self.current_song.update_segment(self.selected_segment_index, **{key: new_value})
+                self._update_encoder_led() # Update LED to reflect new value
+                # Provide brief feedback on change
                 display_name = self.parameter_display_names.get(key, key)
-                self.set_feedback(f"{display_name}: {new_value}", duration=0.75)
-                self._update_encoder_led()
+                value_str = "ON" if isinstance(new_value, bool) and new_value else "OFF" if isinstance(new_value, bool) else str(new_value)
+                self.set_feedback(f"{display_name}: {value_str}", duration=0.75)
             else:
-                # print("Debug: Value did not change (e.g., at limit or step issue).") # REMOVE
-                if hit_boundary:
-                    # print("Debug: Updating LED even though value didn't change (at boundary)") # REMOVE
-                    self._update_encoder_led()
+                # Value didn't change (e.g., at limit) - maybe provide limit feedback
+                min_val, max_val, _ = self._get_param_range(key)
+                limit_hit = (direction < 0 and new_value == min_val) or \
+                            (direction > 0 and new_value == max_val)
+                if limit_hit and not isinstance(current_value, bool): # Don't show limit for bool toggle
                     display_name = self.parameter_display_names.get(key, key)
                     limit_type = "min" if direction < 0 else "max"
                     self.set_feedback(f"{display_name}: at {limit_type}", duration=0.5)
+                    # Ensure LED is updated even if value didn't change (might already be correct)
+                    self._update_encoder_led()
+
 
         except (IndexError, AttributeError, TypeError, ValueError) as e:
-            # print(f"Debug: Error during modification: {e}") # REMOVE
-            self.set_feedback(f"Error modifying value: {e}", is_error=True)
-            print(f"Error in _perform_parameter_modification: {e}") # Keep this one? Optional.
+            self.set_feedback(f"Error modifying '{key}': {e}", is_error=True)
+            print(f"Error in _modify_selected_parameter: {e}")
+
+    def _modify_parameter_via_encoder(self, direction: int):
+        """Modify the selected parameter value using the encoder."""
+        # --- REMOVED FOCUS CHECK ---
+        # This now directly calls the modification logic regardless of focus
+        self._modify_selected_parameter(direction)
+        # --- END REMOVED FOCUS CHECK ---
+
+    def _save_current_song(self):
+        """Saves the current song to disk."""
+        if not self.current_song:
+            self.set_feedback("No song loaded to save", is_error=True)
+            return
+
+        if not self.current_song.dirty:
+            self.set_feedback(f"'{self.current_song.name}' has no changes to save.")
+            return
+
+        if file_io.save_song(self.current_song):
+            self.set_feedback(f"Saved '{self.current_song.name}'")
+        else:
+            self.set_feedback(f"Failed to save '{self.current_song.name}'", is_error=True)
+
+    def _add_new_segment(self):
+        """Adds a new segment after the currently selected one, or at the start."""
+        if not self.current_song:
+            self.set_feedback("No song loaded to add segment to", is_error=True)
+            return
+
+        try:
+            new_segment = Segment() # Create with defaults
+            insert_index = 0 # Default to beginning
+
+            # Determine insertion index and copy parameters if a segment is selected
+            if self.selected_segment_index is not None and self.current_song.segments:
+                insert_index = self.selected_segment_index + 1
+                try:
+                    source_segment = self.current_song.get_segment(self.selected_segment_index)
+                    # Copy all parameters from the selected segment
+                    for key in self.parameter_keys:
+                        if hasattr(source_segment, key):
+                            setattr(new_segment, key, getattr(source_segment, key))
+                    print(f"Copied parameters from segment {self.selected_segment_index + 1} to new segment.")
+                except IndexError:
+                    print(f"Warning: Could not get segment at index {self.selected_segment_index} to copy parameters.")
+                    # Proceed with default new_segment
+            elif self.current_song.segments:
+                 # If no segment selected but list not empty, add after last one (effectively at end)
+                 insert_index = len(self.current_song.segments)
+                 # Optionally copy from last segment in this case too? Let's keep it simple for now.
 
 
-# ... rest of the file ...
+            self.current_song.add_segment(new_segment, index=insert_index)
+            self.set_feedback(f"Added new segment at position {insert_index + 1}")
+
+            # Select the newly added segment
+            self.selected_segment_index = insert_index
+            # Adjust scroll if necessary
+            max_visible = self._get_max_visible_segments()
+            if self.selected_segment_index >= self.segment_scroll_offset + max_visible:
+                self.segment_scroll_offset = self.selected_segment_index - max_visible + 1
+            elif self.selected_segment_index < self.segment_scroll_offset:
+                 # This case might happen if adding at the beginning while scrolled down
+                 self.segment_scroll_offset = self.selected_segment_index
+
+
+            # Ensure parameter selection is reset/updated
+            self.selected_parameter_key = self.parameter_keys[0] if self.parameter_keys else None
+            self.parameter_scroll_offset = 0
+            self._update_encoder_led()
+
+        except Exception as e:
+            self.set_feedback(f"Error adding segment: {e}", is_error=True)
+            print(f"Error in _add_new_segment: {e}")

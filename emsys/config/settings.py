@@ -22,12 +22,22 @@ BUTTON_REPEAT_DELAY_MS = 500
 # Interval in milliseconds between repeated actions
 BUTTON_REPEAT_INTERVAL_MS = 25
 
-# Colors
-BLACK = (0, 0, 0)
+# --- Color Definitions ---
 WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
+CYAN = (0, 255, 255)
+MAGENTA = (255, 0, 255)
+
+# UI Specific Colors
+HIGHLIGHT_COLOR = GREEN         # For selected items in lists
+FEEDBACK_COLOR = BLUE           # For general feedback messages
+ERROR_COLOR = RED               # For error messages
+FOCUS_BORDER_COLOR = BLUE       # For indicating the focused UI column/area
+# Add other colors as needed
 
 
 # --- File Storage Settings ---
