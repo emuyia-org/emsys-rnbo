@@ -707,11 +707,6 @@ class SongManagerScreen(BaseScreen):
             list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
             y_offset = list_area_top
 
-            # Replace CC references with button names for hints
-            # Use .get() for safety in case mappings change
-            rename_hint = f"Rename ({mappings.button_map.get(mappings.RENAME_CC, f'CC{mappings.RENAME_CC}')})"
-            delete_hint = f"Delete ({mappings.button_map.get(mappings.DELETE_CC, f'CC{mappings.DELETE_CC}')})"
-
             # Get the current loaded song name for highlighting
             current_song_name = None
             if hasattr(self.app, 'current_song') and self.app.current_song:
@@ -777,26 +772,6 @@ class SongManagerScreen(BaseScreen):
                         pygame.draw.rect(screen_surface, border_color, border_rect, 2)  # 2px border width
 
                     screen_surface.blit(item_surf, item_rect)
-
-                    # Display hints for selected items
-                    if is_selected:
-                        # --- Display both rename and delete hints ---
-                        hints = []
-                        # Only show hints if the corresponding CC is defined
-                        if hasattr(mappings, 'RENAME_CC'):
-                            hints.append(rename_hint)
-                        if hasattr(mappings, 'DELETE_CC'):
-                            hints.append(delete_hint)
-
-                        if hints:
-                            combined_hint = " | ".join(hints)
-                            hint_surf = self.font_small.render(combined_hint, True, WHITE)
-                            hint_rect = hint_surf.get_rect(midleft=(item_rect.right + 10, item_rect.centery))
-                            # Prevent hint going off screen
-                            if hint_rect.right > screen_surface.get_width() - LEFT_MARGIN:
-                                hint_rect.right = screen_surface.get_width() - LEFT_MARGIN
-                            screen_surface.blit(hint_surf, hint_rect)
-                        # -----------------------------------------
 
                     y_offset += LINE_HEIGHT
 
