@@ -409,6 +409,10 @@ class App:
         Handles button press/release/repeat logic for momentary buttons.
         Directly dispatches messages for non-repeatable controls (encoders/faders).
         """
+        # Only process messages coming from channel 16 (mido channel index 15)
+        if hasattr(msg, 'channel') and msg.channel != 15:
+            return
+
         self.last_midi_message_str = str(msg)
         current_time = time.time()
 
@@ -552,33 +556,23 @@ class App:
                     state['last_repeat_time'] = current_time # Update last repeat time
 
     # <<< --- ADDED: Method to send MIDI CC --- >>>
-    def send_midi_cc(self, control: int, value: int, channel: int = 0):
-        """Sends a MIDI Control Change message to the output port."""
+    def send_midi_cc(self, control: int, value: int, channel: int = 15):
+        """Sends a MIDI Control Change message to the output port on channel 16."""
         port_status = "Not Initialized"
         if self.midi_output_port:
-            port_status = "Closed" if self.midi_output_port.closed else "Open"
+            port_status = "Open" if not self.midi_output_port.closed else "Closed"
 
         # --- DEBUG PRINT ---
-        print(f"[MIDI Send Debug] Attempting to send CC: Ch={channel+1}, CC={control}, Val={value}. Port Status: {port_status}")
+        print(f"[MIDI Send Debug] Attempting to send CC: Ch=16, CC={control}, Val={value}. Port Status: {port_status}")
         # --- END DEBUG ---
 
         if self.midi_output_port and not self.midi_output_port.closed:
-            try:
-                msg = mido.Message('control_change', channel=channel, control=control, value=value)
-                # --- DEBUG PRINT ---
-                print(f"[MIDI Send Debug]   Sending message: {msg}")
-                # --- END DEBUG ---
-                self.midi_output_port.send(msg)
-            except (IOError, OSError) as e:
-                print(f"MIDI Send Error (IOError/OSError): {e}")
-                self._handle_disconnection(reason=f"Send Error: {e}")
-            except Exception as e:
-                 print(f"MIDI Send Error (Unexpected): {e}")
+            import mido
+            # Force channel 16 (mido channel index 15)
+            msg = mido.Message('control_change', control=control, value=value, channel=15)
+            self.midi_output_port.send(msg)
         else:
-            # --- DEBUG PRINT ---
-            print(f"[MIDI Send Debug]   Cannot send MIDI CC - Output port not available or closed.")
-            # --- END DEBUG ---
-            pass # Already printed status above
+            print("Error: MIDI output port is not available.")
 
     # <<< --- ADDED: Method to update LEDs initially --- >>>
     def _initial_led_update(self):
