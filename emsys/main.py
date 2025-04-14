@@ -48,6 +48,7 @@ from emsys.config.mappings import NEXT_CC, PREV_CC, FADER_SELECT_CC # Keep FADER
 from emsys.config.mappings import NON_REPEATABLE_CCS
 # -------------------------------------------
 from emsys.utils.midi import find_midi_port
+from emsys.utils import file_io       # <<< ADDED: Import file_io for load/save song operations
 
 # UI Imports
 from emsys.ui.base_screen import BaseScreen
@@ -118,6 +119,8 @@ class App:
         self._initialize_midi() # Attempt initial connection (Input and Output)
         self.initialize_screens()
         self._initial_led_update() # <<< ADDED: Update LEDs on startup
+        self.current_song = None  # Ensure we have a variable to hold the current song
+        self._load_last_song()
 
     def initialize_screens(self):
         """Initialize all application screens."""
@@ -645,27 +648,53 @@ class App:
         """Clean up resources before exiting."""
         print("Cleaning up application...")
         self.notify_status("Application Shutting Down")
+        # --- Save last song before exit ---
+        self._save_last_song()
+        
         if self.midi_port:
             try:
                 self.midi_port.close()
                 print("MIDI Input port closed.")
             except Exception as e:
                 print(f"Error closing MIDI Input port during cleanup: {e}")
-        if self.midi_output_port: # <<< ADDED: Close output port
-             try:
-                 # Optionally send message to turn off LEDs before closing
-                 self._initial_led_update() # Reuse to turn off LEDs
-                 time.sleep(0.1) # Short pause to allow message sending
-                 self.midi_output_port.close()
-                 print("MIDI Output port closed.")
-             except Exception as e:
-                 print(f"Error closing MIDI Output port during cleanup: {e}")
-
+        if self.midi_output_port:
+            try:
+                # Optionally send message to turn off LEDs before closing
+                self._initial_led_update() # Reuse to turn off LEDs
+                time.sleep(0.1) # Short pause to allow message sending
+                self.midi_output_port.close()
+                print("MIDI Output port closed.")
+            except Exception as e:
+                print(f"Error closing MIDI Output port during cleanup: {e}")
         pygame.font.quit()
         pygame.quit()
         print("Pygame quit.")
         self.notifier.notify("STOPPING=1")
         print("Cleanup finished.")
+
+    def _load_last_song(self):
+        """Load the previously loaded song from persistent storage."""
+        import os
+        last_song_file = os.path.join(settings_module.PROJECT_ROOT, "last_song.txt")
+        if os.path.exists(last_song_file):
+            with open(last_song_file, "r") as f:
+                last_song_basename = f.read().strip()
+            if last_song_basename:
+                loaded = file_io.load_song(last_song_basename)
+                if loaded:
+                    self.current_song = loaded
+                    print(f"Loaded last song: {loaded.name}")
+                    self.notify_status(f"Loaded last song: {loaded.name}")
+
+    def _save_last_song(self):
+        """Save the name of the current song to persistent storage."""
+        import os
+        last_song_file = os.path.join(settings_module.PROJECT_ROOT, "last_song.txt")
+        if self.current_song and self.current_song.name:
+            with open(last_song_file, "w") as f:
+                f.write(self.current_song.name)
+        elif os.path.exists(last_song_file):
+            os.remove(last_song_file)
 
 
 # Script Entry Point
