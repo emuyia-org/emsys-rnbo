@@ -2,10 +2,10 @@
 """
 Screen for managing Songs (Loading, Creating, Renaming).
 """
-import pygame
-import time
-from typing import List, Optional, Tuple
-import datetime # Needed for default new song name
+import pygame # Ensure pygame is imported if not already
+import time   # Ensure time is imported
+from datetime import datetime # Ensure datetime is imported
+from typing import List, Optional, Tuple # <<< ADDED List, Optional, Tuple
 
 # Core components
 from emsys.core.song import Song, Segment
@@ -23,15 +23,8 @@ from emsys.config.mappings import FADER_SELECT_CC
 # --- Import the TextInputWidget ---
 from .widgets import TextInputWidget, TextInputStatus
 
-# --- Define colors (imported from settings) ---
-WHITE = settings.WHITE
-BLACK = settings.BLACK
-GREEN = settings.GREEN
-RED = settings.RED
-BLUE = settings.BLUE
-HIGHLIGHT_COLOR = settings.HIGHLIGHT_COLOR
-FEEDBACK_COLOR = settings.FEEDBACK_COLOR
-ERROR_COLOR = settings.ERROR_COLOR
+# --- Import colors (imported from settings) ---
+from emsys.config.settings import WHITE, BLACK, GREEN, RED, BLUE, HIGHLIGHT_COLOR, FEEDBACK_COLOR, ERROR_COLOR, GREY, FEEDBACK_AREA_HEIGHT # <<< Added GREY and FEEDBACK_AREA_HEIGHT
 # ---------------------------------------------
 
 # Define layout constants
@@ -77,6 +70,11 @@ class SongManagerScreen(BaseScreen):
         self.song_to_load_after_prompt: Optional[str] = None # Store the basename of the song to load
         # ----------------------------------------
 
+        # --- ADDED: Reset create prompt state ---
+        self.create_prompt_active = False
+        self.song_name_for_create: Optional[str] = None
+        # ----------------------------------------
+
     def init(self):
         """Called when the screen becomes active. Load the song list."""
         super().init()
@@ -96,6 +94,10 @@ class SongManagerScreen(BaseScreen):
         self.unsaved_prompt_active = False
         self.song_to_load_after_prompt = None
         # -----------------------------------------
+        # --- ADDED: Reset create prompt state ---
+        self.create_prompt_active = False
+        self.song_name_for_create: Optional[str] = None
+        # ----------------------------------------
 
     def cleanup(self):
         """Called when the screen becomes inactive."""
@@ -108,39 +110,41 @@ class SongManagerScreen(BaseScreen):
         self.delete_confirmation_active = False
         self.unsaved_prompt_active = False
         self.song_to_load_after_prompt = None
+        # --- ADDED: Reset create prompt state ---
+        self.create_prompt_active = False
+        self.song_name_for_create = None
         # ------------------------------------------
         self.clear_feedback()
 
     def _refresh_song_list(self):
         """Fetches the list of songs from file_io and resets selection."""
-        current_selection = None
+        current_selection_name = None # <<< Store name instead of index
         if self.selected_index is not None and self.selected_index < len(self.song_list):
-            current_selection = self.song_list[self.selected_index]
+            try: # <<< Add try-except for safety
+                current_selection_name = self.song_list[self.selected_index]
+            except IndexError:
+                current_selection_name = None # <<< Handle potential index error
 
         self.song_list = file_io.list_songs()
         self.scroll_offset = 0 # Reset scroll on refresh
 
         if not self.song_list:
-            self.selected_index = None
+            self.selected_index = None # <<< No selection if list is empty
         else:
-            # Try to restore selection if the item still exists
-            try:
-                if current_selection and current_selection in self.song_list:
-                    self.selected_index = self.song_list.index(current_selection)
-                else:
-                    self.selected_index = 0 # Default to first item
-            except ValueError:
-                self.selected_index = 0 # Fallback
-
-            # Adjust scroll offset if needed after refresh/selection reset
-            max_visible = self._get_max_visible_items()
-            if self.selected_index is not None and self.selected_index >= max_visible:
-                 self.scroll_offset = self.selected_index - max_visible + 1
+            # Try to re-select the previously selected song by name
+            if current_selection_name in self.song_list:
+                try:
+                    self.selected_index = self.song_list.index(current_selection_name)
+                    # Ensure selection is visible
+                    max_visible = self._get_max_visible_items()
+                    if self.selected_index >= max_visible:
+                        self.scroll_offset = self.selected_index - max_visible + 1
+                except ValueError:
+                    self.selected_index = 0 # Fallback to first item
             else:
-                 self.scroll_offset = 0
+                self.selected_index = 0 # Default to first item if previous selection is gone
 
-
-        print(f"Refreshed songs: {self.song_list}, Selected: {self.selected_index}")
+        print(f"Refreshed songs: {self.song_list}, Selected Index: {self.selected_index}")
 
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
@@ -164,7 +168,7 @@ class SongManagerScreen(BaseScreen):
         """Handle MIDI messages for list navigation, selection, creation, and renaming."""
         # --- Only process Control Change messages ---
         if msg.type != 'control_change':
-            return
+            return # <<< Added return
 
         cc = msg.control
         value = msg.value # Get value for all CC types
@@ -187,45 +191,55 @@ class SongManagerScreen(BaseScreen):
 
         # --- Handle Text Input Mode FIRST ---
         if self.text_input_widget.is_active:
-            # Text input only responds to button presses (value 127)
-            if value == 127:
-                status = self.text_input_widget.handle_input(cc)
-                if status == TextInputStatus.CONFIRMED:
-                    self._confirm_song_rename() # Call the confirmation logic
-                elif status == TextInputStatus.CANCELLED:
-                    self._cancel_song_rename() # Call the cancellation logic
-            # If ACTIVE or ERROR, the widget handles drawing, we just wait
-            return # Don't process other actions while text input is active
-        # ----------------------------------
+            status = self.text_input_widget.handle_input(cc)
+            if status == TextInputStatus.CONFIRMED:
+                # Check if we were creating or renaming
+                if self.song_name_for_create is not None: # We were in create flow
+                    self._confirm_song_create()
+                else: # We were renaming
+                    self._confirm_song_rename()
+            elif status == TextInputStatus.CANCELLED:
+                # Check if we were creating or renaming
+                if self.song_name_for_create is not None: # We were in create flow
+                    self._cancel_song_create()
+                else: # We were renaming
+                    self._cancel_song_rename()
+            # No return here, widget handles its state
+            return # <<< IMPORTANT: Prevent further processing if widget handled it
 
         # --- Handle Delete Confirmation Mode ---
         if self.delete_confirmation_active:
-            # Delete confirmation only responds to button presses (value 127)
-            if value == 127:
+            if value == 127: # Only react to button presses
                 if cc == mappings.YES_NAV_CC:
                     self._perform_delete()
-                    return
                 elif cc == mappings.NO_NAV_CC:
                     self.delete_confirmation_active = False
                     self.set_feedback("Delete cancelled.")
-                    return
-            # Ignore other buttons/values during delete confirmation
-            return
-        # -------------------------------------
+            return # <<< IMPORTANT: Prevent further processing
 
-        # --- Handle Unsaved Changes Prompt Mode ---
+        # --- Handle Unsaved Changes Prompt Mode (for Loading) ---
         if self.unsaved_prompt_active:
-            # Unsaved prompt only responds to button presses (value 127)
-            if value == 127:
-                if cc == mappings.SAVE_CC: # Use SAVE button to save
+            if value == 127: # Only react to button presses
+                if cc == mappings.SAVE_CC: # YES: Save current, then load
                     self._save_current_and_load_selected()
-                elif cc == mappings.DELETE_CC: # Use DELETE button to discard
+                elif cc == mappings.DELETE_CC: # NO: Discard current, then load
                     self._discard_changes_and_load_selected()
-                elif cc == mappings.NO_NAV_CC: # Use NO button to cancel loading
+                elif cc == mappings.NO_NAV_CC: # CANCEL: Cancel load
                     self._cancel_load_due_to_unsaved()
-            # Ignore other buttons/values during this prompt
-            return
-        # ------------------------------------------
+            return # <<< IMPORTANT: Prevent further processing
+
+        # --- ADDED: Handle Unsaved Changes Prompt Mode (for Creating) ---
+        if self.create_prompt_active:
+            if value == 127: # Only react to button presses
+                if cc == mappings.SAVE_CC: # YES: Save current, then proceed to create
+                    self._save_current_and_proceed_to_create()
+                elif cc == mappings.DELETE_CC: # NO: Discard current, then proceed to create
+                    self._discard_changes_and_proceed_to_create()
+                elif cc == mappings.NO_NAV_CC: # CANCEL: Cancel create
+                    self._cancel_create_due_to_unsaved()
+            return # <<< IMPORTANT: Prevent further processing
+        # -----------------------------------------------------------------
+
 
         # --- Handle Fader Selection (CC 65) ---
         if cc == FADER_SELECT_CC:
@@ -265,16 +279,16 @@ class SongManagerScreen(BaseScreen):
             # else: # Optional: Log when no update occurs
             #     print(f"          No selection change needed (TargetIdx == CurrentSelected)")
 
-            return # Fader handled, don't process as button press below
+            return # <<< Added return
 
         # --- Normal Song Management Mode (Button Presses Only) ---
         # Process remaining CCs only if they are button presses (value 127)
         if value != 127:
-            return
+            return # <<< Added return
 
         # Handle CREATE_CC
         if cc == mappings.CREATE_CC:
-            self._create_new_song()
+            self._initiate_create_new_song() # <<< Use new initiation method
             return
 
         # Handle RENAME_CC
@@ -325,7 +339,7 @@ class SongManagerScreen(BaseScreen):
             self.clear_feedback()
 
         elif cc == mappings.YES_NAV_CC:
-            self._load_selected_song() # This now checks for dirty state
+            self._load_selected_song() # <<< Check for unsaved changes is now inside this method
 
     # --- Methods for Renaming using TextInputWidget ---
     def _start_song_rename(self):
@@ -387,43 +401,22 @@ class SongManagerScreen(BaseScreen):
 
         # Use the rename_song function from file_io
         if file_io.rename_song(old_name, new_name):
-            self.set_feedback(f"Song renamed to '{new_name}'")
-
-            # --- Critical: Check if the renamed song was the loaded current_song ---
-            renamed_current = False
-            # Use getattr for safety, although current_song should exist if rename is possible
-            current_song_obj = getattr(self.app, 'current_song', None)
-            if current_song_obj and current_song_obj.name == old_name:
-                print(f"Updating current song in memory from '{old_name}' to '{new_name}'")
-                self.app.current_song.name = new_name
-                renamed_current = True
-                # Optional: Save the current song immediately after rename?
-                # if not file_io.save_song(self.app.current_song):
-                #     self.set_feedback(f"Renamed, but failed to save current song '{new_name}'", is_error=True)
-
-
-            # Refresh the list to show the new name and re-select it
-            self._refresh_song_list()
-            try:
-                # Find the new index after refresh
-                new_index = self.song_list.index(new_name)
-                self.selected_index = new_index
-                # Adjust scroll if necessary after re-selection
-                max_visible = self._get_max_visible_items()
-                if self.selected_index >= self.scroll_offset + max_visible:
-                    self.scroll_offset = self.selected_index - max_visible + 1
-                elif self.selected_index < self.scroll_offset:
-                    self.scroll_offset = self.selected_index
-
-            except (ValueError, IndexError):
-                self.selected_index = 0 if self.song_list else None # Fallback selection
-
-            self.text_input_widget.cancel() # Exit rename mode on success
-
+            self.set_feedback(f"Renamed to '{new_name}'")
+            # --- Update current song name if it was the one renamed ---
+            current_song = getattr(self.app, 'current_song', None)
+            if current_song and current_song.name == old_name:
+                current_song.name = new_name
+                # Keep dirty status as renaming the file doesn't change content
+            # ---------------------------------------------------------
+            self._refresh_song_list() # Refresh list to show new name and order
         else:
-            # file_io.rename_song failed
-            self.set_feedback(f"Failed to rename song", is_error=True)
-            self.text_input_widget.cancel() # Cancel on failure
+            # Error message is printed by file_io.rename_song
+            self.set_feedback(f"Failed to rename to '{new_name}'", is_error=True)
+            # Keep widget active on failure? Or cancel? Let's cancel.
+            self.text_input_widget.cancel()
+
+        # Deactivate widget only on success or explicit failure handling above
+        # self.text_input_widget.cancel() # Moved into success/failure blocks
 
 
     def _cancel_song_rename(self):
@@ -454,109 +447,181 @@ class SongManagerScreen(BaseScreen):
     def _perform_delete(self):
         """Performs the actual song deletion after confirmation."""
         if self.selected_index is None or not self.song_list:
+            self.set_feedback("No song selected to delete.", is_error=True) # <<< Added feedback
             self.delete_confirmation_active = False
-            self.set_feedback("No song selected to delete", is_error=True)
-            return
+            return # <<< Added return
 
         try:
-            song_name = self.song_list[self.selected_index]
+            song_to_delete = self.song_list[self.selected_index]
+            print(f"Attempting to delete song: '{song_to_delete}'")
 
-            # --- MODIFIED LINE: Use getattr for safer access ---
-            # Check if the song to be deleted is the currently loaded song
-            current_song_obj = getattr(self.app, 'current_song', None)
-            is_current_song = (current_song_obj and current_song_obj.name == song_name)
-            # --- END MODIFICATION ---
-
-            # Delete the song using file_io
-            if hasattr(file_io, 'delete_song') and file_io.delete_song(song_name):
-                self.set_feedback(f"Deleted: '{song_name}'")
-
-                # If we deleted the current song, clear the app's current_song reference
-                if is_current_song:
-                    # This check implies self.app.current_song existed, so direct assignment is safe here
-                    self.app.current_song = None
-                    print(f"Cleared current song as it was deleted: '{song_name}'")
-
-                # Store the index before refreshing
-                deleted_index = self.selected_index
-
-                # Update the song list and selection
-                self._refresh_song_list()
-
-                # Adjust selection after deletion
-                if not self.song_list:
-                    self.selected_index = None
-                else:
-                    # Try to select the next item, or the previous if it was the last
-                    if deleted_index >= len(self.song_list):
-                        self.selected_index = len(self.song_list) - 1
-                    else:
-                        self.selected_index = deleted_index
-                    # Ensure selection is within bounds (especially if list became empty)
-                    if self.selected_index < 0:
-                        self.selected_index = None
-                    elif self.selected_index >= len(self.song_list):
-                         self.selected_index = len(self.song_list) - 1
-
-
+            if file_io.delete_song(song_to_delete):
+                self.set_feedback(f"Deleted '{song_to_delete}'")
+                # --- Check if the deleted song was the current song ---
+                current_song = getattr(self.app, 'current_song', None)
+                if current_song and current_song.name == song_to_delete:
+                    self.app.current_song = None # Clear the current song in the app
+                    print("Cleared current song as it was deleted.")
+                # ----------------------------------------------------
+                self._refresh_song_list() # Refresh list and selection
             else:
-                # file_io.delete_song should print the specific error
-                self.set_feedback(f"Failed to delete '{song_name}'", is_error=True)
+                # Error message printed by file_io.delete_song
+                self.set_feedback(f"Failed to delete '{song_to_delete}'", is_error=True)
+
         except IndexError:
-             # This might happen if the list changes unexpectedly between selection and deletion
-             self.set_feedback("Selection error during delete.", is_error=True)
-             self._refresh_song_list() # Refresh to get a consistent state
+             self.set_feedback("Error: Invalid selection index.", is_error=True)
         except Exception as e:
-            # Catch other unexpected errors
-            self.set_feedback(f"Error deleting song: {str(e)}", is_error=True)
-            print(f"Unexpected error in _perform_delete: {e}") # Log detailed error
+            self.set_feedback(f"Error during delete: {e}", is_error=True)
+            print(f"Unexpected error during delete: {e}")
 
         self.delete_confirmation_active = False # Always deactivate confirmation mode
 
-    def _create_new_song(self):
-        """Creates a new song and navigates to the song edit screen."""
-        if self.text_input_widget.is_active: return # Prevent action during text input
+
+    # --- Modified Create Song Logic ---
+    def _initiate_create_new_song(self):
+        """
+        Checks for unsaved changes before starting the song creation process.
+        """
+        if self.text_input_widget.is_active: return
+
+        current_song = getattr(self.app, 'current_song', None)
+
+        # Check for unsaved changes
+        if current_song and current_song.dirty:
+            print("Unsaved changes detected. Activating create prompt.")
+            self.create_prompt_active = True
+            # We don't have the new name yet, so store None
+            self.song_name_for_create = None
+            self.set_feedback("Current song has unsaved changes!", is_error=True)
+        else:
+            # No unsaved changes, proceed directly to getting name
+            self._proceed_to_create_name_input()
+
+    def _proceed_to_create_name_input(self):
+        """Activates the text input widget to get the new song name."""
+        # Generate a default unique name
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        default_name = f"NewSong-{timestamp}"
+        # Ensure the default name doesn't already exist (unlikely but possible)
+        i = 1
+        final_default_name = default_name
+        while final_default_name in self.song_list:
+            final_default_name = f"{default_name}-{i}"
+            i += 1
+
+        self.song_name_for_create = final_default_name # Store the intended name
+        self.text_input_widget.start(initial_text=final_default_name, prompt="Create New Song")
+        self.set_feedback("Enter name for the new song.")
+
+    def _confirm_song_create(self):
+        """Creates the new song file after getting the name."""
+        if not self.text_input_widget.is_active or self.song_name_for_create is None:
+            self.set_feedback("Error: Create confirmation in invalid state.", is_error=True)
+            self._reset_create_state()
+            return
+
+        new_name = self.text_input_widget.get_text()
+        if new_name is None:
+             self.set_feedback("Error: Could not get name from input.", is_error=True)
+             self._reset_create_state()
+             return
+
+        new_name = new_name.strip()
+        if not new_name:
+            self.set_feedback("Error: Song name cannot be empty.", is_error=True)
+            # Keep widget active to allow correction? Or cancel? Let's keep active.
+            # self._reset_create_state()
+            return # Stay in text input
+
+        if new_name in self.song_list:
+            self.set_feedback(f"Error: Song '{new_name}' already exists.", is_error=True)
+            # Keep widget active
+            return # Stay in text input
+
+        print(f"Attempting to create new song: '{new_name}'")
         try:
-            # Create a default song name based on timestamp to ensure uniqueness
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            new_song_name = f"{timestamp}"
-
-            # Create a new song with an initial empty segment
-            new_song = Song(name=new_song_name)
-            initial_segment = Segment()  # Create with default values
-            new_song.add_segment(initial_segment)
-
-            # Don't set as current song in the app - removed this line
-            # self.app.current_song = new_song
-
-            # Save the song to disk
+            # Create a new empty song object
+            new_song = Song(name=new_name)
+            # Save the new empty song file
             if file_io.save_song(new_song):
-                self.set_feedback(f"Created new song: {new_song_name}.")
-                # Refresh the song list to include the new song
-                self._refresh_song_list()
-                # Select the new song in the list
-                try:
-                    new_song_index = self.song_list.index(new_song_name)
-                    self.selected_index = new_song_index
-                    # Adjust scroll
-                    max_visible = self._get_max_visible_items()
-                    if self.selected_index >= self.scroll_offset + max_visible:
-                        self.scroll_offset = self.selected_index - max_visible + 1
-
-                except (ValueError, IndexError):
-                    pass  # If we can't find or select it, that's ok
-
-                # Remove automatic navigation
-                # NAVIGATE_EVENT = pygame.USEREVENT + 1
-                # pygame.time.set_timer(NAVIGATE_EVENT, 1500, loops=1)  # 1500 ms delay
+                self.set_feedback(f"Created new song '{new_name}'")
+                self.app.current_song = new_song # Set as the current song
+                self._refresh_song_list() # Update list and select the new song
+                # Navigate to Song Edit Screen
+                # if self.app.song_edit_screen:
+                #     self.app.set_active_screen(self.app.song_edit_screen) # <<< COMMENTED OUT
+                # else:
+                #     self.set_feedback("Created song, but edit screen unavailable.", is_error=True) # <<< COMMENTED OUT
             else:
-                self.set_feedback(f"Failed to save new song.", is_error=True)
-                # Don't need to clear current_song since we never set it
+                # Error message printed by save_song
+                self.set_feedback(f"Failed to save new song '{new_name}'", is_error=True)
 
         except Exception as e:
             self.set_feedback(f"Error creating song: {e}", is_error=True)
-            print(f"Error in _create_new_song: {e}")
-            # Don't need to clear current_song since we never set it
+            print(f"Error during song creation: {e}")
+
+        # Reset state regardless of success/failure after attempting save
+        self._reset_create_state()
+
+
+    def _cancel_song_create(self):
+        """Cancels the song creation process."""
+        self.set_feedback("Create cancelled.")
+        self._reset_create_state()
+
+    def _reset_create_state(self):
+        """Resets variables related to song creation."""
+        self.text_input_widget.cancel()
+        self.create_prompt_active = False
+        self.song_name_for_create = None
+
+    # --- Methods for Handling Create Prompt ---
+    def _save_current_and_proceed_to_create(self):
+        """Saves the current song, then proceeds to get the new song name."""
+        print("User chose SAVE before creating.")
+        current_song = getattr(self.app, 'current_song', None)
+
+        if not current_song:
+            self.set_feedback("Error: No current song to save.", is_error=True)
+            self._reset_create_state() # Also reset create prompt state
+            return
+
+        self.set_feedback(f"Saving '{current_song.name}'...")
+        pygame.display.flip()
+
+        if file_io.save_song(current_song):
+            self.set_feedback(f"Saved '{current_song.name}'. Proceeding to create...")
+            self.create_prompt_active = False # Deactivate prompt
+            self._proceed_to_create_name_input() # Start getting name
+        else:
+            self.set_feedback(f"Failed to save '{current_song.name}'. Create cancelled.", is_error=True)
+            self._reset_create_state() # Reset create prompt state on save failure
+
+    def _discard_changes_and_proceed_to_create(self):
+        """Discards changes to the current song, then proceeds to get the new song name."""
+        print("User chose DISCARD before creating.")
+        current_song = getattr(self.app, 'current_song', None)
+
+        if current_song:
+            current_song.dirty = False # Mark as not dirty
+            # Optionally reload from disk to ensure state is truly discarded?
+            # reloaded_song = file_io.load_song(current_song.name)
+            # if reloaded_song: self.app.current_song = reloaded_song
+            # else: self.app.current_song = None # Failed to reload, clear it
+            self.set_feedback(f"Discarded changes in '{current_song.name}'. Proceeding...")
+        else:
+            self.set_feedback("No current song changes to discard. Proceeding...")
+
+        self.create_prompt_active = False # Deactivate prompt
+        self._proceed_to_create_name_input() # Start getting name
+
+    def _cancel_create_due_to_unsaved(self):
+        """Cancels the pending create operation."""
+        print("User chose CANCEL create.")
+        self.set_feedback("Create cancelled.")
+        self._reset_create_state() # Reset create prompt state
+
+    # --- End Create Song Logic ---
 
     def _load_selected_song(self):
         """
@@ -565,36 +630,37 @@ class SongManagerScreen(BaseScreen):
         """
         if self.text_input_widget.is_active: return
         if self.selected_index is None or not self.song_list:
-            self.set_feedback("No song selected.", is_error=True)
+            self.set_feedback("No song selected to load.", is_error=True)
             return
 
         try:
-            selected_basename = self.song_list[self.selected_index]
+            basename_to_load = self.song_list[self.selected_index]
             current_song = getattr(self.app, 'current_song', None)
 
-            # Check if the selected song is already loaded
-            if current_song and current_song.name == selected_basename:
-                self.set_feedback(f"'{selected_basename}' is already loaded.")
-                # Optionally navigate to edit screen? For now, just feedback.
+            # If the selected song is already loaded, do nothing (or maybe go to edit screen?)
+            if current_song and current_song.name == basename_to_load:
+                self.set_feedback(f"'{basename_to_load}' is already loaded.")
+                # Optionally navigate to edit screen if desired
+                if self.app.song_edit_screen:
+                    self.app.set_active_screen(self.app.song_edit_screen)
                 return
 
             # Check for unsaved changes in the *current* song
             if current_song and current_song.dirty:
-                print(f"Unsaved changes detected in '{current_song.name}'. Prompting user.")
-                self.song_to_load_after_prompt = selected_basename # Store target song
+                print("Unsaved changes detected. Activating load prompt.")
                 self.unsaved_prompt_active = True
-                self.set_feedback(f"Unsaved changes in '{current_song.name}'!", is_error=True, duration=10.0)
-                # Don't proceed with loading yet
+                self.song_to_load_after_prompt = basename_to_load # Store target
+                self.set_feedback(f"'{current_song.name}' has unsaved changes!", is_error=True)
             else:
-                # No unsaved changes, or no song currently loaded. Proceed directly.
-                self._perform_load(selected_basename)
+                # No unsaved changes, proceed directly to loading
+                self._perform_load(basename_to_load)
 
         except IndexError:
-            self.set_feedback("Selection index error.", is_error=True)
-            self.selected_index = 0 if self.song_list else None # Reset index
+            self.set_feedback("Error: Invalid selection index.", is_error=True)
         except Exception as e:
-            self.set_feedback(f"Error preparing load: {e}", is_error=True)
-            print(f"Unexpected error during load prep: {e}")
+            self.set_feedback(f"Error preparing to load: {e}", is_error=True)
+            print(f"Error in _load_selected_song: {e}")
+
 
     def _perform_load(self, basename_to_load: str):
         """Internal method to actually load the song file."""
@@ -604,17 +670,21 @@ class SongManagerScreen(BaseScreen):
         loaded_song = file_io.load_song(basename_to_load)
 
         if loaded_song:
-            self.app.current_song = loaded_song
-            self.set_feedback(f"Loaded: {basename_to_load}.")
-            # Refresh display to show new current song border
+            self.app.current_song = loaded_song # Update the main app's current song
+            self.set_feedback(f"Loaded '{basename_to_load}'")
+            # Navigate to Song Edit Screen after successful load
+            # if self.app.song_edit_screen:
+            #     self.app.set_active_screen(self.app.song_edit_screen) # <<< COMMENTED OUT
+            # else:
+            #     self.set_feedback(f"Loaded '{basename_to_load}', but edit screen unavailable.", is_error=True) # <<< COMMENTED OUT
         else:
-            # Loading failed (file_io.load_song returns None and prints error)
-            self.app.current_song = None # Ensure current song is cleared
+            # Error message printed by load_song
             self.set_feedback(f"Failed to load '{basename_to_load}'", is_error=True)
+            # Should we clear the current song if load fails? Maybe not.
+            # self.app.current_song = None
 
         # Reset prompt state regardless of success/failure
-        self.unsaved_prompt_active = False
-        self.song_to_load_after_prompt = None
+        self._reset_prompt_state() # Use the helper
 
 
     def _save_current_and_load_selected(self):
@@ -624,7 +694,7 @@ class SongManagerScreen(BaseScreen):
         basename_to_load = self.song_to_load_after_prompt
 
         if not current_song or not basename_to_load:
-            self.set_feedback("Error: Missing context for save/load.", is_error=True)
+            self.set_feedback("Error: Cannot save/load, state invalid.", is_error=True)
             self._reset_prompt_state()
             return
 
@@ -632,13 +702,14 @@ class SongManagerScreen(BaseScreen):
         pygame.display.flip()
 
         if file_io.save_song(current_song):
-            self.set_feedback(f"Saved '{current_song.name}'.")
+            self.set_feedback(f"Saved '{current_song.name}'. Now loading...")
+            pygame.display.flip()
             # Proceed to load the target song
-            self._perform_load(basename_to_load)
+            self._perform_load(basename_to_load) # This will reset prompt state
         else:
+            # Error message printed by save_song
             self.set_feedback(f"Failed to save '{current_song.name}'. Load cancelled.", is_error=True)
-            # Keep prompt active? Or cancel? Let's cancel load on save failure.
-            self._reset_prompt_state()
+            self._reset_prompt_state() # Reset prompt state on save failure
 
 
     def _discard_changes_and_load_selected(self):
@@ -648,18 +719,19 @@ class SongManagerScreen(BaseScreen):
         basename_to_load = self.song_to_load_after_prompt
 
         if not basename_to_load:
-            self.set_feedback("Error: Missing context for discard/load.", is_error=True)
+            self.set_feedback("Error: No target song to load.", is_error=True)
             self._reset_prompt_state()
             return
 
         if current_song:
-            self.set_feedback(f"Discarding changes in '{current_song.name}'...")
-            current_song.dirty = False # Mark as not dirty anymore
-            pygame.display.flip()
-            time.sleep(0.5) # Brief pause for feedback visibility
+            current_song.dirty = False # Mark as not dirty
+            self.set_feedback(f"Discarded changes in '{current_song.name}'. Now loading...")
+        else:
+            self.set_feedback("No current song changes to discard. Now loading...")
 
+        pygame.display.flip()
         # Proceed to load the target song
-        self._perform_load(basename_to_load)
+        self._perform_load(basename_to_load) # This will reset prompt state
 
 
     def _cancel_load_due_to_unsaved(self):
@@ -679,125 +751,117 @@ class SongManagerScreen(BaseScreen):
     def _get_max_visible_items(self) -> int:
         """Calculate how many list items fit on the screen."""
         list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-        list_area_bottom = self.app.screen.get_height() - 40 # Reserve space for feedback
+        list_area_bottom = self.app.screen.get_height() - FEEDBACK_AREA_HEIGHT # <<< Use constant
         available_height = list_area_bottom - list_area_top
         if available_height <= 0 or LINE_HEIGHT <= 0:
-            return 0
+            return 1 # <<< Return 1 instead of 0
         return available_height // LINE_HEIGHT
 
     def draw(self, screen_surface, midi_status=None):
         """Draws the screen content or the text input widget."""
         # --- Draw Text Input Interface if active ---
         if self.text_input_widget.is_active:
-            # Optionally clear background first
-            # screen_surface.fill(BLACK)
+            # Assume widget draws over everything, or clear first if needed
+            # screen_surface.fill(BLACK) # Optional clear
             self.text_input_widget.draw(screen_surface)
-        # --- Draw Unsaved Changes Prompt if active ---
+            # No feedback message when text input is active
         elif self.unsaved_prompt_active:
-            self._draw_unsaved_prompt(screen_surface)
-        # --- Draw Delete Confirmation if active ---
+            self._draw_normal_content(screen_surface, midi_status) # Draw list underneath
+            self._draw_unsaved_prompt(screen_surface, "Load Song") # <<< Pass context
+        elif self.create_prompt_active: # <<< ADDED
+            self._draw_normal_content(screen_surface, midi_status) # Draw list underneath
+            self._draw_unsaved_prompt(screen_surface, "Create Song") # <<< Pass context
         elif self.delete_confirmation_active:
+             self._draw_normal_content(screen_surface, midi_status) # Draw list underneath
              self._draw_delete_confirmation(screen_surface)
-        # --- Draw Normal Song List Interface ---
         else:
-            # Draw the title
-            screen_surface.blit(self.title_surf, self.title_rect)
+            # --- Draw Normal Content ---
+            self._draw_normal_content(screen_surface, midi_status)
+            # --- Draw Feedback Message (Common) ---
+            self._draw_feedback(screen_surface)
 
-            # --- Draw Song List ---
-            list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-            y_offset = list_area_top
 
-            # Get the current loaded song name for highlighting
-            current_song_name = None
-            if hasattr(self.app, 'current_song') and self.app.current_song:
-                current_song_name = self.app.current_song.name
+    def _draw_normal_content(self, screen_surface, midi_status=None):
+        """Draws the main list view."""
+        # Clear background
+        screen_surface.fill(BLACK)
 
-            if not self.song_list:
-                no_songs_text = f"No songs found."
-                no_songs_surf = self.font.render(no_songs_text, True, WHITE)
-                no_songs_rect = no_songs_surf.get_rect(centerx=screen_surface.get_width() // 2, top=y_offset + 20)
-                screen_surface.blit(no_songs_surf, no_songs_rect)
-            else:
-                max_visible = self._get_max_visible_items()
-                # Ensure scroll offset is valid
-                if self.scroll_offset > len(self.song_list) - max_visible:
-                    self.scroll_offset = max(0, len(self.song_list) - max_visible)
-                if self.scroll_offset < 0:
-                    self.scroll_offset = 0
+        # Draw Title
+        screen_surface.blit(self.title_surf, self.title_rect)
 
-                end_index = min(self.scroll_offset + max_visible, len(self.song_list))
+        # --- Draw Currently Loaded Song Indicator ---
+        current_song = getattr(self.app, 'current_song', None)
+        loaded_text = "Loaded: None"
+        if current_song:
+            dirty_flag = "*" if current_song.dirty else ""
+            loaded_text = f"Loaded: {current_song.name}{dirty_flag}"
 
-                # Draw scroll up indicator if needed
+        loaded_surf = self.font_small.render(loaded_text, True, GREY) # Use smaller font, grey color
+        loaded_rect = loaded_surf.get_rect(topright=(screen_surface.get_width() - LEFT_MARGIN, TOP_MARGIN + 5))
+        screen_surface.blit(loaded_surf, loaded_rect)
+        # --------------------------------------------
+
+        # Draw Song List
+        list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
+        max_visible = self._get_max_visible_items()
+        list_end_index = min(self.scroll_offset + max_visible, len(self.song_list))
+
+        if not self.song_list:
+            no_songs_surf = self.font.render("No songs found.", True, WHITE)
+            no_songs_rect = no_songs_surf.get_rect(centerx=screen_surface.get_width() // 2, top=list_area_top + 20)
+            screen_surface.blit(no_songs_surf, no_songs_rect)
+        else:
+            for i in range(self.scroll_offset, list_end_index):
+                song_name = self.song_list[i]
+                display_index = i - self.scroll_offset # 0-based index for drawing position
+                y_pos = list_area_top + (display_index * LINE_HEIGHT)
+
+                is_selected = (i == self.selected_index)
+                text_color = HIGHLIGHT_COLOR if is_selected else WHITE
+
+                # Determine if this song is the currently loaded song
+                is_loaded = current_song and current_song.name == song_name
+                # Remove the '>' prefix and use a fixed indent
+                prefix = "  "
+                item_text = f"{prefix}{song_name}"
+                item_surf = self.font.render(item_text, True, text_color)
+                item_rect = item_surf.get_rect(topleft=(LEFT_MARGIN + LIST_ITEM_INDENT, y_pos))
+
+                # Draw selection background if the item is selected
+                if is_selected:
+                    bg_rect = pygame.Rect(LEFT_MARGIN, y_pos - 2, screen_surface.get_width() - (2 * LEFT_MARGIN), LINE_HEIGHT)
+                    pygame.draw.rect(screen_surface, GREY, bg_rect)  # Filled background for proper highlight
+
+                # Blit the song name text
+                screen_surface.blit(item_surf, item_rect)
+
+                # If the song is loaded, draw a colored border around it
+                if is_loaded:
+                    # Inflate the rectangle to create a border around the text
+                    border_rect = item_rect.inflate(8, 8)
+                    pygame.draw.rect(screen_surface, GREEN, border_rect, 2)  # 2-pixel thick border
+
+            # --- Draw Scroll Indicators ---
+            if len(self.song_list) > max_visible:
+                # Up arrow if not at the top
                 if self.scroll_offset > 0:
-                     scroll_up_surf = self.font_small.render("^", True, WHITE)
-                     scroll_up_rect = scroll_up_surf.get_rect(centerx=screen_surface.get_width() // 2, top=list_area_top - 15)
-                     screen_surface.blit(scroll_up_surf, scroll_up_rect)
-
-                # Draw the visible portion of the list
-                for i in range(self.scroll_offset, end_index):
-                    song_name = self.song_list[i]
-                    
-                    # Check if this is the currently loaded song
-                    is_current = (song_name == current_song_name)
-                    
-                    # Display the song name
-                    display_text = f"{i + 1}. {song_name}"
-                    
-                    is_selected = (i == self.selected_index)
-                    
-                    # Determine color - prioritize selection highlight
-                    if is_selected:
-                        color = HIGHLIGHT_COLOR
-                    else:
-                        color = WHITE  # Always use white for better visibility
-
-                    item_surf = self.font.render(display_text, True, color)
-                    item_rect = item_surf.get_rect(topleft=(LEFT_MARGIN + LIST_ITEM_INDENT, y_offset))
-
-                    if is_selected:
-                        # Draw highlight background
-                        highlight_rect = pygame.Rect(LEFT_MARGIN, y_offset - 2, screen_surface.get_width() - (2 * LEFT_MARGIN), LINE_HEIGHT)
-                        # Use the standard green highlight for selected items
-                        pygame.draw.rect(screen_surface, (40, 80, 40), highlight_rect)
-                    
-                    # Draw a border around the currently loaded song (after background, before text)
-                    if is_current:
-                        # Create a rectangle slightly larger than the text for the border
-                        border_rect = pygame.Rect(LEFT_MARGIN + LIST_ITEM_INDENT - 10, 
-                                                y_offset - 2, 
-                                                screen_surface.get_width() - LEFT_MARGIN - LIST_ITEM_INDENT - 10, 
-                                                LINE_HEIGHT)
-                        # Draw the border with a bright cyan color for better visibility
-                        border_color = (0, 255, 255)  # Bright cyan
-                        pygame.draw.rect(screen_surface, border_color, border_rect, 2)  # 2px border width
-
-                    screen_surface.blit(item_surf, item_rect)
-
-                    y_offset += LINE_HEIGHT
-
-                # Draw scroll down indicator if needed
-                if end_index < len(self.song_list):
-                     scroll_down_surf = self.font_small.render("v", True, WHITE)
-                     scroll_down_rect = scroll_down_surf.get_rect(centerx=screen_surface.get_width() // 2, top=y_offset + 5)
-                     screen_surface.blit(scroll_down_surf, scroll_down_rect)
-
-
-        # --- Draw Feedback Message (Common) ---
-        # Draw feedback last so it's on top, unless a prompt is active
-        if not self.unsaved_prompt_active and not self.delete_confirmation_active:
-             self._draw_feedback(screen_surface)
+                    up_arrow_surf = self.font_small.render("^", True, WHITE)
+                    up_arrow_rect = up_arrow_surf.get_rect(centerx=screen_surface.get_width() // 2, top=list_area_top - 15)
+                    screen_surface.blit(up_arrow_surf, up_arrow_rect)
+                # Down arrow if not at the bottom
+                if self.scroll_offset + max_visible < len(self.song_list):
+                    down_arrow_surf = self.font_small.render("v", True, WHITE)
+                    down_arrow_rect = down_arrow_surf.get_rect(centerx=screen_surface.get_width() // 2, bottom=screen_surface.get_height() - FEEDBACK_AREA_HEIGHT + 10)
+                    screen_surface.blit(down_arrow_surf, down_arrow_rect)
+            # -----------------------------
 
 
     def _draw_feedback(self, surface):
         """Draws the feedback message at the bottom."""
         if self.feedback_message:
             message, timestamp, color = self.feedback_message
-            feedback_surf = self.font.render(message, True, color)
-            feedback_rect = feedback_surf.get_rect(center=(surface.get_width() // 2, surface.get_height() - 25))
-            # Optional: Add a background to make it stand out
-            bg_rect = feedback_rect.inflate(10, 5)
-            pygame.draw.rect(surface, BLACK, bg_rect)
-            pygame.draw.rect(surface, color, bg_rect, 1) # Border
+            feedback_surf = self.font_small.render(message, True, color)
+            feedback_rect = feedback_surf.get_rect(centerx=surface.get_width() // 2, bottom=surface.get_height() - 10)
             surface.blit(feedback_surf, feedback_rect)
 
     def _draw_delete_confirmation(self, surface):
@@ -843,7 +907,7 @@ class SongManagerScreen(BaseScreen):
         instr_rect = instr_surf.get_rect(midbottom=(surface.get_width() // 2, box_y + box_height - 15))
         surface.blit(instr_surf, instr_rect)
 
-    def _draw_unsaved_prompt(self, surface):
+    def _draw_unsaved_prompt(self, surface, context: str = "Operation"): # <<< Added context parameter
         """Draws the unsaved changes prompt overlay."""
         # Create semi-transparent overlay
         overlay = pygame.Surface((surface.get_width(), surface.get_height()), pygame.SRCALPHA)
@@ -851,7 +915,7 @@ class SongManagerScreen(BaseScreen):
         surface.blit(overlay, (0, 0))
 
         # Draw confirmation box
-        box_width, box_height = 400, 180 # Slightly taller
+        box_width, box_height = 400, 200 # Slightly taller
         box_x = (surface.get_width() - box_width) // 2
         box_y = (surface.get_height() - box_height) // 2
 
@@ -881,19 +945,23 @@ class SongManagerScreen(BaseScreen):
         discard_btn = mappings.button_map.get(mappings.DELETE_CC, f"CC{mappings.DELETE_CC}") # Using DELETE for discard
         cancel_btn = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
 
+        # --- Modify text based on context ---
+        cancel_action_text = f"Cancel {context}"
+
         instr1_text = f"Save Changes? ({save_btn})"
         instr2_text = f"Discard Changes? ({discard_btn})"
-        instr3_text = f"Cancel Load? ({cancel_btn})"
+        instr3_text = f"{cancel_action_text}? ({cancel_btn})"
+        # ------------------------------------
 
         instr1_surf = self.font.render(instr1_text, True, GREEN)
         instr1_rect = instr1_surf.get_rect(midtop=(surface.get_width() // 2, song_rect.bottom + 20))
         surface.blit(instr1_surf, instr1_rect)
 
         instr2_surf = self.font.render(instr2_text, True, RED)
-        instr2_rect = instr2_surf.get_rect(midtop=(surface.get_width() // 2, instr1_rect.bottom + 5))
+        instr2_rect = instr2_surf.get_rect(midtop=(surface.get_width() // 2, instr1_rect.bottom + 10)) # <<< Increased spacing
         surface.blit(instr2_surf, instr2_rect)
 
         instr3_surf = self.font.render(instr3_text, True, WHITE)
-        instr3_rect = instr3_surf.get_rect(midtop=(surface.get_width() // 2, instr2_rect.bottom + 5))
+        instr3_rect = instr3_surf.get_rect(midtop=(surface.get_width() // 2, instr2_rect.bottom + 10)) # <<< Increased spacing
         surface.blit(instr3_surf, instr3_rect)
 

@@ -23,15 +23,11 @@ MIN_PROGRAM_MSG = 0
 MAX_PROGRAM_MSG = 127
 
 # --- Segment Data Structure ---
-
 @dataclass
 class Segment:
     """
     Represents one segment or section within a Song.
-
     Attributes are designed to be easily accessed and modified, suitable for UI editing.
-    Consider adding validation logic (e.g., in __post_init__) if strict range
-    enforcement is needed outside the UI layer.
     """
     program_message_1: int = 0          # MIDI Program Change 1 (0-127)
     program_message_2: int = 0          # MIDI Program Change 2 (0-127)
@@ -39,23 +35,21 @@ class Segment:
     tempo_ramp: float = 0.0             # Time in seconds to ramp to this tempo from previous (0.0-300.0). 0 = instant.
     loop_length: int = 16               # Length of the loop in beats (8-128)
     repetitions: int = 1                # Number of times to repeat this segment (1-128)
-    automatic_transport_interrupt: bool = False # Pause playback after this segment finishes? (True=Yes, False=No)
+    automatic_transport_interrupt: bool = False # Pause playback after this segment finishes? (True/False)
+    dirty: bool = field(default=False, compare=False, repr=False) # Tracks unsaved changes for this segment
 
-    # Optional: Post-init validation if needed, though UI might handle this
-    # def __post_init__(self):
-    #     if not (MIN_PROGRAM_MSG <= self.program_message_1 <= MAX_PROGRAM_MSG):
-    #         raise ValueError(f"program_message_1 must be between {MIN_PROGRAM_MSG} and {MAX_PROGRAM_MSG}")
-    #     # ... add other validations similarly ...
-    #     if not (MIN_TEMPO <= self.tempo <= MAX_TEMPO):
-    #          raise ValueError(f"Tempo must be between {MIN_TEMPO} and {MAX_TEMPO} BPM")
-    #     # etc.
+    def __str__(self) -> str:
+        # Include asterisk if this segment has unsaved changes.
+        dirty_flag = "*" if self.dirty else ""
+        return (f"Segment{dirty_flag}(Prog1={self.program_message_1}, "
+                f"Prog2={self.program_message_2}, Tempo={self.tempo}, "
+                f"Ramp={self.tempo_ramp}, Loop={self.loop_length}, "
+                f"Reps={self.repetitions}, AutoTransport={self.automatic_transport_interrupt})")
 
 # --- Song Data Structure ---
-
 class Song:
     """
     Represents a song, composed of an ordered list of Segments.
-
     Provides methods for managing the segments within the song.
     Designed to be manipulated by UI components.
     Includes a 'dirty' flag to track unsaved changes.
@@ -73,9 +67,8 @@ class Song:
             raise ValueError("Song name must be a non-empty string.")
 
         self.name: str = name
-        # Use field for default_factory to ensure each Song instance gets its own list
         self.segments: List[Segment] = segments if segments is not None else []
-        self.dirty: bool = False # Flag to track unsaved changes
+        self.dirty: bool = False  # Flag to track unsaved changes
 
     def add_segment(self, segment: Segment, index: Optional[int] = None):
         """
@@ -136,6 +129,7 @@ class Song:
     def update_segment(self, index: int, **kwargs):
         """
         Updates attributes of a segment at the specified index.
+        Also sets the segment's and the song's dirty flag if a value changes.
 
         Args:
             index: The index of the segment to update.
@@ -152,7 +146,7 @@ class Song:
         modified = False
         for key, value in kwargs.items():
             if hasattr(segment, key):
-                # Only set dirty if the value actually changes
+                # Only mark as modified if the value actually changes
                 if getattr(segment, key) != value:
                     setattr(segment, key, value)
                     modified = True
@@ -161,56 +155,66 @@ class Song:
             else:
                 raise AttributeError(f"Segment object has no attribute '{key}'")
         if modified:
-            self.dirty = True # Mark as modified
+            segment.dirty = True # Mark the specific segment as dirty
+            self.dirty = True # Mark the whole song as dirty
 
     def to_dict(self) -> Dict[str, Any]:
         """
         Converts the Song object to a dictionary suitable for serialization.
-        
+        Excludes the runtime 'dirty' flags.
+
         Returns:
             A dictionary containing the song name and segments.
         """
-        # Note: The 'dirty' flag is runtime state and not saved to the file.
+        # Convert each segment to dict, excluding the 'dirty' field
+        segments_list = []
+        for segment in self.segments:
+            segment_dict = asdict(segment)
+            segment_dict.pop('dirty', None) # Remove dirty flag before saving
+            segments_list.append(segment_dict)
+
         return {
             "name": self.name,
-            "segments": [asdict(segment) for segment in self.segments]
+            "segments": segments_list
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Song':
         """
         Creates a Song object from a dictionary (deserialization).
-        
+        Initializes segments with dirty=False.
+
         Args:
             data: Dictionary containing song data with 'name' and 'segments'.
-            
+
         Returns:
             A new Song instance populated with the data.
-            
+
         Raises:
             KeyError: If required keys are missing.
             TypeError: If data types are incorrect.
         """
         if not isinstance(data, dict):
             raise TypeError("Data must be a dictionary")
-            
+
         name = data.get("name")
         if not name:
             raise KeyError("Song data must contain 'name'")
-            
+
         segments_data = data.get("segments", [])
         if not isinstance(segments_data, list):
             raise TypeError("'segments' must be a list")
-            
+
         segments = []
         for segment_dict in segments_data:
             try:
                 # Create Segment instance using dictionary unpacking
+                # The 'dirty' flag will default to False as defined in the dataclass
                 segment = Segment(**segment_dict)
                 segments.append(segment)
             except TypeError as e:
                 raise TypeError(f"Error creating segment: {e}")
-                
+
         song = cls(name=name, segments=segments)
         song.dirty = False # Loaded song starts clean
         return song
@@ -221,104 +225,20 @@ class Song:
             self.segments = []
             self.dirty = True
 
+    def clear_segment_dirty_flags(self):
+        """Resets the dirty flag for all segments in the song."""
+        for segment in self.segments:
+            segment.dirty = False
+
     def __len__(self) -> int:
         """Returns the number of segments in the song."""
         return len(self.segments)
 
     def __repr__(self) -> str:
-        """Provides a useful string representation of the Song object."""
-        return f"Song(name='{self.name}', segments={len(self.segments)})"
+        dirty_flag = "*" if self.dirty else ""
+        return f"Song(name='{self.name}{dirty_flag}', segments={len(self.segments)})"
 
     def __str__(self) -> str:
-        """Provides a user-friendly string representation."""
+        dirty_flag = "*" if self.dirty else ""
         segment_details = "\n  ".join([f"{i+1}: {seg}" for i, seg in enumerate(self.segments)])
-        return f"Song: {self.name}\nSegments:\n  {segment_details if segment_details else 'No segments.'}"
-
-'''
-# --- Example Usage ---
-if __name__ == '__main__':
-    print("--- Testing Song/Segment Classes ---")
-
-    # Create example segments
-    try:
-        seg1 = Segment(
-            program_message_1=10,
-            program_message_2=25,
-            tempo=120.0,
-            tempo_ramp=2.0,
-            loop_length=16,
-            repetitions=4,
-            automatic_transport_interrupt=False
-        )
-        seg2 = Segment(
-            program_message_1=11,
-            program_message_2=26,
-            tempo=90.0,
-            tempo_ramp=0.0, # Instant change
-            loop_length=32,
-            repetitions=2,
-            automatic_transport_interrupt=True # Pause after this one
-        )
-        seg3 = Segment() # Use defaults
-
-        print("\nCreated Segments:")
-        print(f"Segment 1: {seg1}")
-        print(f"Segment 2: {seg2}")
-        print(f"Segment 3 (Defaults): {seg3}")
-
-        # Create a song
-        my_song = Song(name="My Awesome Track")
-        print(f"\nCreated Song: {my_song}")
-
-        # Add segments
-        my_song.add_segment(seg1)
-        my_song.add_segment(seg2)
-        print(f"\nSong after adding 2 segments: {my_song}")
-        print(f"Number of segments: {len(my_song)}")
-
-        # Insert a segment
-        my_song.add_segment(seg3, index=1) # Insert seg3 between seg1 and seg2
-        print(f"\nSong after inserting segment at index 1: {my_song}")
-
-        # Print detailed song structure
-        print("\nDetailed Song Structure:")
-        print(str(my_song))
-
-        # Get a specific segment
-        retrieved_segment = my_song.get_segment(0)
-        print(f"\nRetrieved segment at index 0: {retrieved_segment}")
-        assert retrieved_segment == seg1
-
-        # Update a segment
-        print("\nUpdating segment at index 2 (originally seg2):")
-        my_song.update_segment(2, tempo=95.5, repetitions=3)
-        print(str(my_song))
-        assert my_song.get_segment(2).tempo == 95.5
-        assert my_song.get_segment(2).repetitions == 3
-
-        # Remove a segment
-        removed = my_song.remove_segment(1) # Remove seg3
-        print(f"\nRemoved segment at index 1: {removed}")
-        print(f"Song after removal: {my_song}")
-        print(str(my_song))
-        assert len(my_song) == 2
-        assert removed == seg3
-
-        # Clear all segments
-        my_song.clear_segments()
-        print(f"\nSong after clearing segments: {my_song}")
-        print(str(my_song))
-        assert len(my_song) == 0
-
-        # Test initialization with segments
-        initial_segments = [Segment(tempo=100), Segment(tempo=110)]
-        another_song = Song(name="Preloaded Song", segments=initial_segments)
-        print(f"\nCreated song with initial segments: {another_song}")
-        print(str(another_song))
-        assert len(another_song) == 2
-
-    except (ValueError, TypeError, IndexError, AttributeError) as e:
-        print(f"\nAn error occurred during testing: {e}")
-
-    print("\n--- Testing Complete ---")
-'''
+        return f"Song: {self.name}{dirty_flag}\nSegments:\n  {segment_details if segment_details else 'No segments.'}"

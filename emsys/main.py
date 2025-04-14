@@ -15,6 +15,7 @@ import sys
 import os
 import sdnotify # For systemd notification
 import traceback # For detailed error logs
+from typing import Optional # <<< ADDED Optional
 
 # Add the project root directory to the path to enable absolute imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,6 +116,10 @@ class App:
         # Button Hold State (Universal for all CCs)
         # Dictionary mapping control_number to {'press_time': float, 'last_repeat_time': float, 'message': mido.Message}
         self.pressed_buttons = {}
+
+        # --- ADDED: State for pending screen change ---
+        self.pending_screen_change: Optional[BaseScreen] = None
+        # ---------------------------------------------
 
         self._initialize_midi() # Attempt initial connection (Input and Output)
         self.initialize_screens()
@@ -327,9 +332,14 @@ class App:
         loop_counter = 0 # Optional: Counter for loop iterations
 
         while self.running:
-            loop_start_time = time.time() # <<< Timing Start
+            current_time = time.time()
 
-            current_time = time.time() # Used for button repeats and connection checks
+            # --- Handle Pending Screen Change ---
+            if self.pending_screen_change:
+                screen_to_set = self.pending_screen_change
+                self.pending_screen_change = None # Clear pending request
+                self.set_active_screen(screen_to_set) # Perform the change
+            # ------------------------------------
 
             # --- MIDI Connection Management ---
             if self.is_searching:
@@ -420,39 +430,47 @@ class App:
             control = msg.control
             value = msg.value
 
-            # Check if this CC is an encoder/fader
+            # Check if this CC is an encoder/fader (non-repeatable)
             if control in NON_REPEATABLE_CCS:
-                # Directly dispatch non-repeatable controls (encoders, faders)
+                # Directly dispatch non-repeatable controls
                 self._dispatch_action(msg)
                 return # Handled non-repeatable CC
 
             # Handle MOMENTARY Button Press (value == 127)
             if value == 127:
                 if control not in self.pressed_buttons:
-                    # print(f"Button Press Detected: CC {control} (Value: {value})") # Keep this one? Optional.
+                    # print(f"Button Press Detected: CC {control} (Value: {value})") # Optional debug
                     self.pressed_buttons[control] = {
                         'press_time': current_time,
                         'last_repeat_time': current_time,
                         'message': msg
                     }
+                    # --- Dispatch action ONLY on initial press ---
                     self._dispatch_action(msg)
+                # else: # Optional debug: Button already held (repeat logic handles this)
+                    # print(f"Button {control} already held, ignoring redundant press event.")
                 return # Handled momentary press
 
             # Handle MOMENTARY Button Release (value == 0)
             elif value == 0:
                 if control in self.pressed_buttons:
-                    # print(f"Button Release Detected: CC {control}") # Keep this one? Optional.
+                    # print(f"Button Release Detected: CC {control}") # Optional debug
                     del self.pressed_buttons[control]
-                self._dispatch_action(msg)
+                # --- DO NOT DISPATCH ACTION ON RELEASE ---
+                # self._dispatch_action(msg) # <<< REMOVE THIS LINE
                 return # Handled momentary release
 
-            # Handle Other CC Values
+            # Handle Other CC Values (if any non-momentary, non-repeatable buttons exist)
             else:
-                 self._dispatch_action(msg)
+                 # If there are other types of CC messages that need dispatching,
+                 # they would be handled here. Otherwise, this can be ignored.
+                 # print(f"Unhandled CC value: CC {control}, Value {value}") # Optional debug
+                 # self._dispatch_action(msg) # Decide if other values need dispatching
                  return
 
-        # Handle Non-CC Messages
+        # Handle Non-CC Messages (Notes, etc.)
         else:
+            # Dispatch other message types directly
             self._dispatch_action(msg)
 
     def _dispatch_action(self, msg):
@@ -525,11 +543,16 @@ class App:
         self._dispatch_action(msg)
 
     def _handle_button_release(self, control):
-        """Handle the release of a button."""
-        print(f"Button Release Detected: CC {control}")
-        # Remove the button from the tracking dictionary
+        """Handles the release of a momentary button."""
         if control in self.pressed_buttons:
+            # msg = self.pressed_buttons[control]['message'] # Get the original message if needed
             del self.pressed_buttons[control]
+            # print(f"Button Released: CC {control}") # Optional debug
+            # --- REMOVE DISPATCH ON RELEASE ---
+            # self._dispatch_action(msg) # <<< REMOVE THIS LINE
+            # ----------------------------------
+        # else: # Optional debug
+            # print(f"Button Release Ignored (not tracked): CC {control}")
 
     def _handle_button_repeats(self, current_time):
         """Check and handle button repeats based on the current time."""
@@ -587,32 +610,79 @@ class App:
              self.active_screen._update_encoder_led()
 
     def next_screen(self):
-        """Switch to the next available screen."""
-        if not hasattr(self, 'screens') or not self.screens: return # No screens to switch
-        try:
-            current_index = self.screens.index(self.active_screen)
+        """Switches to the next screen in the list, wrapping around."""
+        if not self.screens:
+            return
+
+        # --- REMOVE Check if current screen allows deactivation ---
+        # if self.active_screen and hasattr(self.active_screen, 'can_deactivate'):
+        #     if not self.active_screen.can_deactivate():
+        #         print("Screen change blocked by active screen (e.g., unsaved changes).")
+        #         self.pending_screen_change = None # Ensure no pending change remains
+        #         return # Do not proceed
+        # --- END REMOVAL ---
+
+        current_index = -1
+        if self.active_screen:
+            try:
+                current_index = self.screens.index(self.active_screen)
+            except ValueError:
+                pass # Should not happen if active_screen is always in screens
+
+        if current_index != -1:
             next_index = (current_index + 1) % len(self.screens)
-            # Log the switch action itself
-            print(f"Action: Switch screen {self.active_screen.__class__.__name__} -> {self.screens[next_index].__class__.__name__}")
-            self.set_active_screen(self.screens[next_index])
-        except (ValueError, AttributeError): # Handle if active_screen somehow not in list
-             if self.screens:
-                  print(f"Action: Switch screen (fallback) -> {self.screens[0].__class__.__name__}")
-                  self.set_active_screen(self.screens[0])
+            self.pending_screen_change = self.screens[next_index] # <<< Set pending change
+            print(f"Requested next screen: {self.pending_screen_change.__class__.__name__}")
+        else:
+            # If no active screen or not found, default to first screen
+            if self.screens:
+                self.pending_screen_change = self.screens[0] # Default to first screen
+                print(f"Requested next screen (default): {self.pending_screen_change.__class__.__name__}")
 
     def previous_screen(self):
-        """Switch to the previous available screen."""
-        if not hasattr(self, 'screens') or not self.screens: return # No screens to switch
-        try:
-            current_index = self.screens.index(self.active_screen)
-            prev_index = (current_index - 1) % len(self.screens) # Correctly handles negative index
-            # Log the switch action itself
-            print(f"Action: Switch screen {self.active_screen.__class__.__name__} -> {self.screens[prev_index].__class__.__name__}")
-            self.set_active_screen(self.screens[prev_index])
-        except (ValueError, AttributeError): # Handle if active_screen somehow not in list
-             if self.screens:
-                  print(f"Action: Switch screen (fallback) -> {self.screens[0].__class__.__name__}")
-                  self.set_active_screen(self.screens[0])
+        """Switches to the previous screen in the list, wrapping around."""
+        if not self.screens:
+            return
+
+        # --- REMOVE Check if current screen allows deactivation ---
+        # if self.active_screen and hasattr(self.active_screen, 'can_deactivate'):
+        #     if not self.active_screen.can_deactivate():
+        #         print("Screen change blocked by active screen (e.g., unsaved changes).")
+        #         self.pending_screen_change = None # Ensure no pending change remains
+        #         return # Do not proceed
+        # --- END REMOVAL ---
+
+        current_index = -1
+        if self.active_screen:
+            try:
+                current_index = self.screens.index(self.active_screen)
+            except ValueError:
+                pass
+
+        if current_index != -1:
+            prev_index = (current_index - 1 + len(self.screens)) % len(self.screens)
+            self.pending_screen_change = self.screens[prev_index] # <<< Set pending change
+            print(f"Requested previous screen: {self.pending_screen_change.__class__.__name__}")
+        else:
+            # If no active screen or not found, default to last screen
+            if self.screens:
+                self.pending_screen_change = self.screens[-1] # Default to last screen
+                print(f"Requested previous screen (default): {self.pending_screen_change.__class__.__name__}")
+
+    # --- Keep request_screen_change method, it might be useful elsewhere ---
+    def request_screen_change(self):
+        """
+        Called by a screen (e.g., after resolving an exit prompt) to indicate
+        that a previously requested screen change can now proceed.
+        """
+        # This method doesn't strictly *need* to do anything if the main loop
+        # handles the pending_screen_change flag correctly.
+        # However, it's a clear signal. We could potentially re-trigger
+        # the original next/prev action if needed, but the pending flag is simpler.
+        print("Screen signaled readiness for change. Main loop will handle pending request.")
+        # If self.pending_screen_change is already set, the main loop will pick it up.
+        # If it's not set (e.g., user cancelled prompt then hit next/prev again),
+        # the next/prev methods will set it.
 
     def set_active_screen(self, screen):
         """Set the active screen, call cleanup/init if needed, and notify status."""
@@ -620,19 +690,31 @@ class App:
             if screen is None: print("Error: Attempted to set active screen to None.")
             return # No change needed or invalid input
 
+        old_screen = self.active_screen # <<< Store the current screen before changing
+
         # Cleanup old screen
-        if self.active_screen and hasattr(self.active_screen, 'cleanup'):
-            print(f"Cleaning up screen: {self.active_screen.__class__.__name__}")
-            try: self.active_screen.cleanup()
-            except Exception as e: print(f"Error during screen cleanup: {e}")
+        if old_screen and hasattr(old_screen, 'cleanup'): # <<< Use old_screen here
+            try: # <<< Add try-except for safety
+                print(f"Cleaning up {old_screen.__class__.__name__}...") # <<< Use old_screen here
+                old_screen.cleanup() # <<< Use old_screen here
+            except Exception as e:
+                print(f"Error during {old_screen.__class__.__name__} cleanup: {e}") # <<< Use old_screen here
+                traceback.print_exc() # Log the error
 
         self.active_screen = screen
 
         # Initialize new screen
         if hasattr(self.active_screen, 'init'):
-             print(f"Initializing screen: {self.active_screen.__class__.__name__}")
-             try: self.active_screen.init()
-             except Exception as e: print(f"Error during screen init: {e}")
+             try: # <<< Add try-except for safety
+                 print(f"Initializing {self.active_screen.__class__.__name__}...")
+                 self.active_screen.init()
+             except Exception as e:
+                 print(f"Error during {self.active_screen.__class__.__name__} init: {e}")
+                 traceback.print_exc()
+                 # Revert to old screen or a safe screen on init failure?
+                 self.active_screen = old_screen # Revert for now <<< Use the stored old_screen
+                 self.notify_status(f"FAIL: Init error in {screen.__class__.__name__}. Reverted.")
+                 return # Stop the screen change process
 
         # Status notification includes screen name and MIDI status
         current_midi_status = self.midi_error_message or (self.midi_port_name if self.midi_port else "Searching...")
@@ -642,9 +724,17 @@ class App:
         """Clean up resources before exiting."""
         print("Cleaning up application...")
         self.notify_status("Application Shutting Down")
-        # --- Save last song before exit ---
-        self._save_last_song()
-        
+        # --- Check for unsaved changes before saving last song ---
+        # Although saving last_song.txt doesn't depend on dirty status,
+        # it's good practice to consider if a final save prompt is needed here.
+        # For now, just save the name of the potentially dirty song.
+        current_song = getattr(self, 'current_song', None)
+        if current_song and current_song.dirty:
+            print("Warning: Exiting with unsaved changes in current song.")
+            # Optionally add a final save prompt here if running interactively?
+            # For a service, probably just log and exit.
+
+        self._save_last_song() # Save the name regardless of dirty status
         if self.midi_port:
             try:
                 self.midi_port.close()

@@ -26,7 +26,7 @@ from .widgets import TextInputWidget, TextInputStatus, FocusColumn # <<< Added F
 from emsys.core.song import Segment # <<< Added for default values
 from emsys.config.mappings import FADER_SELECT_CC, DELETE_CC # <<< Added DELETE_CC etc.
 # --- Import colors from settings ---
-from emsys.config.settings import ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR, BLACK, WHITE, FOCUS_BORDER_COLOR # <<< Use settings
+from emsys.config.settings import ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR, BLACK, WHITE, GREY, FOCUS_BORDER_COLOR # <<< Use settings
 # -----------------------------------
 
 # Define layout constants
@@ -110,6 +110,10 @@ class SongEditScreen(BaseScreen):
         self.focused_column: FocusColumn = FocusColumn.SEGMENT_LIST
         # ---------------------------------
 
+        # --- Add state for exit confirmation prompt ---
+        self.exit_prompt_active: bool = False
+        # ------------------------------------------
+
         # --- Add scroll offsets ---
         self.segment_scroll_offset: int = 0
         self.parameter_scroll_offset: int = 0
@@ -171,18 +175,22 @@ class SongEditScreen(BaseScreen):
 
         self.text_input_widget.cancel()
         self.focused_column = FocusColumn.SEGMENT_LIST
+        # --- Reset exit prompt state ---
+        self.exit_prompt_active = False
+        # -----------------------------
         # --- Reset scroll offsets ---
         self.segment_scroll_offset = 0
         self.parameter_scroll_offset = 0
         # --------------------------
         self.clear_feedback()
-        self._update_encoder_led() # <<< RE-ENABLED
+        self._update_encoder_led()
 
     def cleanup(self):
         """Called when the screen becomes inactive."""
         super().cleanup()
         print(f"{self.__class__.__name__} is being deactivated.")
         self.text_input_widget.cancel()
+        self.exit_prompt_active = False # Ensure prompt is cleared
         # Optionally turn off the LED when leaving the screen
         # if hasattr(self.app, 'send_midi_cc'):
         #     self.app.send_midi_cc(control=16, value=0, channel=15) # CC 16 (Knob 8), Value 0 (Off), Channel 16
@@ -208,7 +216,7 @@ class SongEditScreen(BaseScreen):
     def handle_midi(self, msg):
         """Handle MIDI messages delegated from the main app."""
         if msg.type != 'control_change':
-             return
+             return # <<< Added return
 
         cc = msg.control
         value = msg.value
@@ -230,6 +238,18 @@ class SongEditScreen(BaseScreen):
             return # Don't process other actions while text input is active
         # ----------------------------------
 
+        # --- ADDED: Handle Exit Confirmation Prompt ---
+        if self.exit_prompt_active:
+            if value == 127: # Button press
+                if cc == mappings.SAVE_CC: # Save & Exit
+                    self._save_and_exit()
+                elif cc == mappings.DELETE_CC: # Discard & Exit
+                    self._discard_and_exit()
+                elif cc == mappings.NO_NAV_CC: # Cancel Exit
+                    self._cancel_exit()
+            return # <<< Prevent further processing
+        # --------------------------------------------
+
         # --- Handle Universal Encoder Parameter Adjustment (KNOB_B8_CC) ---
         if cc == mappings.KNOB_B8_CC:
             direction = 0
@@ -240,7 +260,7 @@ class SongEditScreen(BaseScreen):
 
             if direction != 0:
                 self._modify_parameter_via_encoder(direction)
-            return # Encoder handled
+            return # <<< Added return
 
         # --- Handle Fader Selection (CC 65) ---
         if cc == FADER_SELECT_CC:
@@ -318,7 +338,7 @@ class SongEditScreen(BaseScreen):
         # --- Normal Edit Mode Handling (Button Presses Only) ---
         # Process remaining CCs only if they are button presses (value 127)
         if value != 127:
-            return # Ignore releases or other values for the buttons below
+            return # <<< Added return
 
         # --- REMOVE RENAME_CC Handling ---
         # if cc == mappings.RENAME_CC:
@@ -329,10 +349,12 @@ class SongEditScreen(BaseScreen):
         # --- Handle DELETE_CC based on focus ---
         if cc == DELETE_CC:
             if self.focused_column == FocusColumn.SEGMENT_LIST:
-                self._delete_current_segment() # <<< Direct deletion
+                self._delete_current_segment() # Direct delete for segments
             elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
-                self._reset_or_copy_parameter() # Reset/copy parameter value
-            return # DELETE handled
+                # Maybe implement parameter reset here later?
+                self.set_feedback("DELETE not implemented for parameters yet.") # <<< Keep this or change to reset?
+                # self._reset_or_copy_parameter() # <<< Or use DELETE to reset?
+            return # <<< Prevent further processing of DELETE
         # ---------------------------------------
 
         # --- Now handle other button presses based on focus ---
@@ -352,11 +374,26 @@ class SongEditScreen(BaseScreen):
         elif cc == mappings.LEFT_NAV_CC:
             self._navigate_focus(-1) # Move focus left
 
-        # Value Modification (Only if Parameter column is focused)
-        elif cc == mappings.YES_NAV_CC: # Increment
-            self._modify_selected_parameter(1)
-        elif cc == mappings.NO_NAV_CC: # Decrement
-            self._modify_selected_parameter(-1)
+        # --- MODIFIED: YES/NO for value modification OR boolean toggle ---
+        elif cc == mappings.YES_NAV_CC:
+            if self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                if self.selected_parameter_key == 'automatic_transport_interrupt':
+                    self._toggle_boolean_parameter() # Toggle boolean with YES
+                else:
+                    self._modify_selected_parameter(1) # Increment other params with YES
+            else:
+                 self.set_feedback("YES action not defined here.")
+        elif cc == mappings.NO_NAV_CC:
+            if self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                 if self.selected_parameter_key == 'automatic_transport_interrupt':
+                     self._toggle_boolean_parameter() # Also allow toggle with NO? Or just YES? Let's keep NO for decrement/reset
+                     # self.set_feedback("Use YES to toggle Auto Pause.")
+                     self._modify_selected_parameter(-1) # Decrement other params with NO
+                 else:
+                     self._modify_selected_parameter(-1) # Decrement other params with NO
+            else:
+                self.set_feedback("NO action not defined here.")
+        # --- END MODIFICATION ---
 
         # Actions (Generally independent of focus, but act on selection)
         elif cc == mappings.SAVE_CC:
@@ -573,20 +610,29 @@ class SongEditScreen(BaseScreen):
             self.text_input_widget.draw(screen)
             return # Don't draw anything else
 
+        # --- Draw Exit Prompt if active ---
+        elif self.exit_prompt_active:
+            self._draw_normal_content(screen, midi_status) # Draw underneath
+            self._draw_exit_prompt(screen)
         # --- Draw Normal Content ---
-        self._draw_normal_content(screen, midi_status)
-
-        # --- Draw Feedback ---
-        self._draw_feedback(screen)
+        else:
+            self._draw_normal_content(screen, midi_status)
+            # --- Draw Feedback ---
+            self._draw_feedback(screen) # Only draw feedback if no prompt is active
 
     def _draw_normal_content(self, screen, midi_status=None):
         """Draws the main content of the song edit screen."""
         # Clear screen or assume it's cleared by main loop
         # screen.fill(BLACK)
 
-        # Draw Title (Example)
-        title_surf = self.font_large.render("Song Editor", True, WHITE)
-        self.title_rect = title_surf.get_rect(midtop=(screen.get_width() // 2, 10))
+        # Draw Title with Dirty Flag
+        title_text = "Song Editor"
+        if self.current_song:
+            dirty_flag = "*" if self.current_song.dirty else ""
+            title_text = f"Edit: {self.current_song.name}{dirty_flag}"
+
+        title_surf = self.font_large.render(title_text, True, WHITE)
+        self.title_rect = title_surf.get_rect(midtop=(screen.get_width() // 2, TOP_MARGIN))
         screen.blit(title_surf, self.title_rect)
 
         # --- REMOVED MIDI Status Drawing ---
@@ -641,17 +687,24 @@ class SongEditScreen(BaseScreen):
                     is_selected_segment = (i == self.selected_segment_index)
                     is_segment_column_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
                     color = HIGHLIGHT_COLOR if (is_selected_segment and is_segment_column_focused) else WHITE
-                    text = f"Seg {i+1}"
-                    surf = self.font_small.render(text, True, color)
-                    item_rect = surf.get_rect(topleft=(seg_list_rect.left + 5, seg_text_y))
 
-                    # Highlight background if selected segment
-                    if is_selected_segment:
-                         highlight_bg_rect = pygame.Rect(item_rect.left - 3, item_rect.top - 1, seg_list_rect.width - 10, LINE_HEIGHT - 4) # Use LINE_HEIGHT
-                         pygame.draw.rect(screen, (40, 80, 40), highlight_bg_rect) # Dim green background
+                    # --- ADDED: Segment Dirty Flag ---
+                    dirty_flag = "*" if seg.dirty else ""
+                    # --- END ADDED ---
 
-                    screen.blit(surf, item_rect)
-                    seg_text_y += LINE_HEIGHT # Use LINE_HEIGHT
+                    seg_text = f"{i + 1}{dirty_flag}" # Basic text, add dirty flag
+                    seg_surf = self.font_small.render(seg_text, True, color)
+                    seg_rect = seg_surf.get_rect(topleft=(seg_list_rect.left + 10, seg_text_y))
+
+                    # Draw selection background if focused and selected
+                    if is_selected_segment and is_segment_column_focused:
+                        # Define background rect slightly smaller than the line height space
+                        bg_rect = pygame.Rect(seg_list_rect.left + 2, seg_text_y - 2, seg_list_rect.width - 4, LINE_HEIGHT)
+                        # Fill the background rectangle with GREY color
+                        pygame.draw.rect(screen, GREY, bg_rect) # <<< Changed from border (width 1) to fill
+
+                    screen.blit(seg_surf, seg_rect)
+                    seg_text_y += LINE_HEIGHT
 
                 # Draw scroll down indicator
                 if end_index < num_segments:
@@ -681,8 +734,10 @@ class SongEditScreen(BaseScreen):
                         self.parameter_scroll_offset = max(0, num_params - max_visible_params)
                     if self.parameter_scroll_offset < 0: self.parameter_scroll_offset = 0
 
-                    start_index = self.parameter_scroll_offset
-                    end_index = min(start_index + max_visible_params, num_params)
+                    # <<< --- ADDED: Define start and end index for parameter loop --- >>>
+                    param_start_index = self.parameter_scroll_offset
+                    param_end_index = min(param_start_index + max_visible_params, num_params)
+                    # <<< --- END ADDED --- >>>
 
                     # Draw scroll up indicator
                     if self.parameter_scroll_offset > 0:
@@ -692,44 +747,55 @@ class SongEditScreen(BaseScreen):
 
                     param_text_y = param_detail_rect.top + LIST_TOP_PADDING # Start below indicator space
 
-                    for i in range(start_index, end_index):
-                        key = self.parameter_keys[i]
-                        is_the_selected_param = (key == self.selected_parameter_key)
-                        is_param_column_focused = (self.focused_column == FocusColumn.PARAMETER_DETAILS)
-
-                        # Text color: Highlight only if column is focused AND it's the selected param
-                        color = HIGHLIGHT_COLOR if (is_the_selected_param and is_param_column_focused) else WHITE
-
+                    for j in range(param_start_index, param_end_index):
+                        key = self.parameter_keys[j]
                         display_name = self.parameter_display_names.get(key, key)
                         value = getattr(segment, key, "N/A")
 
-                        # Format value (e.g., boolean, float precision)
+                        # Format value (e.g., boolean as ON/OFF)
                         if isinstance(value, bool):
                             value_str = "ON" if value else "OFF"
                         elif isinstance(value, float):
-                            value_str = f"{value:.1f}" # Example: 1 decimal place
+                            value_str = f"{value:.1f}" # One decimal place for floats
                         else:
                             value_str = str(value)
 
-                        text = f"{display_name}: {value_str}"
-                        surf = self.font_small.render(text, True, color)
-                        item_rect = surf.get_rect(topleft=(param_detail_rect.left + 5, param_text_y))
+                        is_selected_param = (key == self.selected_parameter_key)
+                        is_param_column_focused = (self.focused_column == FocusColumn.PARAMETER_DETAILS)
+                        # Text color is highlighted only when selected AND focused
+                        color = HIGHLIGHT_COLOR if (is_selected_param and is_param_column_focused) else WHITE
 
-                        # Background highlight: Draw if it's the selected param, regardless of focus
-                        if is_the_selected_param:
-                            highlight_bg_rect = pygame.Rect(item_rect.left - 3, item_rect.top - 1, param_detail_rect.width - 10, LINE_HEIGHT - 4) # Use LINE_HEIGHT
-                            pygame.draw.rect(screen, (40, 80, 40), highlight_bg_rect) # Dim green background
+                        # --- NOTE: Parameter-level dirty flag display is complex ---
+                        # We only have segment.dirty. We could highlight the whole parameter
+                        # list if segment.dirty is True, or just rely on the segment list asterisk.
+                        # For now, just display the value.
+                        # dirty_param_flag = "*" if segment.dirty else "" # Example: Mark all if segment is dirty
+                        # param_text = f"{display_name}{dirty_param_flag}: {value_str}"
+                        param_text = f"{display_name}: {value_str}"
+                        # --- END NOTE ---
 
-                        screen.blit(surf, item_rect)
-                        param_text_y += LINE_HEIGHT # Use LINE_HEIGHT
+                        param_surf = self.font.render(param_text, True, color)
+                        param_rect = param_surf.get_rect(topleft=(param_detail_rect.left + PARAM_INDENT, param_text_y))
+
+                        # Draw selection background if the parameter is selected, regardless of focus column
+                        if is_selected_param:
+                            # Use a slightly different background/border if not focused? Optional.
+                            # For now, just use the same grey border.
+                            bg_rect = pygame.Rect(param_detail_rect.left + 2, param_text_y - 2, param_detail_rect.width - 4, LINE_HEIGHT)
+                            # Fill the background rectangle with GREY color
+                            pygame.draw.rect(screen, GREY, bg_rect) # <<< Changed from border (width 1) to fill
+
+                        screen.blit(param_surf, param_rect)
+                        param_text_y += LINE_HEIGHT
 
                     # Draw scroll down indicator
-                    if end_index < num_params:
+                    if param_end_index < num_params:
                         scroll_down_surf = self.font_small.render("v", True, WHITE)
                         scroll_down_rect = scroll_down_surf.get_rect(centerx=param_detail_rect.centerx, bottom=param_detail_rect.bottom - 2)
                         screen.blit(scroll_down_surf, scroll_down_rect)
 
                 except IndexError:
+                    # Handle case where selected_segment_index becomes invalid
                     error_surf = self.font_small.render("Segment Error", True, ERROR_COLOR)
                     error_rect = error_surf.get_rect(center=param_detail_rect.center)
                     screen.blit(error_surf, error_rect)
@@ -955,19 +1021,33 @@ class SongEditScreen(BaseScreen):
         # --- END REMOVED FOCUS CHECK ---
 
     def _save_current_song(self):
-        """Saves the current song to disk."""
+        """Saves the current song to disk and clears dirty flags."""
         if not self.current_song:
             self.set_feedback("No song loaded to save", is_error=True)
-            return
+            return False # <<< Return status
 
+        # Check if the song is actually dirty before saving
         if not self.current_song.dirty:
             self.set_feedback(f"'{self.current_song.name}' has no changes to save.")
-            return
+            return True # <<< Return success (nothing needed saving)
 
+        self.set_feedback(f"Saving '{self.current_song.name}'...")
+        pygame.display.flip() # Show feedback immediately
+
+        # Assume file_io.save_song now handles clearing Song.dirty
+        # and potentially Segment.dirty flags upon successful save.
+        # If file_io.save_song doesn't clear segment flags, do it here.
         if file_io.save_song(self.current_song):
-            self.set_feedback(f"Saved '{self.current_song.name}'")
+            self.set_feedback(f"Saved '{self.current_song.name}' successfully.")
+            # Explicitly clear segment dirty flags after successful save
+            # (if not handled within file_io.save_song)
+            self.current_song.clear_segment_dirty_flags()
+            # Song.dirty should be cleared by file_io.save_song
+            return True # <<< Return success
         else:
+            # Error message printed by save_song
             self.set_feedback(f"Failed to save '{self.current_song.name}'", is_error=True)
+            return False # <<< Return failure
 
     def _add_new_segment(self):
         """Adds a new segment after the currently selected one, or at the start."""
@@ -1020,3 +1100,112 @@ class SongEditScreen(BaseScreen):
         except Exception as e:
             self.set_feedback(f"Error adding segment: {e}", is_error=True)
             print(f"Error in _add_new_segment: {e}")
+
+    # --- ADDED: Exit Prompt Handling Methods ---
+    def _save_and_exit(self):
+        """Saves the song and then allows exit."""
+        print("User chose Save & Exit.")
+        if self._save_current_song(): # Try saving
+            self.exit_prompt_active = False # Deactivate prompt on success
+            # Now allow the app to proceed with screen change
+            # We don't trigger the change here, just allow it
+            self.app.request_screen_change() # <<< Tell app it's ok now
+        else:
+            # Save failed, keep prompt active
+            self.set_feedback("Save failed! Cannot exit.", is_error=True)
+
+    def _discard_and_exit(self):
+        """Discards changes and allows exit."""
+        print("User chose Discard & Exit.")
+        if self.current_song:
+            self.current_song.dirty = False # Mark as clean
+            # Optionally reload from disk?
+            # reloaded = file_io.load_song(self.current_song.name)
+            # if reloaded: self.app.current_song = reloaded # Update app's copy too
+        self.exit_prompt_active = False # Deactivate prompt
+        self.set_feedback("Changes discarded.")
+        # Allow the app to proceed with screen change
+        self.app.request_screen_change() # <<< Tell app it's ok now
+
+    def _cancel_exit(self):
+        """Cancels the exit attempt."""
+        print("User chose Cancel Exit.")
+        self.exit_prompt_active = False # Deactivate prompt
+        self.clear_feedback()
+        # App's requested screen change is implicitly cancelled
+    # -----------------------------------------
+
+    # --- ADDED: Toggle Boolean Parameter ---
+    def _toggle_boolean_parameter(self):
+        """Toggles the value of the selected boolean parameter."""
+        if (self.selected_segment_index is None or
+                self.selected_parameter_key is None or
+                not self.current_song):
+            return
+
+        try:
+            segment = self.current_song.get_segment(self.selected_segment_index)
+            current_value = getattr(segment, self.selected_parameter_key, None)
+
+            if isinstance(current_value, bool):
+                new_value = not current_value
+                # Use the song's update method to ensure dirty flags are set
+                self.current_song.update_segment(self.selected_segment_index, **{self.selected_parameter_key: new_value})
+                self.set_feedback(f"{self.parameter_display_names.get(self.selected_parameter_key, self.selected_parameter_key)}: {'ON' if new_value else 'OFF'}") # Use ON/OFF
+                self._update_encoder_led() # Update LED
+            else:
+                self.set_feedback("Not a boolean parameter.", is_error=True)
+
+        except (IndexError, AttributeError) as e:
+            self.set_feedback(f"Error toggling parameter: {e}", is_error=True)
+            self._reset_selection_on_error()
+
+    # --- ADDED: Draw Exit Prompt ---
+    def _draw_exit_prompt(self, surface):
+        """Draws the unsaved changes prompt when trying to exit."""
+        # Reuses the unsaved prompt drawing logic but with different text/context
+        overlay = pygame.Surface((surface.get_width(), surface.get_height()), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        surface.blit(overlay, (0, 0))
+
+        box_width, box_height = 400, 200
+        box_x = (surface.get_width() - box_width) // 2
+        box_y = (surface.get_height() - box_height) // 2
+
+        # Use settings colors
+        pygame.draw.rect(surface, settings.BLACK, (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(surface, settings.BLUE, (box_x, box_y, box_width, box_height), 2)
+
+        title_text = "Unsaved Changes"
+        title_surf = self.font_large.render(title_text, True, settings.BLUE)
+        title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
+        surface.blit(title_surf, title_rect)
+
+        song_name = self.current_song.name if self.current_song else "Error"
+        song_text = f"in '{song_name}'"
+        song_surf = self.font.render(song_text, True, settings.WHITE)
+        song_rect = song_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
+        surface.blit(song_surf, song_rect)
+
+        save_btn = mappings.button_map.get(mappings.SAVE_CC, f"CC{mappings.SAVE_CC}")
+        discard_btn = mappings.button_map.get(mappings.DELETE_CC, f"CC{mappings.DELETE_CC}")
+        cancel_btn = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
+
+        instr1_text = f"Save & Exit? ({save_btn})"
+        instr2_text = f"Discard & Exit? ({discard_btn})"
+        instr3_text = f"Cancel Exit? ({cancel_btn})"
+
+        instr1_surf = self.font.render(instr1_text, True, settings.GREEN)
+        instr1_rect = instr1_surf.get_rect(midtop=(surface.get_width() // 2, song_rect.bottom + 20))
+        surface.blit(instr1_surf, instr1_rect)
+
+        instr2_surf = self.font.render(instr2_text, True, settings.RED)
+        instr2_rect = instr2_surf.get_rect(midtop=(surface.get_width() // 2, instr1_rect.bottom + 10))
+        surface.blit(instr2_surf, instr2_rect)
+
+        instr3_surf = self.font.render(instr3_text, True, settings.WHITE)
+        instr3_rect = instr3_surf.get_rect(midtop=(surface.get_width() // 2, instr2_rect.bottom + 10))
+        surface.blit(instr3_surf, instr3_rect)
+    # -----------------------------
+
+    # ... (rest of the methods like _save_current_song, _add_new_segment, etc.) ...
