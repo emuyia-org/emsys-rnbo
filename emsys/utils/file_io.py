@@ -60,18 +60,20 @@ def sanitize_filename(name: str) -> str:
 
 def list_songs(directory: str = SONGS_DIR) -> List[str]:
     """
-    Lists available song files (basenames without extension) in the directory.
+    Lists available song files (basenames without extension) in the directory,
+    ordered by last modified time descending (most recently edited first).
 
     Args:
         directory: The directory path to scan. Defaults to SONGS_DIR.
 
     Returns:
-        A sorted list of song basenames (e.g., ["my-song", "another-track"]).
+        A list of song basenames.
     """
     try:
         files = [f for f in os.listdir(directory) if f.endswith(SONG_EXTENSION)]
-        # Return only the base name
-        return sorted([os.path.splitext(f)[0] for f in files])
+        # Sort files by modification time (most recent first)
+        files.sort(key=lambda f: os.path.getmtime(os.path.join(directory, f)), reverse=True)
+        return [os.path.splitext(f)[0] for f in files]
     except FileNotFoundError:
         print(f"Error: Songs directory not found at {directory}")
         return []
