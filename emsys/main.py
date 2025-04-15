@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-Main entry point for the Emsys Python Application. V1
+Main entry point for the Emsys Python Application. V2 (Refactored)
 
-Initializes Pygame, basic MIDI, UI placeholder, and runs the main event loop.
-Handles exit via MIDI CC 47. Includes MIDI device auto-reconnection.
+Initializes Pygame, MIDI service, Screen manager, and runs the main event loop.
+Handles exit via MIDI CC 47. Includes MIDI device auto-reconnection via MidiService.
 Implements universal button hold-repeat for MIDI CC messages.
 """
-
 import pygame
 import mido
-import mido.backends.rtmidi # Explicitly import backend if needed
 import time
 import sys
 import os
 import sdnotify # For systemd notification
 import traceback # For detailed error logs
-from typing import Optional # <<< ADDED Optional
+from typing import Optional, Dict, Any # <<< ADDED Dict and Any
 
 # Add the project root directory to the path to enable absolute imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -24,8 +22,6 @@ if project_root not in sys.path:
 
 # Now we can use absolute imports from the emsys package
 from emsys.config import settings as settings_module
-print(f"Settings module contents: {dir(settings_module)}")
-
 # Import settings constants
 SCREEN_WIDTH = settings_module.SCREEN_WIDTH
 SCREEN_HEIGHT = settings_module.SCREEN_HEIGHT
@@ -33,53 +29,21 @@ FPS = settings_module.FPS
 BLACK = settings_module.BLACK
 WHITE = settings_module.WHITE
 RED = settings_module.RED
-MIDI_DEVICE_NAME = settings_module.MIDI_DEVICE_NAME
-# Import reconnection settings
-RESCAN_INTERVAL_SECONDS = settings_module.RESCAN_INTERVAL_SECONDS
-CONNECTION_CHECK_INTERVAL_SECONDS = settings_module.CONNECTION_CHECK_INTERVAL_SECONDS
-# Import Button Repeat Settings (convert to seconds for internal use)
-# Use getattr for safe access with defaults
+
+# --- Import Button Repeat Settings ---
 BUTTON_REPEAT_DELAY_S = getattr(settings_module, 'BUTTON_REPEAT_DELAY_MS', 500) / 1000.0
 BUTTON_REPEAT_INTERVAL_S = getattr(settings_module, 'BUTTON_REPEAT_INTERVAL_MS', 100) / 1000.0
 
+# --- Import specific CCs and non-repeatable set ---
+from emsys.config.mappings import NEXT_CC, PREV_CC, NON_REPEATABLE_CCS
 
-# --- Import specific CCs ---
-from emsys.config.mappings import NEXT_CC, PREV_CC, FADER_SELECT_CC # Keep FADER_SELECT_CC if used elsewhere directly
-# --- Import the set of non-repeatable CCs ---
-from emsys.config.mappings import NON_REPEATABLE_CCS
-# -------------------------------------------
-from emsys.utils.midi import find_midi_port
-from emsys.utils import file_io       # <<< ADDED: Import file_io for load/save song operations
+# --- Refactored Imports ---
+from emsys.services.midi_service import MidiService
+from emsys.ui.screen_manager import ScreenManager
+from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
+# --------------------------
 
-# UI Imports
-from emsys.ui.base_screen import BaseScreen
-# from emsys.ui.main_menu_screen import MainMenuScreen # Assuming not used based on test.py
-from emsys.ui.placeholder_screen import PlaceholderScreen
-
-# Additional screen imports (keep existing logic)
-SongManagerScreen = None
-SongEditScreen = None
-try:
-    import emsys.ui.song_manager_screen
-    if hasattr(emsys.ui.song_manager_screen, 'SongManagerScreen'):
-        from emsys.ui.song_manager_screen import SongManagerScreen
-    else:
-        print(f"Error: emsys.ui.song_manager_screen module exists but doesn't contain SongManagerScreen class")
-except ImportError as e:
-    print(f"Error importing song_manager_screen: {e}")
-try:
-    import emsys.ui.song_edit_screen
-    if hasattr(emsys.ui.song_edit_screen, 'SongEditScreen'):
-        from emsys.ui.song_edit_screen import SongEditScreen
-    else:
-        print(f"Error: emsys.ui.song_edit_screen module exists but doesn't contain SongEditScreen class")
-except ImportError as e:
-    print(f"Error importing song_edit_screen: {e}")
-
-print(f"Available screens: SongManagerScreen={'Available' if SongManagerScreen else 'Not Available'}, "
-      f"SongEditScreen={'Available' if SongEditScreen else 'Not Available'}")
-print(f"Universal Button Repeat: Delay={BUTTON_REPEAT_DELAY_S*1000}ms, Interval={BUTTON_REPEAT_INTERVAL_S*1000}ms")
-
+from emsys.utils import file_io # Keep for load/save last song operations
 
 # Main Application Class
 class App:
@@ -92,223 +56,37 @@ class App:
         self.notify_status("Initializing Pygame...")
 
         pygame.init()
-        pygame.font.init()
+        pygame.font.init() # Font init needed for screens/widgets
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption('Emsys Controller')
         self.clock = pygame.time.Clock()
-        pygame.mouse.set_visible(False)
+        pygame.mouse.set_visible(False) # Assume headless operation
         self.running = False
 
-        # MIDI State
-        self.midi_port = None
-        self.midi_port_name = None
-        self.midi_output_port = None # <<< ADDED: MIDI Output Port
-        self.midi_output_port_name = None # <<< ADDED: MIDI Output Port Name
-        self.midi_error_message = None
-        self.is_searching = False
-        self.last_scan_time = 0
-        self.last_connection_check_time = 0
+        # --- Instantiate Services ---
+        # Pass self.notify_status as the callback for MidiService
+        self.midi_service = MidiService(status_callback=self.notify_status)
+        self.screen_manager = ScreenManager(app_ref=self) # Pass app reference
+        # --------------------------
 
-        # UI State
-        self.active_screen = None
+        # --- Application State ---
+        self.current_song = None # Will be loaded/managed by screens interacting with file_io
         self.last_midi_message_str = None # Keep for potential display
-
-        # Button Hold State (Universal for all CCs)
         # Dictionary mapping control_number to {'press_time': float, 'last_repeat_time': float, 'message': mido.Message}
-        self.pressed_buttons = {}
+        self.pressed_buttons: Dict[int, Dict[str, Any]] = {}
+        # -------------------------
 
-        # --- ADDED: State for pending screen change ---
-        self.pending_screen_change: Optional[BaseScreen] = None
-        # ---------------------------------------------
-
-        self._initialize_midi() # Attempt initial connection (Input and Output)
-        self.initialize_screens()
-        self._initial_led_update() # <<< ADDED: Update LEDs on startup
-        self.current_song = None  # Ensure we have a variable to hold the current song
-        self._load_last_song()
-
-    def initialize_screens(self):
-        """Initialize all application screens."""
-        print("Initializing Screens...")
-        self.placeholder_screen = PlaceholderScreen(self)
-
-        if SongManagerScreen:
-            self.song_manager_screen = SongManagerScreen(self)
-        else:
-            self.song_manager_screen = None
-
-        if SongEditScreen:
-            self.song_edit_screen = SongEditScreen(self)
-        else:
-            self.song_edit_screen = None
-
-        # Create a list of screens for navigation in the desired order
-        self.screens = [
-            screen for screen in [
-                self.placeholder_screen,
-                self.song_manager_screen,
-                self.song_edit_screen,
-            ] if screen is not None
-        ]
-
-        if self.screens:
-             self.set_active_screen(self.screens[0])
-        else:
-             print("WARNING: No screens defined or successfully imported!")
-             self.active_screen = None
+        # --- Final Initialization Steps ---
+        self.screen_manager.set_initial_screen() # Set the first screen active
+        if not self.screen_manager.get_active_screen():
+            # Handle case where no screens could be initialized
              self.notify_status("FAIL: No UI screens loaded.")
-             # Consider exiting if no screens? Or run with a default error screen?
+             raise RuntimeError("Application cannot start without any screens.") # Raise error to stop init
 
-        print("Screens initialized.")
+        self._initial_led_update() # Update LEDs based on initial screen
+        self._load_last_song()
+        print("App initialization complete.")
 
-    def _initialize_midi(self):
-        """Finds and attempts to open the MIDI input and output ports initially."""
-        self.notify_status(f"Initializing MIDI: Searching for '{MIDI_DEVICE_NAME}'...")
-        # Use verbose=True for initial search
-        found_input_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=True, port_type='input')
-        found_output_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=True, port_type='output') # <<< ADDED: Search for output
-
-        # --- Handle Input Port ---
-        if found_input_port_name:
-            try:
-                self.midi_port = mido.open_input(found_input_port_name)
-                self.midi_port_name = found_input_port_name
-                self.midi_error_message = None
-                self.is_searching = False
-                print(f"Successfully opened MIDI Input: '{self.midi_port_name}'")
-                self.notify_status(f"MIDI Input Connected: '{self.midi_port_name}'")
-            except (IOError, OSError) as e:
-                self.midi_port = None
-                self.midi_port_name = None
-                self.midi_error_message = f"Error opening Input '{found_input_port_name}': {e}"
-                print(self.midi_error_message)
-                self.notify_status(f"Error opening MIDI Input: {e}")
-                self._start_search_mode() # Start searching if initial open fails
-        else:
-            self.midi_error_message = f"MIDI Input '{MIDI_DEVICE_NAME}' not found."
-            print(self.midi_error_message)
-            self.notify_status(f"MIDI Input '{MIDI_DEVICE_NAME}' not found. Searching...")
-            self._start_search_mode()
-
-        # --- Handle Output Port ---
-        if found_output_port_name:
-            try:
-                # Add use_virtual=False if you encounter issues with virtual ports on Linux
-                self.midi_output_port = mido.open_output(found_output_port_name)
-                self.midi_output_port_name = found_output_port_name
-                print(f"Successfully opened MIDI Output: '{self.midi_output_port_name}'")
-                self.notify_status(f"MIDI Output Connected: '{self.midi_output_port_name}'")
-            except (IOError, OSError) as e:
-                self.midi_output_port = None
-                self.midi_output_port_name = None
-                # Don't necessarily set midi_error_message here, input status is primary
-                print(f"Warning: Error opening Output '{found_output_port_name}': {e}")
-                self.notify_status(f"Warning: Error opening MIDI Output: {e}")
-                # We might still be able to run without output, don't force search mode just for output failure
-        else:
-             print(f"Warning: MIDI Output '{MIDI_DEVICE_NAME}' not found.")
-             self.notify_status(f"Warning: MIDI Output '{MIDI_DEVICE_NAME}' not found.")
-             # No output port found, LED feedback won't work
-
-    def _handle_disconnection(self, reason="Disconnected"):
-        """Handles the state change when a MIDI disconnection is detected."""
-        if self.midi_port is None and self.midi_output_port is None and not self.is_searching:
-             return # Already disconnected and searching
-
-        print(f"\n--- Handling MIDI Disconnection (Reason: {reason}) ---")
-        if self.midi_port:
-            try:
-                self.midi_port.close()
-                print("MIDI Input port closed.")
-            except Exception as e:
-                print(f"Error closing MIDI Input port: {e}")
-            self.midi_port = None
-            self.midi_port_name = None
-
-        if self.midi_output_port: # <<< ADDED: Close output port
-            try:
-                self.midi_output_port.close()
-                print("MIDI Output port closed.")
-            except Exception as e:
-                print(f"Error closing MIDI Output port: {e}")
-            self.midi_output_port = None
-            self.midi_output_port_name = None
-
-        self.midi_error_message = f"MIDI Disconnected ({reason}). Searching..."
-        self.notify_status(self.midi_error_message)
-        self._start_search_mode()
-
-    def _attempt_reconnect(self):
-        """Attempts to find and reopen the MIDI input and output ports."""
-        if not self.is_searching:
-             return # Should not happen, but safety check
-
-        current_time = time.time()
-        if current_time - self.last_scan_time < RESCAN_INTERVAL_SECONDS:
-            return # Wait before scanning again
-
-        self.last_scan_time = current_time
-        print(f"Scanning for MIDI device '{MIDI_DEVICE_NAME}'...")
-        self.notify_status(f"Scanning for '{MIDI_DEVICE_NAME}'...")
-
-        # Use verbose=False during reconnection attempts to reduce log noise
-        found_input_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=False, port_type='input')
-        found_output_port_name = find_midi_port(MIDI_DEVICE_NAME, verbose=False, port_type='output') # <<< ADDED: Search output
-
-        reconnected_input = False
-        reconnected_output = False
-
-        # --- Reconnect Input ---
-        if found_input_port_name:
-            try:
-                self.midi_port = mido.open_input(found_input_port_name)
-                self.midi_port_name = found_input_port_name
-                self.midi_error_message = None
-                self.is_searching = False # Stop searching once input is found
-                reconnected_input = True
-                print(f"\nSuccessfully Reconnected MIDI Input: '{self.midi_port_name}'")
-                self.notify_status(f"MIDI Input Reconnected: '{self.midi_port_name}'")
-            except (IOError, OSError) as e:
-                # Failed to open even though found, keep searching
-                self.midi_port = None
-                self.midi_port_name = None
-                self.midi_error_message = f"Found Input '{found_input_port_name}', but open failed: {e}. Retrying..."
-                print(self.midi_error_message)
-                # Keep is_searching = True
-        # else: # No need for else, if not found, is_searching remains True
-
-        # --- Reconnect Output (only if input reconnected successfully) ---
-        # We prioritize input being available. Output is secondary.
-        if reconnected_input and found_output_port_name:
-             if not self.midi_output_port: # Only try if not already open
-                try:
-                    self.midi_output_port = mido.open_output(found_output_port_name)
-                    self.midi_output_port_name = found_output_port_name
-                    reconnected_output = True
-                    print(f"Successfully Reconnected MIDI Output: '{self.midi_output_port_name}'")
-                    self.notify_status(f"MIDI Output Reconnected: '{self.midi_output_port_name}'")
-                except (IOError, OSError) as e:
-                    self.midi_output_port = None
-                    self.midi_output_port_name = None
-                    print(f"Warning: Reconnected Input, but failed to reopen Output '{found_output_port_name}': {e}")
-                    self.notify_status(f"Warning: Failed to reopen MIDI Output: {e}")
-        elif reconnected_input and not found_output_port_name:
-             print(f"Warning: Reconnected Input, but MIDI Output '{MIDI_DEVICE_NAME}' not found.")
-             self.notify_status(f"Warning: MIDI Output '{MIDI_DEVICE_NAME}' not found.")
-
-
-        if not reconnected_input:
-            # If input still not found after scan interval
-            self.midi_error_message = f"MIDI Input '{MIDI_DEVICE_NAME}' not found. Still searching..."
-            self.notify_status(self.midi_error_message) # Update status
-
-    # <<< --- ADDED: Missing method --- >>>
-    def _start_search_mode(self):
-        """Sets the application state to actively search for MIDI devices."""
-        print("Starting MIDI search mode...")
-        self.is_searching = True
-        self.last_scan_time = 0 # Reset scan timer to allow immediate scan attempt
-        self.notify_status(self.midi_error_message or "MIDI Searching...") # Update status
 
     def notify_status(self, status_message):
         """Helper function to print status and notify systemd."""
@@ -316,8 +94,6 @@ class App:
         truncated_message = status_message[:max_len] + '...' if len(status_message) > max_len else status_message
         print(f"Status: {status_message}") # Print full message to console
         try:
-            # Update internal error message for potential UI display
-            # self.midi_error_message = status_message # Or maybe only on errors?
             self.notifier.notify(f"STATUS={truncated_message}")
         except Exception as e:
             print(f"Could not notify systemd: {e}")
@@ -325,112 +101,105 @@ class App:
     def run(self):
         """Main application loop."""
         self.running = True
-        self.notify_status("Application Running")
+        self.notify_status("Application Running") # Initial running status
+        # Update status with initial screen and MIDI state
+        self.update_combined_status()
         self.notifier.notify("READY=1")
         print("Application loop started.")
-
-        loop_counter = 0 # Optional: Counter for loop iterations
 
         while self.running:
             current_time = time.time()
 
-            # --- Handle Pending Screen Change ---
-            if self.pending_screen_change:
-                screen_to_set = self.pending_screen_change
-                self.pending_screen_change = None # Clear pending request
-                self.set_active_screen(screen_to_set) # Perform the change
-            # ------------------------------------
+            # --- Process Pending Screen Change ---
+            self.screen_manager.process_pending_change()
+            active_screen = self.screen_manager.get_active_screen() # Get current active screen
 
             # --- MIDI Connection Management ---
-            if self.is_searching:
-                self._attempt_reconnect()
-            elif self.midi_port and current_time - self.last_connection_check_time > CONNECTION_CHECK_INTERVAL_SECONDS:
-                # Periodically check if the connected port still exists
-                self.last_connection_check_time = current_time
-                available_inputs = mido.get_input_names()
-                # Also check output port if it was opened
-                output_ok = True
-                if self.midi_output_port:
-                    available_outputs = mido.get_output_names()
-                    if self.midi_output_port_name not in available_outputs:
-                        output_ok = False
-                        print(f"MIDI Output port '{self.midi_output_port_name}' disappeared.")
-
-                if self.midi_port_name not in available_inputs or not output_ok:
-                    reason = "Port disappeared" if self.midi_port_name not in available_inputs else "Output port disappeared"
-                    self._handle_disconnection(reason=reason)
-                # else: print("Connection check OK") # Debug
+            if self.midi_service.is_searching:
+                self.midi_service.attempt_reconnect()
+            else:
+                self.midi_service.check_connection()
 
             # --- Process MIDI Input ---
-            if self.midi_port and not self.is_searching:
-                try:
-                    for msg in self.midi_port.iter_pending():
-                        self.handle_midi_message(msg)
-                except (IOError, OSError) as e:
-                    print(f"\nMIDI Read Error: {e}")
-                    self._handle_disconnection(reason=f"Read Error: {e}")
-                except Exception as e: # Catch other potential errors during read
-                    print(f"\nUnexpected Error processing MIDI: {e}")
-                    traceback.print_exc() # Log the full traceback
-                    self._handle_disconnection(reason=f"Unexpected Error: {e}")
+            # Get messages from the service
+            try:
+                midi_messages = self.midi_service.receive_messages()
+                for msg in midi_messages:
+                    self.handle_midi_message(msg)
+            except Exception as e:
+                 print(f"\n--- Unhandled Error in MIDI receive loop ---")
+                 traceback.print_exc()
+                 # Consider if this should stop the app or try to recover
 
             # --- Process Pygame Events ---
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
                 # Pass event to active screen if it has a handler
-                if self.active_screen and hasattr(self.active_screen, 'handle_event'):
-                    self.active_screen.handle_event(event)
+                if active_screen and hasattr(active_screen, 'handle_event'):
+                    try: # Add try-except around screen handlers
+                        active_screen.handle_event(event)
+                    except Exception as e:
+                        print(f"Error in {active_screen.__class__.__name__} handle_event: {e}")
+                        traceback.print_exc()
 
             # --- Handle Button Repeats ---
             self._handle_button_repeats(current_time)
 
             # --- Update Active Screen ---
-            if self.active_screen and hasattr(self.active_screen, 'update'):
-                self.active_screen.update()
+            if active_screen and hasattr(active_screen, 'update'):
+                try: # Add try-except
+                    active_screen.update()
+                except Exception as e:
+                    print(f"Error in {active_screen.__class__.__name__} update: {e}")
+                    traceback.print_exc()
+
 
             # --- Drawing ---
             self.screen.fill(BLACK)
-            if self.active_screen and hasattr(self.active_screen, 'draw'):
-                # Determine MIDI status string
-                midi_status_str = "MIDI: Searching..." if self.is_searching else \
-                                  f"MIDI In: {self.midi_port_name or 'N/A'}"
-                if self.midi_output_port_name: # Add output status if available
-                    midi_status_str += f" | Out: {self.midi_output_port_name}"
-                elif not self.is_searching and find_midi_port(MIDI_DEVICE_NAME, verbose=False, port_type='output'):
-                     midi_status_str += " | Out: Ready" # Indicate if found but not opened/reopened yet
-                elif not self.is_searching:
-                     midi_status_str += " | Out: N/A"
+            if active_screen and hasattr(active_screen, 'draw'):
+                try: # Add try-except
+                    # Get MIDI status string from the service
+                    midi_status_str = self.midi_service.get_status_string()
+                    active_screen.draw(self.screen, midi_status=midi_status_str)
+                except Exception as e:
+                    print(f"Error in {active_screen.__class__.__name__} draw: {e}")
+                    traceback.print_exc()
+                    # Optionally draw an error message to the screen
+                    error_font = pygame.font.Font(None, 30)
+                    error_surf = error_font.render(f"Draw Error in {active_screen.__class__.__name__}!", True, RED)
+                    self.screen.blit(error_surf, (10, self.screen.get_height() // 2))
 
-                if self.midi_error_message and self.is_searching:
-                     midi_status_str = self.midi_error_message # Show specific error during search
-
-                self.active_screen.draw(self.screen, midi_status=midi_status_str)
 
             pygame.display.flip()
             self.clock.tick(FPS)
+            # Optional: Update systemd status periodically
+            # if current_time - last_status_update > 5.0:
+            #    self.update_combined_status()
+            #    last_status_update = current_time
 
         print("Application loop finished.")
         self.cleanup()
 
     def handle_midi_message(self, msg):
         """
-        Process incoming MIDI messages.
+        Process incoming MIDI messages. Routes based on type and CC.
         Handles button press/release/repeat logic for momentary buttons.
-        Directly dispatches messages for non-repeatable controls (encoders/faders).
+        Directly dispatches messages for non-repeatable controls.
         """
-        # Only process messages coming from channel 16 (mido channel index 15)
+        # Filter channel (e.g., only channel 16 - Mido index 15)
         if hasattr(msg, 'channel') and msg.channel != 15:
+            # print(f"Ignoring MIDI message on channel {msg.channel + 1}") # Debug
             return
 
-        self.last_midi_message_str = str(msg)
+        self.last_midi_message_str = str(msg) # Store for potential display
         current_time = time.time()
 
         if msg.type == 'control_change':
             control = msg.control
             value = msg.value
 
-            # Check if this CC is an encoder/fader (non-repeatable)
+            # Check if this CC is an encoder/fader/etc. (non-repeatable)
             if control in NON_REPEATABLE_CCS:
                 # Directly dispatch non-repeatable controls
                 self._dispatch_action(msg)
@@ -439,7 +208,7 @@ class App:
             # Handle MOMENTARY Button Press (value == 127)
             if value == 127:
                 if control not in self.pressed_buttons:
-                    # print(f"Button Press Detected: CC {control} (Value: {value})") # Optional debug
+                    # print(f"Button Press Detected: CC {control}") # Debug
                     self.pressed_buttons[control] = {
                         'press_time': current_time,
                         'last_repeat_time': current_time,
@@ -447,125 +216,99 @@ class App:
                     }
                     # --- Dispatch action ONLY on initial press ---
                     self._dispatch_action(msg)
-                # else: # Optional debug: Button already held (repeat logic handles this)
-                    # print(f"Button {control} already held, ignoring redundant press event.")
                 return # Handled momentary press
 
             # Handle MOMENTARY Button Release (value == 0)
             elif value == 0:
                 if control in self.pressed_buttons:
-                    # print(f"Button Release Detected: CC {control}") # Optional debug
+                    # print(f"Button Release Detected: CC {control}") # Debug
                     del self.pressed_buttons[control]
                 # --- DO NOT DISPATCH ACTION ON RELEASE ---
-                # self._dispatch_action(msg) # <<< REMOVE THIS LINE
                 return # Handled momentary release
 
             # Handle Other CC Values (if any non-momentary, non-repeatable buttons exist)
             else:
-                 # If there are other types of CC messages that need dispatching,
-                 # they would be handled here. Otherwise, this can be ignored.
                  # print(f"Unhandled CC value: CC {control}, Value {value}") # Optional debug
-                 # self._dispatch_action(msg) # Decide if other values need dispatching
                  return
 
-        # Handle Non-CC Messages (Notes, etc.)
+        # Handle Non-CC Messages (Notes, etc.) - Dispatch directly
         else:
-            # Dispatch other message types directly
             self._dispatch_action(msg)
 
     def _dispatch_action(self, msg):
         """
         Determines and executes the action associated with a MIDI message.
-        This is called for initial presses and subsequent repeats.
-        Prevents global screen switching if TextInputWidget is active.
+        Handles global actions (screen switching) or passes to the active screen.
+        Prevents global screen switching if an input widget is active on the screen.
         """
-        # --- Check if TextInputWidget is active ---
+        active_screen = self.screen_manager.get_active_screen()
+
+        # --- Check if TextInputWidget is active on the current screen ---
+        # This requires the screen to expose its widget's state
         widget_active = False
-        if (hasattr(self.active_screen, 'text_input_widget') and
-                self.active_screen.text_input_widget is not None and
-                self.active_screen.text_input_widget.is_active):
-            widget_active = True
-            # print("TextInputWidget is active, bypassing global actions for relevant CCs.") # Debug
+        if active_screen:
+            # Check standard attribute name used in provided screens
+            text_input_widget = getattr(active_screen, 'text_input_widget', None)
+            if text_input_widget and getattr(text_input_widget, 'is_active', False):
+                 widget_active = True
+                 # print("TextInputWidget is active, bypassing global screen nav.") # Debug
+
 
         # --- Handle Control Change Messages ---
         if msg.type == 'control_change':
             control = msg.control
-            value = msg.value # Value might be relevant for some actions
+            value = msg.value
 
-            # --- Global Actions (only if widget is NOT active) ---
-            if not widget_active:
-                # Check NEXT_CC (typically requires value 127)
-                if control == NEXT_CC and value == 127:
-                    print(f"Next screen action triggered by CC #{NEXT_CC}")
-                    self.next_screen()
-                    return # Screen navigation handled
+            # --- Global Actions (Screen Navigation - only if widget is NOT active) ---
+            # Check common button press value (e.g., 127)
+            if not widget_active and value == 127:
+                if control == NEXT_CC:
+                    print(f"Requesting next screen (via CC #{NEXT_CC})")
+                    self.screen_manager.request_next_screen()
+                    return # Action handled
 
-                # Check PREV_CC (typically requires value 127)
-                elif control == PREV_CC and value == 127:
-                    print(f"Previous screen action triggered by CC #{PREV_CC}")
-                    self.previous_screen()
-                    return # Screen navigation handled
+                elif control == PREV_CC:
+                    print(f"Requesting previous screen (via CC #{PREV_CC})")
+                    self.screen_manager.request_previous_screen()
+                    return # Action handled
 
-            # --- Pass to Active Screen (Always, unless handled by global action above) ---
-            # If widget is active, NEXT/PREV CCs will fall through to here.
-            # If widget is inactive, other CCs will fall through to here.
-            if self.active_screen and hasattr(self.active_screen, 'handle_midi'):
+            # --- Pass to Active Screen (Always, unless handled by global action) ---
+            # If widget is active, NEXT/PREV CCs will fall through here.
+            # If widget is inactive, other CCs will fall through here.
+            if active_screen and hasattr(active_screen, 'handle_midi'):
                 try:
-                    # print(f"Passing CC {control} (Value: {value}) to screen: {self.active_screen.__class__.__name__}") # Debug
-                    self.active_screen.handle_midi(msg)
+                    # print(f"Passing CC {control} (Val:{value}) to screen: {active_screen.__class__.__name__}") # Debug
+                    active_screen.handle_midi(msg)
                 except Exception as screen_midi_err:
-                     print(f"Error in screen {self.active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
+                     print(f"Error in screen {active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
                      traceback.print_exc()
-            # else: print(f"No active screen or handle_midi method for CC {control}") # Debug
+            # else: # Debug
+                 # if active_screen: print(f"Screen {active_screen.__class__.__name__} has no handle_midi method for {msg}")
+                 # else: print(f"No active screen to handle MIDI {msg}")
 
         # --- Handle Other Message Types (Notes, etc.) ---
         else:
             # Pass non-CC messages directly to the active screen
-            if self.active_screen and hasattr(self.active_screen, 'handle_midi'):
+            if active_screen and hasattr(active_screen, 'handle_midi'):
                 try:
-                    # print(f"Passing non-CC message {msg} to screen: {self.active_screen.__class__.__name__}") # Debug
-                    self.active_screen.handle_midi(msg)
+                    # print(f"Passing non-CC message {msg} to screen: {active_screen.__class__.__name__}") # Debug
+                    active_screen.handle_midi(msg)
                 except Exception as screen_midi_err:
-                     print(f"Error in screen {self.active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
+                     print(f"Error in screen {active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
                      traceback.print_exc()
             # else: print(f"No active screen or handle_midi method for non-CC message {msg}") # Debug
 
-    def _handle_button_press(self, control, msg, current_time):
-        """Handle the initial press of a button."""
-        print(f"Button Press Detected: CC {control} (Value: {msg.value})")
-        # Record the press time, initial repeat time, and the message itself
-        self.pressed_buttons[control] = {
-            'press_time': current_time,
-            'last_repeat_time': current_time, # Set to press time initially
-            'message': msg # Store the original message for repeats
-        }
-        # --- Trigger the INITIAL action ---
-        self._dispatch_action(msg)
-
-    def _handle_button_release(self, control):
-        """Handles the release of a momentary button."""
-        if control in self.pressed_buttons:
-            # msg = self.pressed_buttons[control]['message'] # Get the original message if needed
-            del self.pressed_buttons[control]
-            # print(f"Button Released: CC {control}") # Optional debug
-            # --- REMOVE DISPATCH ON RELEASE ---
-            # self._dispatch_action(msg) # <<< REMOVE THIS LINE
-            # ----------------------------------
-        # else: # Optional debug
-            # print(f"Button Release Ignored (not tracked): CC {control}")
 
     def _handle_button_repeats(self, current_time):
         """Check and handle button repeats based on the current time."""
         # Iterate over a copy of keys in case the dict changes during iteration
         pressed_controls = list(self.pressed_buttons.keys())
         for control in pressed_controls:
-            if control not in self.pressed_buttons: continue # Check if button was released during iteration
+            if control not in self.pressed_buttons: continue # Check if released during iteration
 
-            # --- Skip repeat for controls defined as non-repeatable ---
+            # Skip repeat for non-repeatable controls (faders, knobs, etc.)
             if control in NON_REPEATABLE_CCS:
-                # print(f"Skipping repeat for Non-Repeatable CC {control}") # Optional debug
-                continue # Don't repeat faders, knobs, etc.
-            # ----------------------------------------------------------
+                continue
 
             state = self.pressed_buttons[control]
             time_held = current_time - state['press_time']
@@ -574,260 +317,177 @@ class App:
             if time_held >= BUTTON_REPEAT_DELAY_S:
                 # Check if repeat interval has passed since last repeat/press
                 if (current_time - state['last_repeat_time']) >= BUTTON_REPEAT_INTERVAL_S:
-                    print(f"Repeat Action for CC {control} (Msg: {state['message']})")
+                    # print(f"Repeat Action for CC {control}") # Debug
                     self._dispatch_action(state['message']) # Dispatch the original press message again
                     state['last_repeat_time'] = current_time # Update last repeat time
 
-    # <<< --- ADDED: Method to send MIDI CC --- >>>
-    def send_midi_cc(self, control: int, value: int, channel: int = 15):
-        """Sends a MIDI Control Change message to the output port on channel 16."""
-        port_status = "Not Initialized"
-        if self.midi_output_port:
-            port_status = "Open" if not self.midi_output_port.closed else "Closed"
 
-        # --- DEBUG PRINT ---
-        print(f"[MIDI Send Debug] Attempting to send CC: Ch=16, CC={control}, Val={value}. Port Status: {port_status}")
-        # --- END DEBUG ---
-
-        if self.midi_output_port and not self.midi_output_port.closed:
-            import mido
-            # Force channel 16 (mido channel index 15)
-            msg = mido.Message('control_change', control=control, value=value, channel=15)
-            self.midi_output_port.send(msg)
-        else:
-            print("Error: MIDI output port is not available.")
-
-    # <<< --- ADDED: Method to update LEDs initially --- >>>
     def _initial_led_update(self):
-        """Send initial LED values (e.g., turn them off or set defaults)."""
+        """Send initial LED values via MidiService, potentially based on active screen."""
         print("Sending initial LED states...")
-        # Example: Turn off LEDs for all 8 knobs (CC 9-16) on Channel 16
+        # Example: Turn off LEDs for specific knobs (e.g., B1-B8, CC 9-16)
         for i in range(8):
             knob_cc = 9 + i
-            self.send_midi_cc(control=knob_cc, value=0, channel=15) # Channel 15 is MIDI channel 16
-        # Optionally, call the active screen's update method if it sets LEDs
-        if self.active_screen and hasattr(self.active_screen, '_update_encoder_led'):
-             self.active_screen._update_encoder_led()
+            self.send_midi_cc(control=knob_cc, value=0) # Default channel is 15
 
-    def next_screen(self):
-        """Switches to the next screen in the list, wrapping around."""
-        if not self.screens:
-            return
+        # Optionally, trigger the active screen's LED update method if it exists
+        active_screen = self.screen_manager.get_active_screen()
+        if active_screen and hasattr(active_screen, '_update_encoder_led'):
+            if callable(getattr(active_screen, '_update_encoder_led')):
+                print(f"Calling initial LED update for {active_screen.__class__.__name__}")
+                try:
+                    active_screen._update_encoder_led()
+                except Exception as e:
+                    print(f"Error calling _update_encoder_led on {active_screen.__class__.__name__}: {e}")
 
-        # --- REMOVE Check if current screen allows deactivation ---
-        # if self.active_screen and hasattr(self.active_screen, 'can_deactivate'):
-        #     if not self.active_screen.can_deactivate():
-        #         print("Screen change blocked by active screen (e.g., unsaved changes).")
-        #         self.pending_screen_change = None # Ensure no pending change remains
-        #         return # Do not proceed
-        # --- END REMOVAL ---
 
-        current_index = -1
-        if self.active_screen:
-            try:
-                current_index = self.screens.index(self.active_screen)
-            except ValueError:
-                pass # Should not happen if active_screen is always in screens
+    # --- Methods for Screens to Interact with App/Services ---
+    def send_midi_cc(self, control: int, value: int, channel: int = 15):
+        """Allows screens to send MIDI CC messages via the MidiService."""
+        self.midi_service.send_cc(control, value, channel)
 
-        if current_index != -1:
-            next_index = (current_index + 1) % len(self.screens)
-            self.pending_screen_change = self.screens[next_index] # <<< Set pending change
-            print(f"Requested next screen: {self.pending_screen_change.__class__.__name__}")
-        else:
-            # If no active screen or not found, default to first screen
-            if self.screens:
-                self.pending_screen_change = self.screens[0] # Default to first screen
-                print(f"Requested next screen (default): {self.pending_screen_change.__class__.__name__}")
-
-    def previous_screen(self):
-        """Switches to the previous screen in the list, wrapping around."""
-        if not self.screens:
-            return
-
-        # --- REMOVE Check if current screen allows deactivation ---
-        # if self.active_screen and hasattr(self.active_screen, 'can_deactivate'):
-        #     if not self.active_screen.can_deactivate():
-        #         print("Screen change blocked by active screen (e.g., unsaved changes).")
-        #         self.pending_screen_change = None # Ensure no pending change remains
-        #         return # Do not proceed
-        # --- END REMOVAL ---
-
-        current_index = -1
-        if self.active_screen:
-            try:
-                current_index = self.screens.index(self.active_screen)
-            except ValueError:
-                pass
-
-        if current_index != -1:
-            prev_index = (current_index - 1 + len(self.screens)) % len(self.screens)
-            self.pending_screen_change = self.screens[prev_index] # <<< Set pending change
-            print(f"Requested previous screen: {self.pending_screen_change.__class__.__name__}")
-        else:
-            # If no active screen or not found, default to last screen
-            if self.screens:
-                self.pending_screen_change = self.screens[-1] # Default to last screen
-                print(f"Requested previous screen (default): {self.pending_screen_change.__class__.__name__}")
-
-    # --- Keep request_screen_change method, it might be useful elsewhere ---
     def request_screen_change(self):
         """
         Called by a screen (e.g., after resolving an exit prompt) to indicate
-        that a previously requested screen change can now proceed.
+        that a previously blocked screen change can now proceed.
+        Delegates to the ScreenManager.
         """
-        # This method doesn't strictly *need* to do anything if the main loop
-        # handles the pending_screen_change flag correctly.
-        # However, it's a clear signal. We could potentially re-trigger
-        # the original next/prev action if needed, but the pending flag is simpler.
-        print("Screen signaled readiness for change. Main loop will handle pending request.")
-        # If self.pending_screen_change is already set, the main loop will pick it up.
-        # If it's not set (e.g., user cancelled prompt then hit next/prev again),
-        # the next/prev methods will set it.
+        self.screen_manager.request_screen_change_approved()
 
-    def set_active_screen(self, screen):
-        """Set the active screen, call cleanup/init if needed, and notify status."""
-        if self.active_screen == screen or screen is None:
-            if screen is None: print("Error: Attempted to set active screen to None.")
-            return # No change needed or invalid input
+    def set_active_screen(self, screen_instance: BaseScreen):
+        """Allows screens (or other logic) to request a specific screen change."""
+        # This bypasses the normal next/prev logic and sets directly
+        # Useful for actions like "Load Song -> Go to Edit Screen"
+        print(f"Direct request to set active screen to {screen_instance.__class__.__name__}")
+        # Set pending change, main loop will process it
+        self.screen_manager.pending_screen_change = screen_instance
 
-        old_screen = self.active_screen # <<< Store the current screen before changing
+    def update_combined_status(self):
+        """Updates the systemd status with screen and MIDI info."""
+        screen_name = "No Screen"
+        active_screen = self.screen_manager.get_active_screen()
+        if active_screen:
+            screen_name = active_screen.__class__.__name__
+        midi_status = self.midi_service.get_status_string()
+        # Combine and truncate if necessary
+        combined_status = f"Screen: {screen_name} | {midi_status}"
+        self.notify_status(combined_status) # Use notify_status for truncation and sending
 
-        # Cleanup old screen
-        if old_screen and hasattr(old_screen, 'cleanup'): # <<< Use old_screen here
-            try: # <<< Add try-except for safety
-                print(f"Cleaning up {old_screen.__class__.__name__}...") # <<< Use old_screen here
-                old_screen.cleanup() # <<< Use old_screen here
+
+    # --- Load/Save Last Song ---
+    def _load_last_song(self):
+        """Load the previously loaded song name."""
+        # This logic remains simple, interacting directly with file_io for this specific file
+        last_song_file = os.path.join(settings_module.PROJECT_ROOT, "last_song.txt")
+        if os.path.exists(last_song_file):
+            try:
+                with open(last_song_file, "r") as f:
+                    last_song_basename = f.read().strip()
+                if last_song_basename:
+                    # Load the actual song object - screens handle this on init/load actions
+                    # Here, we just notify about the last *name*
+                    print(f"Last session ended with song: '{last_song_basename}'")
+                    # We don't set self.current_song here, let SongManager load it
+                    # self.notify_status(f"Last song was: {last_song_basename}")
             except Exception as e:
-                print(f"Error during {old_screen.__class__.__name__} cleanup: {e}") # <<< Use old_screen here
-                traceback.print_exc() # Log the error
+                print(f"Error loading last song name: {e}")
 
-        self.active_screen = screen
 
-        # Initialize new screen
-        if hasattr(self.active_screen, 'init'):
-             try: # <<< Add try-except for safety
-                 print(f"Initializing {self.active_screen.__class__.__name__}...")
-                 self.active_screen.init()
+    def _save_last_song(self):
+        """Save the name of the current song to persistent storage."""
+        # Screens are responsible for updating self.current_song
+        last_song_file = os.path.join(settings_module.PROJECT_ROOT, "last_song.txt")
+        if self.current_song and self.current_song.name:
+            try:
+                with open(last_song_file, "w") as f:
+                    f.write(self.current_song.name)
+                print(f"Saved last song name: '{self.current_song.name}'")
+            except Exception as e:
+                 print(f"Error saving last song name: {e}")
+        elif os.path.exists(last_song_file):
+             try:
+                 # If no current song, remove the file
+                 os.remove(last_song_file)
+                 print("Removed last_song.txt (no current song).")
              except Exception as e:
-                 print(f"Error during {self.active_screen.__class__.__name__} init: {e}")
-                 traceback.print_exc()
-                 # Revert to old screen or a safe screen on init failure?
-                 self.active_screen = old_screen # Revert for now <<< Use the stored old_screen
-                 self.notify_status(f"FAIL: Init error in {screen.__class__.__name__}. Reverted.")
-                 return # Stop the screen change process
-
-        # Status notification includes screen name and MIDI status
-        current_midi_status = self.midi_error_message or (self.midi_port_name if self.midi_port else "Searching...")
-        self.notify_status(f"Screen: {self.active_screen.__class__.__name__}. MIDI: {current_midi_status}")
+                  print(f"Error removing last_song.txt: {e}")
 
     def cleanup(self):
         """Clean up resources before exiting."""
         print("Cleaning up application...")
         self.notify_status("Application Shutting Down")
-        # --- Check for unsaved changes before saving last song ---
-        # Although saving last_song.txt doesn't depend on dirty status,
-        # it's good practice to consider if a final save prompt is needed here.
-        # For now, just save the name of the potentially dirty song.
-        current_song = getattr(self, 'current_song', None)
-        if current_song and current_song.dirty:
-            print("Warning: Exiting with unsaved changes in current song.")
-            # Optionally add a final save prompt here if running interactively?
-            # For a service, probably just log and exit.
 
-        self._save_last_song() # Save the name regardless of dirty status
-        if self.midi_port:
-            try:
-                self.midi_port.close()
-                print("MIDI Input port closed.")
-            except Exception as e:
-                print(f"Error closing MIDI Input port during cleanup: {e}")
-        if self.midi_output_port:
-            try:
-                # Optionally send message to turn off LEDs before closing
-                self._initial_led_update() # Reuse to turn off LEDs
-                time.sleep(0.1) # Short pause to allow message sending
-                self.midi_output_port.close()
-                print("MIDI Output port closed.")
-            except Exception as e:
-                print(f"Error closing MIDI Output port during cleanup: {e}")
+        # Check for unsaved changes (optional, depends on desired exit behavior)
+        active_screen = self.screen_manager.get_active_screen()
+        is_dirty = False
+        if hasattr(self.current_song, 'dirty') and self.current_song.dirty:
+             is_dirty = True
+        # Some screens might have their own dirty state (e.g., unsaved edits not yet in song object)
+        # if active_screen and getattr(active_screen, 'is_dirty', False): is_dirty = True
+
+        if is_dirty:
+            print("Warning: Exiting with unsaved changes.")
+            # For a service, usually save automatically or just exit.
+            # For interactive, might prompt, but less applicable here.
+
+        # Save the name of the current song (even if dirty)
+        self._save_last_song()
+
+        # Cleanup active screen
+        self.screen_manager.cleanup_active_screen()
+
+        # Close MIDI ports via service
+        # Optionally send LED off command first
+        self._initial_led_update() # Re-use to turn off LEDs
+        time.sleep(0.1) # Short pause
+        self.midi_service.close_ports()
+
+        # Quit Pygame
         pygame.font.quit()
         pygame.quit()
         print("Pygame quit.")
         self.notifier.notify("STOPPING=1")
         print("Cleanup finished.")
 
-    def _load_last_song(self):
-        """Load the previously loaded song from persistent storage."""
-        import os
-        last_song_file = os.path.join(settings_module.PROJECT_ROOT, "last_song.txt")
-        if os.path.exists(last_song_file):
-            with open(last_song_file, "r") as f:
-                last_song_basename = f.read().strip()
-            if last_song_basename:
-                loaded = file_io.load_song(last_song_basename)
-                if loaded:
-                    self.current_song = loaded
-                    print(f"Loaded last song: {loaded.name}")
-                    self.notify_status(f"Loaded last song: {loaded.name}")
-
-    def _save_last_song(self):
-        """Save the name of the current song to persistent storage."""
-        import os
-        last_song_file = os.path.join(settings_module.PROJECT_ROOT, "last_song.txt")
-        if self.current_song and self.current_song.name:
-            with open(last_song_file, "w") as f:
-                f.write(self.current_song.name)
-        elif os.path.exists(last_song_file):
-            os.remove(last_song_file)
-
 
 # Script Entry Point
 def main():
-    """Main function that can be imported and run from other scripts."""
+    """Main function."""
     app = None
     try:
-        app = App()
-        # Check if initialization resulted in a usable state
-        if app.active_screen is None and not app.screens:
-             print("App initialization failed: No screens loaded. Exiting.")
-             if app: app.cleanup() # Attempt cleanup even if init failed partially
-             sys.exit(1)
-        elif app.active_screen is None and app.screens:
-             print("App initialization warning: Screens loaded but no active screen set.")
-             # Attempt to set the first screen again? Or proceed cautiously?
-             app.set_active_screen(app.screens[0])
-             if app.active_screen is None: # Check if setting it worked
-                  print("Failed to set initial active screen. Exiting.")
-                  if app: app.cleanup()
-                  sys.exit(1)
-
+        app = App() # Initialization happens within App.__init__
         app.run()
         sys.exit(0) # Normal exit
     except KeyboardInterrupt:
          print("\nCtrl+C detected. Exiting gracefully.")
          if app: app.cleanup()
          sys.exit(0)
+    except RuntimeError as e: # Catch init errors specifically
+        print(f"Application initialization failed: {e}")
+        # Attempt minimal cleanup if app partially initialized
+        try:
+            if app and app.midi_service: app.midi_service.close_ports()
+            if app and app.notifier:
+                 app.notifier.notify("STATUS=Initialization Failed. Exiting.")
+                 app.notifier.notify("STOPPING=1")
+            pygame.quit()
+        except: pass # Ignore cleanup errors during init failure
+        sys.exit(1)
     except Exception as e:
         print(f"\n--- An unhandled error occurred in main ---")
         traceback.print_exc()
+        # Attempt to notify systemd and cleanup
         try:
             n = sdnotify.SystemdNotifier()
             n.notify("STATUS=Crashed unexpectedly.")
             n.notify("STOPPING=1")
         except Exception as sd_err:
             print(f"(Could not notify systemd: {sd_err})")
-        # Attempt cleanup even after crash
-        if app:
-            try:
-                if app.active_screen and hasattr(app.active_screen, 'cleanup'): app.active_screen.cleanup()
-                if app.midi_port: app.midi_port.close()
-                app.pressed_buttons.clear() # Clear button state
-            except: pass # Ignore errors during crash cleanup
-        try: pygame.quit()
-        except: pass
+        if app: app.cleanup() # Attempt full cleanup
+        else:
+             try: pygame.quit() # Minimal cleanup if app failed early
+             except: pass
         sys.exit(1) # Exit with error code
 
 if __name__ == '__main__':
-    # Optional: Add backend selection if needed, e.g., for ALSA specific settings
-    # mido.set_backend('mido.backends.rtmidi/LINUX_ALSA')
     main()
