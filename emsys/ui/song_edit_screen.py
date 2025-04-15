@@ -8,7 +8,6 @@ import pygame # Ensure pygame is imported if not already
 import time # Ensure time is imported if not already
 from typing import List, Optional, Tuple, Any, Dict
 from enum import Enum, auto
-import math # Needed for curve calculations and floor
 
 # Core components
 from .base_screen import BaseScreen
@@ -19,6 +18,7 @@ from ..core.song import (MIN_TEMPO, MAX_TEMPO, MIN_RAMP, MAX_RAMP,
 # Utilities and Config
 from ..utils import file_io # Import the file I/O utilities
 from ..config import settings, mappings
+import math # <<< ADD THIS LINE if not already present
 
 # --- Import the TextInputWidget and FocusColumn ---
 from .widgets import TextInputWidget, TextInputStatus, FocusColumn # <<< Added FocusColumn
@@ -635,19 +635,6 @@ class SongEditScreen(BaseScreen):
         self.title_rect = title_surf.get_rect(midtop=(screen.get_width() // 2, TOP_MARGIN))
         screen.blit(title_surf, self.title_rect)
 
-        # --- REMOVED MIDI Status Drawing ---
-        # if midi_status:
-        #     status_surf = self.font_small.render(midi_status, True, WHITE)
-        #     status_rect = status_surf.get_rect(topleft=(10, 10))
-        #     screen.blit(status_surf, status_rect)
-        # -----------------------------------
-
-        # --- Placeholder for actual drawing logic ---
-        # This needs to be implemented based on your UI design
-        # It should draw the segment list, parameter details, etc.
-        # and highlight based on self.focused_column, self.selected_segment_index,
-        # and self.selected_parameter_key.
-
         # Example placeholder text:
         placeholder_y = self.title_rect.bottom + LIST_TOP_PADDING # Use constant
         list_area_height = screen.get_height() - placeholder_y - FEEDBACK_AREA_HEIGHT # Use constant
@@ -737,6 +724,8 @@ class SongEditScreen(BaseScreen):
                     start_index = self.parameter_scroll_offset
                     end_index = min(start_index + max_visible_params, num_params)
 
+                    param_end_index = min(self.parameter_scroll_offset + max_visible_params, len(self.parameter_keys))
+
                     # Draw scroll up indicator
                     if self.parameter_scroll_offset > 0:
                         scroll_up_surf = self.font_small.render("^", True, WHITE)
@@ -764,6 +753,25 @@ class SongEditScreen(BaseScreen):
                         param_dirty_flag = "*" if param_key in current_segment.dirty_params else ""
                         param_text = f"{param_dirty_flag}{display_name}: {value_str}"
                         # <<< END MODIFICATION >>>
+
+                        # --- START MODIFICATION: Format Program Change values ---
+                        if param_key in ['program_message_1', 'program_message_2']:
+                            # Ensure value is an int before formatting
+                            try:
+                                value_str = value_to_elektron_format(int(value))
+                            except (ValueError, TypeError):
+                                value_str = "ERR" # Handle cases where value isn't a valid int
+                        elif isinstance(value, bool):
+                            value_str = "ON" if value else "OFF"
+                        elif isinstance(value, float):
+                            value_str = f"{value:.1f}" # One decimal place for floats
+                        else:
+                            value_str = str(value) # Default string conversion
+
+                        # Add asterisk if parameter is dirty AFTER determining value_str
+                        param_dirty_flag = "*" if param_key in current_segment.dirty_params else ""
+                        param_text = f"{param_dirty_flag}{display_name}: {value_str}"
+                        # --- END CORRECTED LOGIC ---
 
                         color = WHITE
                         bg_color = None
@@ -991,7 +999,19 @@ class SongEditScreen(BaseScreen):
                 self._update_encoder_led() # Update LED to reflect new value
                 # Provide brief feedback on change
                 display_name = self.parameter_display_names.get(key, key)
-                value_str = "ON" if isinstance(new_value, bool) and new_value else "OFF" if isinstance(new_value, bool) else str(new_value)
+                
+                # Determine value string for feedback, using Elektron format for program changes
+                if key in ['program_message_1', 'program_message_2']:
+                    try:
+                        # Ensure it's an int before formatting for Elektron style
+                        value_str = value_to_elektron_format(int(new_value))
+                    except (ValueError, TypeError):
+                        value_str = "ERR" # Handle unexpected type
+                elif isinstance(new_value, bool):
+                    value_str = "ON" if new_value else "OFF"
+                else:
+                    value_str = str(new_value) # Default string conversion for others
+                
                 self.set_feedback(f"{display_name}: {value_str}", duration=0.75)
             else:
                 # Value didn't change (e.g., at limit) - maybe provide limit feedback
@@ -1209,5 +1229,32 @@ class SongEditScreen(BaseScreen):
         instr3_rect = instr3_surf.get_rect(midtop=(surface.get_width() // 2, instr2_rect.bottom + 10))
         surface.blit(instr3_surf, instr3_rect)
     # -----------------------------
+
+    # --- ADDED: Helper functions for Elektron Bank/Patch format ---
+def value_to_elektron_format(value: int) -> str:
+    """Converts a MIDI program change value (0-127) to Elektron format (A01-H16)."""
+    if not 0 <= value <= 127:
+        return "INV" # Invalid value indicator
+    bank_index = value // 16
+    patch_number = value % 16
+    bank_letter = chr(ord('A') + bank_index)
+    patch_str = f"{patch_number + 1:02d}"
+    return f"{bank_letter}{patch_str}"
+
+def elektron_format_to_value(bank_patch_str: str) -> Optional[int]:
+    """Converts an Elektron format string (A01-H16) to a MIDI program change value (0-127)."""
+    if not bank_patch_str or len(bank_patch_str) != 3:
+        return None
+    bank_letter = bank_patch_str[0].upper()
+    patch_str = bank_patch_str[1:]
+    if not 'A' <= bank_letter <= 'H' or not patch_str.isdigit():
+        return None
+    bank_index = ord(bank_letter) - ord('A')
+    patch_number = int(patch_str) - 1
+    if not 0 <= patch_number <= 15:
+        return None
+    value = bank_index * 16 + patch_number
+    return value
+# --- END ADDED HELPER FUNCTIONS ---
 
     # ... (rest of the methods like _save_current_song, _add_new_segment, etc.) ...
