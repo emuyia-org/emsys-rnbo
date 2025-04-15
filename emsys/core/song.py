@@ -7,7 +7,7 @@ allowing for sequencing and editing within the application.
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set # <<< Added Set
 
 # --- Constants for Validation (Optional but Recommended) ---
 # You might want to define these here or import from config if they become more widely used
@@ -37,10 +37,12 @@ class Segment:
     repetitions: int = 1                # Number of times to repeat this segment (1-128)
     automatic_transport_interrupt: bool = False # Pause playback after this segment finishes? (True/False)
     dirty: bool = field(default=False, compare=False, repr=False) # Tracks unsaved changes for this segment
+    dirty_params: Set[str] = field(default_factory=set, compare=False, repr=False) # <<< ADDED: Tracks specific dirty parameters
 
     def __str__(self) -> str:
         # Include asterisk if this segment has unsaved changes.
         dirty_flag = "*" if self.dirty else ""
+        # Note: __str__ doesn't show individual dirty params for brevity
         return (f"Segment{dirty_flag}(Prog1={self.program_message_1}, "
                 f"Prog2={self.program_message_2}, Tempo={self.tempo}, "
                 f"Ramp={self.tempo_ramp}, Loop={self.loop_length}, "
@@ -129,7 +131,8 @@ class Song:
     def update_segment(self, index: int, **kwargs):
         """
         Updates attributes of a segment at the specified index.
-        Also sets the segment's and the song's dirty flag if a value changes.
+        Also sets the segment's and the song's dirty flag if a value changes,
+        and tracks which specific parameters changed.
 
         Args:
             index: The index of the segment to update.
@@ -149,6 +152,7 @@ class Song:
                 # Only mark as modified if the value actually changes
                 if getattr(segment, key) != value:
                     setattr(segment, key, value)
+                    segment.dirty_params.add(key) # <<< ADDED: Track specific dirty param
                     modified = True
                 # Optional: Trigger validation if implemented in Segment
                 # if hasattr(segment, '__post_init__'): segment.__post_init__()
@@ -161,7 +165,7 @@ class Song:
     def to_dict(self) -> Dict[str, Any]:
         """
         Converts the Song object to a dictionary suitable for serialization.
-        Excludes the runtime 'dirty' flags.
+        Excludes the runtime 'dirty' and 'dirty_params' flags.
 
         Returns:
             A dictionary containing the song name and segments.
@@ -171,6 +175,7 @@ class Song:
         for segment in self.segments:
             segment_dict = asdict(segment)
             segment_dict.pop('dirty', None) # Remove dirty flag before saving
+            segment_dict.pop('dirty_params', None) # <<< ADDED: Remove dirty_params flag
             segments_list.append(segment_dict)
 
         return {
@@ -226,9 +231,10 @@ class Song:
             self.dirty = True
 
     def clear_segment_dirty_flags(self):
-        """Resets the dirty flag for all segments in the song."""
+        """Resets the dirty flag and dirty_params set for all segments."""
         for segment in self.segments:
             segment.dirty = False
+            segment.dirty_params.clear() # <<< ADDED: Clear the set too
 
     def __len__(self) -> int:
         """Returns the number of segments in the song."""

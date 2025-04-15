@@ -4,8 +4,8 @@
 Screen for viewing and editing Song objects. Includes renaming functionality via widget.
 Uses column-based navigation (Segments <-> Parameters).
 """
-import pygame
-import time
+import pygame # Ensure pygame is imported if not already
+import time # Ensure time is imported if not already
 from typing import List, Optional, Tuple, Any, Dict
 from enum import Enum, auto
 import math # Needed for curve calculations and floor
@@ -725,7 +725,7 @@ class SongEditScreen(BaseScreen):
 
             if self.selected_segment_index is not None and self.parameter_keys:
                 try:
-                    segment = self.current_song.get_segment(self.selected_segment_index)
+                    current_segment = self.current_song.get_segment(self.selected_segment_index) # Get current segment
                     max_visible_params = self._get_max_visible_parameters()
                     num_params = len(self.parameter_keys)
 
@@ -734,10 +734,8 @@ class SongEditScreen(BaseScreen):
                         self.parameter_scroll_offset = max(0, num_params - max_visible_params)
                     if self.parameter_scroll_offset < 0: self.parameter_scroll_offset = 0
 
-                    # <<< --- ADDED: Define start and end index for parameter loop --- >>>
-                    param_start_index = self.parameter_scroll_offset
-                    param_end_index = min(param_start_index + max_visible_params, num_params)
-                    # <<< --- END ADDED --- >>>
+                    start_index = self.parameter_scroll_offset
+                    end_index = min(start_index + max_visible_params, num_params)
 
                     # Draw scroll up indicator
                     if self.parameter_scroll_offset > 0:
@@ -747,56 +745,55 @@ class SongEditScreen(BaseScreen):
 
                     param_text_y = param_detail_rect.top + LIST_TOP_PADDING # Start below indicator space
 
-                    for j in range(param_start_index, param_end_index):
-                        key = self.parameter_keys[j]
-                        display_name = self.parameter_display_names.get(key, key)
-                        value = getattr(segment, key, "N/A")
+                    for i in range(start_index, end_index):
+                        param_key = self.parameter_keys[i]
+                        display_name = self.parameter_display_names.get(param_key, param_key)
+                        value = getattr(current_segment, param_key, "N/A")
 
-                        # Format value (e.g., boolean as ON/OFF)
+                        # Format boolean values nicely
                         if isinstance(value, bool):
                             value_str = "ON" if value else "OFF"
-                        elif isinstance(value, float):
-                            value_str = f"{value:.1f}" # One decimal place for floats
                         else:
-                            value_str = str(value)
+                            # Format floats nicely (e.g., tempo)
+                            if isinstance(value, float):
+                                value_str = f"{value:.1f}" # One decimal place
+                            else:
+                                value_str = str(value)
 
-                        is_selected_param = (key == self.selected_parameter_key)
-                        is_param_column_focused = (self.focused_column == FocusColumn.PARAMETER_DETAILS)
-                        # Text color is highlighted only when selected AND focused
-                        color = HIGHLIGHT_COLOR if (is_selected_param and is_param_column_focused) else WHITE
+                        # <<< MODIFIED: Add asterisk if parameter is dirty >>>
+                        param_dirty_flag = "*" if param_key in current_segment.dirty_params else ""
+                        param_text = f"{param_dirty_flag}{display_name}: {value_str}"
+                        # <<< END MODIFICATION >>>
 
-                        # --- NOTE: Parameter-level dirty flag display is complex ---
-                        # We only have segment.dirty. We could highlight the whole parameter
-                        # list if segment.dirty is True, or just rely on the segment list asterisk.
-                        # For now, just display the value.
-                        # dirty_param_flag = "*" if segment.dirty else "" # Example: Mark all if segment is dirty
-                        # param_text = f"{display_name}{dirty_param_flag}: {value_str}"
-                        param_text = f"{display_name}: {value_str}"
-                        # --- END NOTE ---
+                        color = WHITE
+                        bg_color = None
+                        if param_key == self.selected_parameter_key:
+                            color = BLACK # Text color when selected
+                            bg_color = HIGHLIGHT_COLOR # Background color when selected
 
                         param_surf = self.font.render(param_text, True, color)
                         param_rect = param_surf.get_rect(topleft=(param_detail_rect.left + PARAM_INDENT, param_text_y))
 
-                        # Draw selection background if the parameter is selected, regardless of focus column
-                        if is_selected_param:
-                            # Use a slightly different background/border if not focused? Optional.
-                            # For now, just use the same grey border.
-                            bg_rect = pygame.Rect(param_detail_rect.left + 2, param_text_y - 2, param_detail_rect.width - 4, LINE_HEIGHT)
-                            # Fill the background rectangle with GREY color
-                            pygame.draw.rect(screen, GREY, bg_rect) # <<< Changed from border (width 1) to fill
+                        if bg_color:
+                            # Draw background highlight slightly larger than text
+                            highlight_rect = param_rect.inflate(10, 2)
+                            # Ensure highlight doesn't go outside the column bounds
+                            highlight_rect.left = max(param_detail_rect.left + COLUMN_BORDER_WIDTH, highlight_rect.left)
+                            highlight_rect.right = min(param_detail_rect.right - COLUMN_BORDER_WIDTH, highlight_rect.right)
+                            pygame.draw.rect(screen, bg_color, highlight_rect)
 
                         screen.blit(param_surf, param_rect)
                         param_text_y += LINE_HEIGHT
 
                     # Draw scroll down indicator
-                    if param_end_index < num_params:
+                    if end_index < num_params:
                         scroll_down_surf = self.font_small.render("v", True, WHITE)
                         scroll_down_rect = scroll_down_surf.get_rect(centerx=param_detail_rect.centerx, bottom=param_detail_rect.bottom - 2)
                         screen.blit(scroll_down_surf, scroll_down_rect)
 
-                except IndexError:
-                    # Handle case where selected_segment_index becomes invalid
-                    error_surf = self.font_small.render("Segment Error", True, ERROR_COLOR)
+                except (IndexError, AttributeError) as e:
+                    # Handle errors fetching segment or attribute
+                    error_surf = self.font_small.render(f"Error: {e}", True, ERROR_COLOR)
                     error_rect = error_surf.get_rect(center=param_detail_rect.center)
                     screen.blit(error_surf, error_rect)
             elif self.selected_segment_index is None:
@@ -1034,15 +1031,12 @@ class SongEditScreen(BaseScreen):
         self.set_feedback(f"Saving '{self.current_song.name}'...")
         pygame.display.flip() # Show feedback immediately
 
-        # Assume file_io.save_song now handles clearing Song.dirty
-        # and potentially Segment.dirty flags upon successful save.
-        # If file_io.save_song doesn't clear segment flags, do it here.
         if file_io.save_song(self.current_song):
             self.set_feedback(f"Saved '{self.current_song.name}' successfully.")
-            # Explicitly clear segment dirty flags after successful save
-            # (if not handled within file_io.save_song)
-            self.current_song.clear_segment_dirty_flags()
-            # Song.dirty should be cleared by file_io.save_song
+            # Explicitly clear segment dirty flags and param flags after successful save
+            self.current_song.clear_segment_dirty_flags() # <<< This now clears both
+            # Song.dirty should be cleared by file_io.save_song (or clear it here if needed)
+            # self.current_song.dirty = False # Uncomment if save_song doesn't handle this
             return True # <<< Return success
         else:
             # Error message printed by save_song
@@ -1117,13 +1111,21 @@ class SongEditScreen(BaseScreen):
     def _discard_and_exit(self):
         """Discards changes and allows exit."""
         print("User chose Discard & Exit.")
-        if self.current_song:
-            self.current_song.dirty = False # Mark as clean
+        if self.current_song and self.current_song.dirty:
+            self.current_song.dirty = False # Mark song as clean
+            self.current_song.clear_segment_dirty_flags() # <<< ADDED: Clear segment/param flags too
             # Optionally reload from disk?
             # reloaded = file_io.load_song(self.current_song.name)
-            # if reloaded: self.app.current_song = reloaded # Update app's copy too
+            # if reloaded:
+            #     self.app.current_song = reloaded # Update app's copy too
+            #     self.current_song = self.app.current_song # Update screen's reference
+            self.set_feedback("Changes discarded.")
+        elif self.current_song:
+             self.set_feedback("No changes to discard.") # If song wasn't dirty
+        else:
+             self.set_feedback("No song loaded.") # If no song
+
         self.exit_prompt_active = False # Deactivate prompt
-        self.set_feedback("Changes discarded.")
         # Allow the app to proceed with screen change
         self.app.request_screen_change() # <<< Tell app it's ok now
 
