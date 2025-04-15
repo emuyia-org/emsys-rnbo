@@ -94,8 +94,8 @@ class PlaceholderScreen(BaseScreen):
             self.base_wink_duration * 1.1
         )
 
-    def draw(self, screen, midi_status=None):
-        """Draw the placeholder content with a MIDI status indicator and animation."""
+    def draw(self, screen, midi_status=None, song_status=None):
+        """Draw the placeholder content with a MIDI status indicator, song status and animation."""
         # Get screen dimensions dynamically
         screen_width = screen.get_width()
         screen_height = screen.get_height()
@@ -164,7 +164,7 @@ class PlaceholderScreen(BaseScreen):
         screen.blit(self.commit_surf, self.commit_rect)
         # --- End Draw Git Commit ID ---
 
-        # Draw other elements as needed
+        # Additional rendering for song_status can be added here if needed.
         # ...
 
     # Implement other methods like handle_event, handle_midi, update if needed

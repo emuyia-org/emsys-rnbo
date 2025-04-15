@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Manages the application screens, including initialization and switching.
+Injects SongService dependency into screens that require it.
 """
 import pygame
 import traceback
@@ -12,9 +13,9 @@ from emsys.ui.base_screen import BaseScreen
 from emsys.ui.placeholder_screen import PlaceholderScreen
 from emsys.ui.song_manager_screen import SongManagerScreen
 from emsys.ui.song_edit_screen import SongEditScreen
+from emsys.services.song_service import SongService # Import SongService type hint
 
 # Define screen classes in order
-# Filter out None values if imports failed (though main should handle this)
 SCREEN_CLASSES = [
     screen for screen in [
         PlaceholderScreen,
@@ -26,15 +27,16 @@ SCREEN_CLASSES = [
 class ScreenManager:
     """Handles the lifecycle and switching of application screens."""
 
-    def __init__(self, app_ref: Any):
+    def __init__(self, app_ref: Any, song_service_ref: SongService): # <<< ADD song_service_ref
         """
         Initialize the ScreenManager.
 
         Args:
             app_ref: A reference to the main application instance.
-                     Used to pass to screen constructors.
+            song_service_ref: A reference to the SongService instance. # <<< ADDED
         """
         self.app = app_ref
+        self.song_service = song_service_ref # <<< STORE SongService reference
         self.screens: List[BaseScreen] = []
         self.active_screen: Optional[BaseScreen] = None
         self.pending_screen_change: Optional[BaseScreen] = None
@@ -42,25 +44,36 @@ class ScreenManager:
         self._initialize_screens()
 
     def _initialize_screens(self):
-        """Instantiate all available screen classes."""
+        """Instantiate all available screen classes, injecting SongService if needed."""
         print("Initializing Screens...")
         self.screens = []
         for ScreenClass in SCREEN_CLASSES:
             try:
-                screen_instance = ScreenClass(self.app)
+                # Check if the screen class constructor accepts 'song_service'
+                import inspect
+                sig = inspect.signature(ScreenClass.__init__)
+                if 'song_service' in sig.parameters:
+                    # Inject SongService
+                    screen_instance = ScreenClass(app=self.app, song_service=self.song_service)
+                    print(f"  - Initialized {ScreenClass.__name__} with SongService")
+                else:
+                    # Initialize without SongService
+                    screen_instance = ScreenClass(app=self.app)
+                    print(f"  - Initialized {ScreenClass.__name__}")
+
                 self.screens.append(screen_instance)
-                print(f"  - Initialized {ScreenClass.__name__}")
             except Exception as e:
                 print(f"Error initializing screen {ScreenClass.__name__}: {e}")
                 traceback.print_exc()
 
         if not self.screens:
             print("WARNING: No screens successfully initialized!")
-            # The main app should handle this case (e.g., exit)
         else:
-            # Set the first screen as active initially
-            # The actual call to set_active_screen is done by the App after manager init
             print("Screen instances created.")
+
+    # --- Rest of the methods (set_initial_screen, set_active_screen, request_next_screen, etc.) remain largely the same ---
+    # They operate on the self.screens list and self.active_screen, which are populated correctly
+    # by the modified _initialize_screens method.
 
     def set_initial_screen(self):
         """Sets the first available screen as active."""
@@ -84,7 +97,6 @@ class ScreenManager:
 
         old_screen = self.active_screen
 
-        # Cleanup old screen
         if old_screen and hasattr(old_screen, 'cleanup'):
             try:
                 print(f"Cleaning up {old_screen.__class__.__name__}...")
@@ -94,13 +106,11 @@ class ScreenManager:
                 traceback.print_exc()
 
         self.active_screen = screen
-        # Notify the app about the change (e.g., for status updates)
         if hasattr(self.app, 'notify_status'):
             status_msg = f"Screen Activated: {self.active_screen.__class__.__name__}"
             self.app.notify_status(status_msg)
 
 
-        # Initialize new screen
         if hasattr(self.active_screen, 'init'):
              try:
                  print(f"Initializing {self.active_screen.__class__.__name__}...")
@@ -108,11 +118,8 @@ class ScreenManager:
              except Exception as e:
                  print(f"Error during {self.active_screen.__class__.__name__} init: {e}")
                  traceback.print_exc()
-                 # Revert to old screen on init failure? Or maybe a default error screen?
                  print(f"Reverting to previous screen due to init error.")
                  self.active_screen = old_screen
-                 # Re-initialize the old screen if needed? Or assume it's state is ok?
-                 # if old_screen and hasattr(old_screen, 'init'): old_screen.init()
                  if hasattr(self.app, 'notify_status'):
                      self.app.notify_status(f"FAIL: Init error in {screen.__class__.__name__}. Reverted.")
                  return # Stop the screen change process
@@ -130,7 +137,6 @@ class ScreenManager:
             print(f"ScreenManager: Requested next screen: {self.pending_screen_change.__class__.__name__}")
         except ValueError:
              print("ScreenManager Error: Active screen not found in screen list.")
-             # Default to first screen if current is lost
              self.pending_screen_change = self.screens[0]
 
     def request_previous_screen(self):
@@ -146,7 +152,6 @@ class ScreenManager:
             print(f"ScreenManager: Requested previous screen: {self.pending_screen_change.__class__.__name__}")
         except ValueError:
             print("ScreenManager Error: Active screen not found in screen list.")
-            # Default to last screen if current is lost
             self.pending_screen_change = self.screens[-1]
 
     def process_pending_change(self):
@@ -154,13 +159,12 @@ class ScreenManager:
         if self.pending_screen_change:
             screen_to_set = self.pending_screen_change
             self.pending_screen_change = None # Clear request
-             # Check if the current screen allows deactivation (e.g., unsaved changes prompt)
+
             can_deactivate = True
             if self.active_screen and hasattr(self.active_screen, 'can_deactivate'):
                  if callable(getattr(self.active_screen, 'can_deactivate')):
                      can_deactivate = self.active_screen.can_deactivate()
                  else:
-                     # If can_deactivate exists but is not callable, assume it's a boolean attribute
                      can_deactivate = bool(getattr(self.active_screen, 'can_deactivate', True))
 
 
@@ -169,19 +173,12 @@ class ScreenManager:
                  self.set_active_screen(screen_to_set)
             else:
                  print(f"ScreenManager: Pending change blocked by active screen ({self.active_screen.__class__.__name__}).")
-                 # Keep self.pending_screen_change = None, the request is effectively cancelled.
-                 # The screen that blocked must handle re-requesting if needed (e.g., after save/discard).
+
 
     def request_screen_change_approved(self):
-        """
-        Called by a screen (e.g., after resolving an exit prompt) to indicate
-        that a previously blocked screen change can now proceed if one was pending.
-        """
-        # This signal indicates readiness. The main loop will call
-        # process_pending_change again, which should now succeed.
-        # We don't need to re-set pending_screen_change here.
+        """Signals readiness for a previously blocked screen change."""
         print("ScreenManager: Screen signaled readiness for change. Main loop will re-attempt.")
-        # If a screen change wasn't pending, this does nothing.
+
 
     def get_active_screen(self) -> Optional[BaseScreen]:
         """Returns the currently active screen instance."""
