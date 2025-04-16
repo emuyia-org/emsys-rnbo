@@ -202,7 +202,6 @@ class App:
         if msg.type == 'control_change' and msg.control in self.direct_midi_handlers:
             try:
                 # Call the direct handler and return immediately
-                print(f"[App] Using direct handler for CC {msg.control}")
                 self.direct_midi_handlers[msg.control](msg)
                 return
             except Exception as e:
@@ -218,23 +217,21 @@ class App:
             # --- Handle Button Release (value == 0) ---
             if value == 0:
                 if control in self.pressed_buttons:
-                    # print(f"Button released: CC {control}") # Debug
                     del self.pressed_buttons[control]
-                # Optional: Dispatch release if screens need it, otherwise just return
-                # self._dispatch_action(msg)
-                return # Stop processing here for releases
+                # Dispatch release messages so screens can react (e.g., update held state)
+                self._dispatch_action(msg)
+                # <<< REMOVED return statement >>>
+                # return # Stop processing here for releases # <<< REMOVED
 
             # --- Handle Button Press (value == 127) ---
             elif value == 127:
                 # If it's a non-repeatable button, dispatch immediately and stop
                 if control in NON_REPEATABLE_CCS:
-                    # print(f"Dispatching non-repeatable button press: CC {control}") # Debug
                     self._dispatch_action(msg)
                     return
 
                 # Otherwise, handle as a potentially repeating button press
                 if control not in self.pressed_buttons:
-                    # print(f"Button pressed (repeatable): CC {control}") # Debug
                     self.pressed_buttons[control] = {
                         'press_time': current_time,
                         'last_repeat_time': current_time, # Set initial repeat time for delay calc
@@ -247,14 +244,11 @@ class App:
 
             # --- Handle ALL OTHER CC Values (Encoders, Faders, etc.) ---
             else:
-                # print(f"Dispatching other CC value: control={control}, value={value}") # Debug
-                # Includes encoder values like 1, 65, etc.
                 self._dispatch_action(msg)
                 return # Stop processing here after dispatching
 
         # --- Handle Non-CC Messages (Notes, Program Changes, etc.) ---
         else:
-            # print(f"Dispatching non-CC message: {msg.type}") # Debug
             self._dispatch_action(msg)
             # No return needed here as it's the end of the function
 
@@ -264,6 +258,7 @@ class App:
         Handles global actions (screen switching) or passes to the active screen.
         Prevents global screen switching if an input widget is active on the screen.
         """
+
         active_screen = self.screen_manager.get_active_screen()
 
         # Check for active input widgets (e.g., text input)
@@ -299,13 +294,6 @@ class App:
             except Exception as screen_midi_err:
                  print(f"Error in screen {active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
                  traceback.print_exc()
-        else:
-            # Add debug for the else case too, just in case
-            if not active_screen:
-                 print(f"[App._dispatch_action] Skipping screen handler: No active screen for msg: {msg}")
-            elif not hasattr(active_screen, 'handle_midi'):
-                 print(f"[App._dispatch_action] Skipping screen handler: {active_screen.__class__.__name__} has no handle_midi method for msg: {msg}")
-
 
     def _handle_button_repeats(self, current_time):
         """Check and handle button repeats based on the current time."""
@@ -364,7 +352,7 @@ class App:
         if active_screen:
             screen_name = active_screen.__class__.__name__
         midi_status = self.midi_service.get_status_string()
-        # Include basic song status
+        # Include basic song statustus)
         song_status = f"Song: {self.song_service.get_current_song_name() or 'None'}"
         if self.song_service.is_current_song_dirty(): song_status += "*"
 

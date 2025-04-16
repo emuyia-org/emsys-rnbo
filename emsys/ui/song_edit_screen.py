@@ -8,6 +8,7 @@ import pygame
 import time
 from typing import List, Optional, Tuple, Any, Dict
 from enum import Enum, auto
+from dataclasses import asdict # <<< Import asdict
 
 # Core components (Only Segment needed for type hinting, Song managed by service)
 from ..core.song import Segment # Keep direct access to Segment structure for type hinting
@@ -81,6 +82,8 @@ class SongEditScreen(BaseScreen):
         self.feedback_message: Optional[Tuple[str, float, Tuple[int, int, int]]] = None
         self.feedback_duration: float = 2.0
         self.text_input_widget = TextInputWidget(app)
+        self.no_button_held: bool = False # <<< ADDED: Track NO button state
+        self.copied_segment_data: Optional[Dict[str, Any]] = None # <<< ADDED: Store copied segment
 
         # Define parameter order and display names (kept here for drawing)
         self.parameter_keys: List[str] = [
@@ -122,6 +125,8 @@ class SongEditScreen(BaseScreen):
         self._adjust_parameter_scroll() # Adjust scroll based on selection
         self.clear_feedback()
         self.text_input_widget.cancel()
+        self.no_button_held = False # <<< ADDED: Reset state
+        self.copied_segment_data = None # <<< ADDED: Reset state
 
         if not current_song:
             self.set_feedback("No song loaded!", is_error=True, duration=5.0)
@@ -134,6 +139,8 @@ class SongEditScreen(BaseScreen):
         print(f"{self.__class__.__name__} is being deactivated.")
         self.text_input_widget.cancel()
         self.clear_feedback()
+        self.no_button_held = False # <<< ADDED: Reset state
+        self.copied_segment_data = None # <<< ADDED: Reset state
         # Optionally turn off specific LEDs here using led_handler if needed
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
@@ -166,10 +173,20 @@ class SongEditScreen(BaseScreen):
             # ... (text input handling logic - currently none needed here)
             return
 
+        # --- Track NO Button State ---
+        # This needs to happen early to set the flag correctly
+        if cc == mappings.NO_NAV_CC:
+            if value == 127:
+                self.no_button_held = True
+            elif value == 0:
+                self.no_button_held = False
+                # NO release itself doesn't trigger actions below, so return
+                return
+
         # --- Handle Fader for Selection ---
         if cc == mappings.FADER_SELECT_CC:
             self._handle_fader_selection(value)
-            return
+            return # Fader handled
 
         # --- Handle Encoder Rotation for Parameter Adjustment ---
         if cc == mappings.KNOB_B8_CC: # Assuming B8 is the primary editing encoder
@@ -179,42 +196,71 @@ class SongEditScreen(BaseScreen):
 
             if direction != 0:
                 self._modify_parameter_via_encoder(direction)
-            return
+            return # Encoder handled
 
-        # --- Normal Edit Mode Handling (Button Presses Only) ---
-        if value != 127:
-            return
+        # --- Process Button Presses (value == 127) ---
+        if value == 127:
+            # --- Action Buttons ---
+            if cc == mappings.SAVE_CC:
+                if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._copy_selected_segment()
+                elif not self.no_button_held: # Explicitly check for normal case
+                    self._save_current_song()
+                return # SAVE CC handled
 
-        # --- Action Buttons ---
-        if cc == mappings.SAVE_CC:
-            self._save_current_song()
-        elif cc == mappings.CREATE_CC:
-            self._add_new_segment()
-        elif cc == mappings.DELETE_CC:
-            if self.focused_column == FocusColumn.SEGMENT_LIST:
-                self._delete_current_segment()
-            elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
-                self._reset_or_copy_parameter()
-        # --- Navigation Buttons ---
-        elif cc == mappings.DOWN_NAV_CC:
-            if self.focused_column == FocusColumn.SEGMENT_LIST: 
-                self._change_selected_segment(1)
-            else: 
-                self._change_selected_parameter_vertically(1)
-        elif cc == mappings.UP_NAV_CC:
-            if self.focused_column == FocusColumn.SEGMENT_LIST: 
-                self._change_selected_segment(-1)
-            else: 
-                self._change_selected_parameter_vertically(-1)
-        elif cc == mappings.RIGHT_NAV_CC:
-            self._navigate_focus(1)
-        elif cc == mappings.LEFT_NAV_CC:
-            self._navigate_focus(-1)
-        # --- Parameter Modification Buttons (YES/NO) ---
-        elif cc == mappings.YES_NAV_CC:
-            self._modify_parameter_via_button(1)
-        elif cc == mappings.NO_NAV_CC:
-            self._modify_parameter_via_button(-1)
+            elif cc == mappings.CREATE_CC:
+                if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._paste_copied_segment()
+                elif not self.no_button_held: # Explicitly check for normal case
+                    self._add_new_segment()
+                return # CREATE CC handled
+
+            elif cc == mappings.DELETE_CC:
+                # Check NO+DELETE combination if needed in future
+                if self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._delete_current_segment()
+                elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                    self._reset_or_copy_parameter()
+                return # DELETE CC handled
+
+            # --- Navigation Buttons ---
+            elif cc == mappings.DOWN_NAV_CC:
+                if self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._change_selected_segment(1)
+                else:
+                    self._change_selected_parameter_vertically(1)
+                return # DOWN handled
+
+            elif cc == mappings.UP_NAV_CC:
+                if self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._change_selected_segment(-1)
+                else:
+                    self._change_selected_parameter_vertically(-1)
+                return # UP handled
+
+            elif cc == mappings.RIGHT_NAV_CC:
+                self._navigate_focus(1)
+                return # RIGHT handled
+
+            elif cc == mappings.LEFT_NAV_CC:
+                self._navigate_focus(-1)
+                return # LEFT handled
+
+            # --- Parameter Modification Buttons (YES/NO) ---
+            # These are checked last, including the NO button press itself
+            elif cc == mappings.YES_NAV_CC:
+                if self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                    self._modify_parameter_via_button(1)
+                return # YES handled
+
+            elif cc == mappings.NO_NAV_CC:
+                # NO press is tracked above. If it reaches here, it means value is 127.
+                # If parameter column is focused, treat as decrement/toggle.
+                if self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                     self._modify_parameter_via_button(-1)
+                # else:
+                    # If segment list focused, NO press (value=127) does nothing here by itself.
+                return # NO handled (as a potential parameter modifier)
 
     # --- Helper to update LEDs using the handler ---
     def _update_leds(self):
@@ -267,7 +313,12 @@ class SongEditScreen(BaseScreen):
         self._modify_parameter(direction)
 
     def _modify_parameter_via_button(self, direction: int):
-        """Modify using +/- buttons."""
+        """Modify using +/- buttons. Only works if parameter details are focused."""
+        # <<< ADDED focus check >>>
+        if self.focused_column != FocusColumn.PARAMETER_DETAILS:
+            # self.set_feedback("Focus on parameters to edit with YES/NO", duration=1.0) # Optional feedback
+            return
+
         if self.selected_parameter_key == 'automatic_transport_interrupt':
              self._modify_parameter(1) # Toggle bool
         else:
@@ -483,6 +534,67 @@ class SongEditScreen(BaseScreen):
             self.set_feedback(message, is_error=True)
             # Optionally reset selection on error?
             # self._reset_selection_on_error()
+
+    # --- NEW: Copy/Paste Helper Methods ---
+    def _copy_selected_segment(self):
+        """Copies the data of the currently selected segment."""
+        current_song = self.song_service.get_current_song()
+        if not current_song or self.selected_segment_index is None:
+            self.set_feedback("No segment selected to copy", is_error=True)
+            return
+
+        try:
+            segment_to_copy = current_song.get_segment(self.selected_segment_index)
+            # Use asdict to get a dictionary representation, excluding runtime flags
+            self.copied_segment_data = asdict(segment_to_copy)
+            # Remove runtime flags explicitly if asdict doesn't handle field(repr=False) etc.
+            self.copied_segment_data.pop('dirty', None)
+            self.copied_segment_data.pop('dirty_params', None)
+
+            self.set_feedback(f"Copied Segment {self.selected_segment_index + 1}")
+        except (IndexError, Exception) as e:
+            self.copied_segment_data = None
+            self.set_feedback(f"Error copying segment: {e}", is_error=True)
+            print(f"Error in _copy_selected_segment: {e}")
+
+    def _paste_copied_segment(self):
+        """Pastes the copied segment data after the selected segment."""
+        current_song = self.song_service.get_current_song()
+        if not self.copied_segment_data:
+            self.set_feedback("Nothing copied to paste", is_error=True)
+            return
+        if not current_song:
+            self.set_feedback("No song loaded to paste into", is_error=True)
+            return
+
+        try:
+            # Create a new Segment instance from the copied data
+            pasted_segment = Segment(**self.copied_segment_data)
+            pasted_segment.dirty = True # Mark pasted segment as needing save initially
+
+            insert_index = 0
+            if self.selected_segment_index is not None:
+                insert_index = self.selected_segment_index + 1
+            elif current_song.segments: # If no selection but segments exist, paste at end
+                 insert_index = len(current_song.segments)
+
+            # Add via service
+            success, message = self.song_service.add_segment_to_current(pasted_segment, index=insert_index)
+
+            if success:
+                self.set_feedback(f"Pasted segment at {insert_index + 1}")
+                # Select the newly added segment and update UI
+                self.selected_segment_index = insert_index
+                self._adjust_segment_scroll()
+                self._ensure_parameter_selection()
+                self._update_leds()
+            else:
+                self.set_feedback(message, is_error=True)
+
+        except (TypeError, Exception) as e:
+            self.set_feedback(f"Error pasting segment: {e}", is_error=True)
+            print(f"Error in _paste_copied_segment: {e}")
+    # --- END Copy/Paste ---
 
 
     def _reset_selection_on_error(self):
