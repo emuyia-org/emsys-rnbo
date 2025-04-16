@@ -141,27 +141,45 @@ class SongService:
             print(f"Error: {msg}")
             return False, msg
 
-        if file_io.list_songs().__contains__(new_name):
-            msg = f"Cannot create song. Name '{new_name}' already exists."
+        # Basic validation before creating Song object (redundant with UI checks but safe)
+        if not new_name or not new_name.strip():
+             msg = "Cannot create song with empty name."
+             self._status_callback(msg)
+             return False, msg
+        # Ensure name doesn't already exist (using stripped name)
+        clean_name = new_name.strip()
+        if clean_name in self.list_song_names():
+            msg = f"Cannot create song. Name '{clean_name}' already exists."
             self._status_callback(msg)
             return False, msg
 
-        self._status_callback(f"Creating new song '{new_name}'...")
+        self._status_callback(f"Creating new song '{clean_name}'...")
         try:
-            new_song = Song(name=new_name) # Create empty song object
+            new_song = Song(name=clean_name) # Create empty song object with cleaned name
+
+            # --- REMOVED CHECK ---
+            # Verify the name attribute immediately after creation
+            # if not new_song.name:
+            #     msg = f"Error: Song object created with invalid name ('{new_song.name}') from input '{clean_name}'. Cannot proceed."
+            #     self._status_callback(msg)
+            #     print(f"Critical Error: {msg}")
+            #     return False, msg
+            # --- END REMOVED CHECK ---
+
             # Save the new empty song immediately
             if file_io.save_song(new_song):
                 # Now set it as current
-                self._set_current_song(new_song, new_name)
-                msg = f"Created and loaded new song '{new_name}'."
+                self._set_current_song(new_song, new_song.name) # Use name from object
+                msg = f"Created and loaded new song '{new_song.name}'."
                 self._status_callback(msg)
                 return True, msg
             else:
-                msg = f"Failed to save new song '{new_name}' during creation."
+                # file_io.save_song prints its own error, use a generic message here
+                msg = f"Failed to save new song '{clean_name}' during creation."
                 self._status_callback(msg)
                 return False, msg
         except Exception as e:
-            msg = f"Error creating song '{new_name}': {e}"
+            msg = f"Error creating song '{clean_name}': {e}"
             self._status_callback(msg)
             traceback.print_exc()
             return False, msg

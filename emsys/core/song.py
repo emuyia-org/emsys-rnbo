@@ -236,10 +236,6 @@ class Song:
             segment.dirty = False
             segment.dirty_params.clear() # <<< ADDED: Clear the set too
 
-    def __len__(self) -> int:
-        """Returns the number of segments in the song."""
-        return len(self.segments)
-
     def __repr__(self) -> str:
         dirty_flag = "*" if self.dirty else ""
         return f"Song(name='{self.name}{dirty_flag}', segments={len(self.segments)})"
