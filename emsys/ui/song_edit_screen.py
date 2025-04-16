@@ -6,9 +6,10 @@ Uses helpers for parameter editing and LED feedback.
 """
 import pygame
 import time
-from typing import List, Optional, Tuple, Any, Dict
+from typing import List, Optional, Tuple, Any, Dict, Set, Union # <<< Added Set, Union
 from enum import Enum, auto
-from dataclasses import asdict # <<< Import asdict
+from dataclasses import asdict
+import traceback # <<< Added traceback
 
 # Core components (Only Segment needed for type hinting, Song managed by service)
 from ..core.song import Segment # Keep direct access to Segment structure for type hinting
@@ -30,7 +31,8 @@ from ..services.song_service import SongService # <<< IMPORT SongService
 # Import colors and constants
 from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
                                    BLACK, WHITE, GREY, BLUE, FOCUS_BORDER_COLOR,
-                                   FEEDBACK_AREA_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT)
+                                   FEEDBACK_AREA_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT,
+                                   MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR) # <<< Added MULTI_SELECT colors
 
 # Define layout constants (Keep layout definitions here)
 LEFT_MARGIN = 15
@@ -74,7 +76,7 @@ class SongEditScreen(BaseScreen):
 
         # --- State ---
         # self.current_song removed - access via self.song_service.get_current_song()
-        self.selected_segment_index: Optional[int] = None
+        self.selected_segment_index: Optional[int] = None # Represents the 'anchor' in multi-select
         self.selected_parameter_key: Optional[str] = None
         self.focused_column: FocusColumn = FocusColumn.SEGMENT_LIST
         self.segment_scroll_offset: int = 0
@@ -82,8 +84,12 @@ class SongEditScreen(BaseScreen):
         self.feedback_message: Optional[Tuple[str, float, Tuple[int, int, int]]] = None
         self.feedback_duration: float = 2.0
         self.text_input_widget = TextInputWidget(app)
-        self.no_button_held: bool = False # <<< ADDED: Track NO button state
-        self.copied_segment_data: Optional[Dict[str, Any]] = None # <<< ADDED: Store copied segment
+        self.no_button_held: bool = False
+        # <<< MODIFIED: copied_segment_data can now be a list for multi-copy >>>
+        self.copied_segment_data: Optional[List[Dict[str, Any]]] = None
+        # <<< ADDED: State for multi-selection >>>
+        self.multi_select_indices: Set[int] = set()
+        # -----------------------------------------
 
         # Define parameter order and display names (kept here for drawing)
         self.parameter_keys: List[str] = [
@@ -125,8 +131,9 @@ class SongEditScreen(BaseScreen):
         self._adjust_parameter_scroll() # Adjust scroll based on selection
         self.clear_feedback()
         self.text_input_widget.cancel()
-        self.no_button_held = False # <<< ADDED: Reset state
-        self.copied_segment_data = None # <<< ADDED: Reset state
+        self.no_button_held = False
+        self.copied_segment_data = None
+        self.multi_select_indices.clear() # <<< ADDED: Clear multi-select
 
         if not current_song:
             self.set_feedback("No song loaded!", is_error=True, duration=5.0)
@@ -139,8 +146,9 @@ class SongEditScreen(BaseScreen):
         print(f"{self.__class__.__name__} is being deactivated.")
         self.text_input_widget.cancel()
         self.clear_feedback()
-        self.no_button_held = False # <<< ADDED: Reset state
-        self.copied_segment_data = None # <<< ADDED: Reset state
+        self.no_button_held = False
+        self.copied_segment_data = None
+        self.multi_select_indices.clear() # <<< ADDED: Clear multi-select
         # Optionally turn off specific LEDs here using led_handler if needed
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
@@ -174,17 +182,19 @@ class SongEditScreen(BaseScreen):
             return
 
         # --- Track NO Button State ---
-        # This needs to happen early to set the flag correctly
         if cc == mappings.NO_NAV_CC:
             if value == 127:
                 self.no_button_held = True
+                # Don't clear multi-select here, allow holding NO across actions
             elif value == 0:
                 self.no_button_held = False
+                self.multi_select_indices.clear() # <<< Clear multi-select on NO release
                 # NO release itself doesn't trigger actions below, so return
                 return
 
         # --- Handle Fader for Selection ---
         if cc == mappings.FADER_SELECT_CC:
+            self.multi_select_indices.clear() # <<< Clear multi-select on fader use
             self._handle_fader_selection(value)
             return # Fader handled
 
@@ -203,22 +213,23 @@ class SongEditScreen(BaseScreen):
             # --- Action Buttons ---
             if cc == mappings.SAVE_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._copy_selected_segment()
-                elif not self.no_button_held: # Explicitly check for normal case
+                    self._copy_multiple_segments() # <<< Use multi-copy method
+                elif not self.no_button_held:
                     self._save_current_song()
                 return # SAVE CC handled
 
             elif cc == mappings.CREATE_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._paste_copied_segment()
-                elif not self.no_button_held: # Explicitly check for normal case
+                    self._paste_multiple_segments() # <<< Use multi-paste method
+                elif not self.no_button_held:
                     self._add_new_segment()
                 return # CREATE CC handled
 
             elif cc == mappings.DELETE_CC:
-                # Check NO+DELETE combination if needed in future
-                if self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._delete_current_segment()
+                if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._delete_multiple_segments() # <<< Use multi-delete method
+                elif not self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._delete_current_segment() # Fallback to single delete if NO not held
                 elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
                     self._reset_or_copy_parameter()
                 return # DELETE CC handled
@@ -235,24 +246,32 @@ class SongEditScreen(BaseScreen):
 
             # --- Navigation Buttons ---
             elif cc == mappings.DOWN_NAV_CC:
-                if self.focused_column == FocusColumn.SEGMENT_LIST:
+                if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._change_selected_segment_multi(1) # <<< Use multi-select navigation
+                elif self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self.multi_select_indices.clear() # <<< Clear multi-select on normal nav
                     self._change_selected_segment(1)
-                else:
+                else: # Parameter column
                     self._change_selected_parameter_vertically(1)
                 return # DOWN handled
 
             elif cc == mappings.UP_NAV_CC:
-                if self.focused_column == FocusColumn.SEGMENT_LIST:
+                if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self._change_selected_segment_multi(-1) # <<< Use multi-select navigation
+                elif self.focused_column == FocusColumn.SEGMENT_LIST:
+                    self.multi_select_indices.clear() # <<< Clear multi-select on normal nav
                     self._change_selected_segment(-1)
-                else:
+                else: # Parameter column
                     self._change_selected_parameter_vertically(-1)
                 return # UP handled
 
             elif cc == mappings.RIGHT_NAV_CC:
+                self.multi_select_indices.clear() # <<< Clear multi-select on focus change
                 self._navigate_focus(1)
                 return # RIGHT handled
 
             elif cc == mappings.LEFT_NAV_CC:
+                self.multi_select_indices.clear() # <<< Clear multi-select on focus change
                 self._navigate_focus(-1)
                 return # LEFT handled
 
@@ -356,6 +375,7 @@ class SongEditScreen(BaseScreen):
     # --- Navigation and Selection ---
     def _handle_fader_selection(self, fader_value: int):
         """Handles selection changes via the fader using SongService state."""
+        # <<< NOTE: Fader clears multi-select (handled in handle_midi) >>>
         current_song = self.song_service.get_current_song()
         if not current_song: return
 
@@ -384,6 +404,7 @@ class SongEditScreen(BaseScreen):
 
     def _navigate_focus(self, direction: int):
         """Change focus between columns."""
+        # <<< NOTE: Focus change clears multi-select (handled in handle_midi) >>>
         if direction > 0 and self.focused_column == FocusColumn.SEGMENT_LIST:
             self.focused_column = FocusColumn.PARAMETER_DETAILS
         elif direction < 0 and self.focused_column == FocusColumn.PARAMETER_DETAILS:
@@ -395,7 +416,8 @@ class SongEditScreen(BaseScreen):
         self._update_leds()
 
     def _change_selected_segment(self, direction: int):
-        """Change the selected segment index and handle scrolling."""
+        """Change the selected segment index (single selection) and handle scrolling."""
+        # <<< NOTE: This is called when NO is NOT held, multi-select is cleared in handle_midi >>>
         current_song = self.song_service.get_current_song()
         if not current_song or not current_song.segments: return
 
@@ -408,6 +430,36 @@ class SongEditScreen(BaseScreen):
         self._adjust_segment_scroll()
         self.clear_feedback()
         self._update_leds()
+
+    # <<< NEW METHOD: Multi-select segment navigation >>>
+    def _change_selected_segment_multi(self, direction: int):
+        """Change the anchor segment index and add to multi-select set."""
+        current_song = self.song_service.get_current_song()
+        if not current_song or not current_song.segments: return
+
+        num_segments = len(current_song.segments)
+        current_anchor = self.selected_segment_index
+
+        # Initialize multi-select with current anchor if it's empty
+        if not self.multi_select_indices and current_anchor is not None:
+            self.multi_select_indices.add(current_anchor)
+
+        # Calculate new anchor index
+        if current_anchor is None:
+            new_anchor = 0 if direction > 0 else num_segments - 1
+        else:
+            new_anchor = (current_anchor + direction + num_segments) % num_segments
+
+        # Update anchor and add to multi-select set
+        self.selected_segment_index = new_anchor
+        self.multi_select_indices.add(new_anchor)
+
+        self._adjust_segment_scroll() # Scroll based on the new anchor
+        self.clear_feedback()
+        self._update_leds() # Update LEDs if needed
+        # Provide feedback about multi-selection
+        self.set_feedback(f"Multi-select: {len(self.multi_select_indices)} segments", duration=1.0)
+    # <<< END NEW METHOD >>>
 
     def _change_selected_parameter_vertically(self, direction: int):
         """Change the selected parameter key and handle scrolling."""
@@ -427,7 +479,7 @@ class SongEditScreen(BaseScreen):
         self._update_leds()
 
     def _adjust_segment_scroll(self):
-        """Adjust segment scroll offset based on selection."""
+        """Adjust segment scroll offset based on selection (anchor)."""
         if self.selected_segment_index is None: return
         max_visible = self._get_max_visible_segments()
         current_song = self.song_service.get_current_song()
@@ -513,7 +565,6 @@ class SongEditScreen(BaseScreen):
             self.set_feedback(f"Error adding segment: {e}", is_error=True)
             print(f"Error in _add_new_segment: {e}")
 
-    # <<< NEW METHOD: Insert segment with unique PGM values >>>
     def _insert_new_segment_unique_pgm(self):
         """
         Inserts a new segment after the selected one, copying parameters but
@@ -601,10 +652,9 @@ class SongEditScreen(BaseScreen):
             self.set_feedback(f"Error inserting unique segment: {e}", is_error=True)
             print(f"Error in _insert_new_segment_unique_pgm: {e}")
             traceback.print_exc()
-    # <<< END NEW METHOD >>>
 
     def _delete_current_segment(self):
-        """Deletes the currently selected segment via SongService."""
+        """Deletes the currently selected single segment via SongService."""
         if self.selected_segment_index is None:
             self.set_feedback("No segment selected", is_error=True)
             return
@@ -635,32 +685,50 @@ class SongEditScreen(BaseScreen):
             # Optionally reset selection on error?
             # self._reset_selection_on_error()
 
-    # --- NEW: Copy/Paste Helper Methods ---
-    def _copy_selected_segment(self):
-        """Copies the data of the currently selected segment."""
+    # --- Modified/New Copy/Paste/Delete Helper Methods ---
+
+    def _copy_multiple_segments(self):
+        """Copies data of selected segment(s) (single or multi) to clipboard."""
         current_song = self.song_service.get_current_song()
-        if not current_song or self.selected_segment_index is None:
+        if not current_song:
+            self.set_feedback("No song loaded", is_error=True)
+            return
+
+        indices_to_copy = []
+        if self.multi_select_indices:
+            # Sort indices to maintain order in the copied list
+            indices_to_copy = sorted(list(self.multi_select_indices))
+        elif self.selected_segment_index is not None:
+            indices_to_copy = [self.selected_segment_index]
+        else:
             self.set_feedback("No segment selected to copy", is_error=True)
             return
 
+        copied_list = []
         try:
-            segment_to_copy = current_song.get_segment(self.selected_segment_index)
-            # Use asdict to get a dictionary representation, excluding runtime flags
-            self.copied_segment_data = asdict(segment_to_copy)
-            # Remove runtime flags explicitly if asdict doesn't handle field(repr=False) etc.
-            self.copied_segment_data.pop('dirty', None)
-            self.copied_segment_data.pop('dirty_params', None)
+            for index in indices_to_copy:
+                segment_to_copy = current_song.get_segment(index)
+                segment_data = asdict(segment_to_copy)
+                segment_data.pop('dirty', None)
+                segment_data.pop('dirty_params', None)
+                copied_list.append(segment_data)
 
-            self.set_feedback(f"Copied Segment {self.selected_segment_index + 1}")
+            self.copied_segment_data = copied_list # Store as list always
+            count = len(copied_list)
+            plural = "s" if count > 1 else ""
+            self.set_feedback(f"Copied {count} segment{plural}")
+
         except (IndexError, Exception) as e:
             self.copied_segment_data = None
-            self.set_feedback(f"Error copying segment: {e}", is_error=True)
-            print(f"Error in _copy_selected_segment: {e}")
+            self.set_feedback(f"Error copying segment(s): {e}", is_error=True)
+            print(f"Error in _copy_multiple_segments: {e}")
+            traceback.print_exc()
 
-    def _paste_copied_segment(self):
-        """Pastes the copied segment data after the selected segment."""
+
+    def _paste_multiple_segments(self):
+        """Pastes the copied segment data (single or multiple) after the selected segment."""
         current_song = self.song_service.get_current_song()
-        if not self.copied_segment_data:
+        if not self.copied_segment_data: # Checks if list is None or empty
             self.set_feedback("Nothing copied to paste", is_error=True)
             return
         if not current_song:
@@ -668,33 +736,126 @@ class SongEditScreen(BaseScreen):
             return
 
         try:
-            # Create a new Segment instance from the copied data
-            pasted_segment = Segment(**self.copied_segment_data)
-            pasted_segment.dirty = True # Mark pasted segment as needing save initially
-
             insert_index = 0
             if self.selected_segment_index is not None:
                 insert_index = self.selected_segment_index + 1
-            elif current_song.segments: # If no selection but segments exist, paste at end
+            elif current_song.segments:
                  insert_index = len(current_song.segments)
 
-            # Add via service
-            success, message = self.song_service.add_segment_to_current(pasted_segment, index=insert_index)
+            pasted_count = 0
+            last_pasted_index = insert_index -1 # Keep track for final selection
 
+            for segment_data in self.copied_segment_data:
+                pasted_segment = Segment(**segment_data)
+                pasted_segment.dirty = True # Mark pasted segment as needing save
+
+                # Add via service at the current insert_index
+                success, message = self.song_service.add_segment_to_current(pasted_segment, index=insert_index)
+
+                if success:
+                    pasted_count += 1
+                    last_pasted_index = insert_index
+                    insert_index += 1 # Increment for the next paste
+                else:
+                    # Stop pasting if one fails
+                    self.set_feedback(f"Paste failed at segment {pasted_count + 1}: {message}", is_error=True)
+                    # Update UI state partially if needed
+                    self.selected_segment_index = last_pasted_index if last_pasted_index >= 0 else 0
+                    self._adjust_segment_scroll()
+                    self._ensure_parameter_selection()
+                    self._update_leds()
+                    return # Exit paste operation
+
+            # If all pastes succeeded
+            plural = "s" if pasted_count > 1 else ""
+            self.set_feedback(f"Pasted {pasted_count} segment{plural} at {last_pasted_index - pasted_count + 2}")
+            # Select the last pasted segment
+            self.selected_segment_index = last_pasted_index
+            self._adjust_segment_scroll()
+            self._ensure_parameter_selection()
+            self._update_leds()
+
+        except (TypeError, Exception) as e:
+            self.set_feedback(f"Error pasting segment(s): {e}", is_error=True)
+            print(f"Error in _paste_multiple_segments: {e}")
+            traceback.print_exc()
+
+
+    def _delete_multiple_segments(self):
+        """Deletes the selected segment(s) (single or multi) via SongService."""
+        current_song = self.song_service.get_current_song()
+        if not current_song:
+            self.set_feedback("No song loaded", is_error=True)
+            return
+
+        indices_to_delete = set()
+        if self.multi_select_indices:
+            indices_to_delete = self.multi_select_indices.copy() # Use the set
+        elif self.selected_segment_index is not None:
+            indices_to_delete.add(self.selected_segment_index)
+        else:
+            self.set_feedback("No segment selected to delete", is_error=True)
+            return
+
+        if not indices_to_delete:
+             self.set_feedback("No segment selected to delete", is_error=True)
+             return
+
+        # Sort indices in descending order to avoid index shifting issues
+        sorted_indices = sorted(list(indices_to_delete), reverse=True)
+        original_anchor = self.selected_segment_index # Remember anchor before deletion
+        deleted_count = 0
+        first_deleted_index = sorted_indices[0] # Highest index deleted
+
+        for index_to_delete in sorted_indices:
+            success, message = self.song_service.remove_segment_from_current(index_to_delete)
             if success:
-                self.set_feedback(f"Pasted segment at {insert_index + 1}")
-                # Select the newly added segment and update UI
-                self.selected_segment_index = insert_index
+                deleted_count += 1
+            else:
+                # Stop deleting if one fails
+                self.set_feedback(f"Delete failed at segment {index_to_delete + 1}: {message}", is_error=True)
+                # Update UI state partially if needed (tricky after partial delete)
+                # Try to select the segment before the first one we attempted to delete
+                self.selected_segment_index = max(0, first_deleted_index - deleted_count) if current_song.segments else None
+                self.multi_select_indices.clear() # Clear multi-select state
                 self._adjust_segment_scroll()
                 self._ensure_parameter_selection()
                 self._update_leds()
-            else:
-                self.set_feedback(message, is_error=True)
+                return # Exit delete operation
 
-        except (TypeError, Exception) as e:
-            self.set_feedback(f"Error pasting segment: {e}", is_error=True)
-            print(f"Error in _paste_copied_segment: {e}")
-    # --- END Copy/Paste ---
+        # If all deletions succeeded
+        plural = "s" if deleted_count > 1 else ""
+        self.set_feedback(f"Deleted {deleted_count} segment{plural}")
+
+        # Clear multi-select state *after* successful deletion
+        self.multi_select_indices.clear()
+
+        # Update selection logic after deletion
+        current_song = self.song_service.get_current_song() # Re-get potentially updated song
+        num_segments_after = len(current_song.segments) if current_song else 0
+
+        if num_segments_after == 0:
+            self.selected_segment_index = None
+            self.selected_parameter_key = None
+            self.focused_column = FocusColumn.SEGMENT_LIST
+        else:
+            # Try to select the segment that was just before the lowest deleted index
+            # Or the segment that was at the original anchor position if it still exists
+            lowest_deleted_index = sorted_indices[-1]
+            new_selection_index = min(lowest_deleted_index, num_segments_after - 1)
+            # Alternative: try to keep anchor if possible
+            # if original_anchor is not None and original_anchor < num_segments_after:
+            #     new_selection_index = original_anchor
+            # else: # Fallback if anchor was deleted or out of bounds
+            #     new_selection_index = min(lowest_deleted_index, num_segments_after - 1)
+
+            self.selected_segment_index = max(0, new_selection_index) # Ensure it's not negative
+
+        self._adjust_segment_scroll()
+        self._ensure_parameter_selection()
+        self._update_leds()
+
+    # --- END Modified/New Helpers ---
 
     def _reset_selection_on_error(self):
         """Resets selection state after an error."""
@@ -770,8 +931,8 @@ class SongEditScreen(BaseScreen):
             pygame.draw.rect(screen, FOCUS_BORDER_COLOR, param_detail_rect, COLUMN_BORDER_WIDTH)
 
 
-    def _draw_segment_list(self, screen, area_rect: pygame.Rect, current_song): # <<< ADD current_song param
-        """Draws the scrollable segment list."""
+    def _draw_segment_list(self, screen, area_rect: pygame.Rect, current_song):
+        """Draws the scrollable segment list, highlighting multi-select."""
         if not current_song:
              no_song_surf = self.font.render("No Song Loaded", True, ERROR_COLOR)
              no_song_rect = no_song_surf.get_rect(center=area_rect.center)
@@ -795,24 +956,38 @@ class SongEditScreen(BaseScreen):
         text_y = area_rect.top + LIST_TOP_PADDING
         for i in range(start_index, end_index):
             seg = current_song.segments[i]
-            is_selected = (i == self.selected_segment_index)
+            is_anchor = (i == self.selected_segment_index)
+            is_multi_selected = i in self.multi_select_indices
             is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
-            color = HIGHLIGHT_COLOR if (is_selected and is_focused) else WHITE
-            dirty_flag = "*" if seg.dirty else "" # Check segment's own dirty flag
 
-            # <<< MODIFIED: Format segment text with number and program changes >>>
-            seg_num_str = f"{i + 1:02d}" # Zero-pad segment number
+            # Determine background and text color based on selection state
+            bg_color = None
+            text_color = WHITE
+            if is_focused:
+                if is_anchor and is_multi_selected:
+                    bg_color = MULTI_SELECT_ANCHOR_COLOR # Distinct color for anchor in multi-select
+                    text_color = BLACK # Ensure readability on bright background
+                elif is_multi_selected:
+                    bg_color = MULTI_SELECT_COLOR # Color for other multi-selected items
+                    text_color = BLACK
+                elif is_anchor: # Single selection or anchor before multi-select starts
+                    bg_color = GREY # Original single-select highlight
+                    text_color = HIGHLIGHT_COLOR # Keep original text color for single select? Or BLACK? Let's try HIGHLIGHT_COLOR
+            # If not focused, or not selected, default text_color is WHITE, bg_color is None
+
+            dirty_flag = "*" if seg.dirty else ""
+            seg_num_str = f"{i + 1:02d}"
             prog1_str = value_to_elektron_format(seg.program_message_1)
             prog2_str = value_to_elektron_format(seg.program_message_2)
             seg_text = f"{seg_num_str}{dirty_flag} {prog1_str}/{prog2_str}"
-            # <<< END MODIFICATION >>>
 
-            seg_surf = self.font_small.render(seg_text, True, color)
+            seg_surf = self.font_small.render(seg_text, True, text_color)
             seg_rect = seg_surf.get_rect(topleft=(area_rect.left + 10, text_y))
 
-            if is_selected and is_focused:
+            if bg_color:
+                # Draw background highlight rectangle
                 bg_rect = pygame.Rect(area_rect.left + 2, text_y - 2, area_rect.width - 4, LINE_HEIGHT)
-                pygame.draw.rect(screen, GREY, bg_rect)
+                pygame.draw.rect(screen, bg_color, bg_rect)
 
             screen.blit(seg_surf, seg_rect)
             text_y += LINE_HEIGHT

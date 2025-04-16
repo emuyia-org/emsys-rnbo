@@ -24,23 +24,25 @@ BUTTON_REPEAT_DELAY_MS = 500
 # Interval in milliseconds between repeated actions
 BUTTON_REPEAT_INTERVAL_MS = 25
 
-# --- Color Definitions ---
+# --- Colors ---
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
+GREY = (100, 100, 100)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
 YELLOW = (255, 255, 0)
-CYAN = (0, 255, 255)
-MAGENTA = (255, 0, 255)
-GREY = (128, 128, 128)
+ORANGE = (255, 165, 0)
 
 # UI Specific Colors
-HIGHLIGHT_COLOR = GREEN         # For selected items in lists
-FEEDBACK_COLOR = BLUE           # For general feedback messages
-ERROR_COLOR = RED               # For error messages
-FOCUS_BORDER_COLOR = BLUE       # For indicating the focused UI column/area
-# Add other colors as needed
+HIGHLIGHT_COLOR = YELLOW # For selected text/items
+FOCUS_BORDER_COLOR = BLUE # Border around the focused column/widget
+ERROR_COLOR = RED
+FEEDBACK_COLOR = GREEN
+MULTI_SELECT_COLOR = (180, 180, 255) # Light blue/purple for multi-selected items
+MULTI_SELECT_ANCHOR_COLOR = (100, 100, 255) # Darker blue/purple for the anchor in multi-select
+
+# --- UI Layout ---
 
 
 # --- File Storage Settings ---
