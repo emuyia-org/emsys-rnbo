@@ -239,6 +239,60 @@ class SongService:
             self._status_callback(msg)
             return False, msg
 
+    def duplicate_song(self, original_basename: str, new_basename: str) -> Tuple[bool, str]:
+        """
+        Duplicates a song file by loading the original, changing its name, and saving it.
+
+        Args:
+            original_basename: The basename of the song to duplicate.
+            new_basename: The desired basename for the duplicated song.
+
+        Returns:
+            A tuple (success: bool, message: str).
+        """
+        self._status_callback(f"Attempting to duplicate '{original_basename}' as '{new_basename}'...")
+
+        # Check if the new name already exists
+        if new_basename in self.list_song_names():
+            msg = f"Cannot duplicate: Name '{new_basename}' already exists."
+            self._status_callback(msg)
+            return False, msg
+
+        # Load the original song data
+        original_song = file_io.load_song(original_basename)
+        if not original_song:
+            msg = f"Cannot duplicate: Failed to load original song '{original_basename}'."
+            self._status_callback(msg)
+            return False, msg
+
+        try:
+            # Create a new Song object for the duplicate
+            # Important: Create a new instance, don't modify the original if it might be loaded
+            # Use the loaded data but change the name
+            duplicate_song = Song.from_dict(original_song.to_dict()) # Create from dict to ensure clean state
+            duplicate_song.name = new_basename # Set the new name
+            duplicate_song.dirty = True # Mark the new duplicate as needing saving
+
+            # Save the duplicated song
+            save_success = file_io.save_song(duplicate_song)
+
+            if save_success:
+                # file_io.save_song resets dirty flag on the saved object
+                msg = f"Successfully duplicated '{original_basename}' to '{new_basename}'."
+                self._status_callback(msg)
+                return True, msg
+            else:
+                # file_io.save_song prints its own error
+                msg = f"Failed to save duplicated song '{new_basename}'."
+                self._status_callback(msg)
+                return False, msg
+        except Exception as e:
+            msg = f"Error during duplication of '{original_basename}': {e}"
+            self._status_callback(msg)
+            traceback.print_exc()
+            return False, msg
+
+
     # --- Current Song Segment/Parameter Modification ---
 
     def add_segment_to_current(self, segment: Segment, index: Optional[int] = None) -> Tuple[bool, str]:

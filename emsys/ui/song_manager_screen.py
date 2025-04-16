@@ -65,6 +65,7 @@ class SongManagerScreen(BaseScreen):
         self.is_renaming: bool = False
         self.is_creating: bool = False
         self.title_rect = pygame.Rect(0,0,0,0)
+        self.no_button_held: bool = False # <<< ADDED: Track NO button state
         # -------------------------
 
     def init(self):
@@ -77,6 +78,7 @@ class SongManagerScreen(BaseScreen):
         self.prompts.deactivate()
         self.is_renaming = False
         self.is_creating = False
+        self.no_button_held = False # <<< ADDED: Reset NO button state on init
         # Update title rect
         title_text = "Song Manager"
         title_surf = self.font_large.render(title_text, True, WHITE)
@@ -92,6 +94,7 @@ class SongManagerScreen(BaseScreen):
         self.clear_feedback()
         self.is_renaming = False
         self.is_creating = False
+        self.no_button_held = False # <<< ADDED: Reset NO button state on cleanup
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
         """Display a feedback message."""
@@ -117,7 +120,20 @@ class SongManagerScreen(BaseScreen):
         cc = msg.control
         value = msg.value
 
-        # --- Handle Text Input Mode FIRST ---
+        # --- Handle NO Button State FIRST (Press/Release) ---
+        # We need to track this regardless of other states (prompts, text input)
+        # so the flag is correct when CREATE is pressed.
+        if cc == mappings.NO_NAV_CC:
+            if value == 127:
+                self.no_button_held = True
+                # print("NO button pressed") # Debug
+            elif value == 0:
+                self.no_button_held = False
+                # print("NO button released") # Debug
+            # Allow NO press/release to potentially be handled by prompts/widgets below
+            # but ensure the flag is set/unset correctly here.
+
+        # --- Handle Text Input Mode ---
         if self.text_input_widget.is_active:
             if value == 127: # Only handle button presses
                 status = self.text_input_widget.handle_input(cc)
@@ -127,7 +143,7 @@ class SongManagerScreen(BaseScreen):
                 elif status == TextInputStatus.CANCELLED:
                     if self.is_creating: self._cancel_song_create()
                     elif self.is_renaming: self._cancel_song_rename()
-            return
+            return # Return after handling text input or NO button state update
 
         # --- Handle Confirmation Prompts ---
         if self.prompts.is_active():
@@ -148,19 +164,23 @@ class SongManagerScreen(BaseScreen):
                     if action == 'confirm': self._save_current_and_proceed_to_create()
                     elif action == 'discard': self._discard_changes_and_proceed_to_create()
                     elif action == 'cancel': self._cancel_create_due_to_unsaved()
-            return
+            return # Return after handling prompt input or NO button state update
 
         # --- Handle Fader Selection ---
         if cc == mappings.FADER_SELECT_CC:
             self._handle_fader_selection(value)
-            return
+            return # Return after handling fader or NO button state update
 
-        # --- Normal Mode (Button Presses Only) ---
-        if value != 127: return
+        # --- Normal Mode (Button Presses Only, value == 127) ---
+        if value != 127: return # Ignore releases here (except NO handled above)
 
         # --- Action Buttons ---
         if cc == mappings.CREATE_CC:
-            self._initiate_create_new_song()
+            # <<< MODIFIED: Check NO button state for duplication >>>
+            if self.no_button_held:
+                self._initiate_duplicate_selected_song()
+            else:
+                self._initiate_create_new_song()
         elif cc == mappings.RENAME_CC:
             self._start_song_rename()
         elif cc == mappings.DELETE_CC:
@@ -514,6 +534,52 @@ class SongManagerScreen(BaseScreen):
         if success:
             self.set_feedback(message)
             self._refresh_song_list() # Update list display
+        else:
+            self.set_feedback(message, is_error=True)
+
+
+    # --- NEW: Duplicate Song Logic ---
+    def _initiate_duplicate_selected_song(self):
+        """Handles the logic to duplicate the selected song."""
+        if self.selected_index is None or not self.song_list:
+            self.set_feedback("No song selected to duplicate", is_error=True)
+            return
+
+        try:
+            original_name = self.song_list[self.selected_index]
+        except IndexError:
+            self.set_feedback("Selection error.", is_error=True)
+            return
+
+        # Find a unique name for the duplicate
+        base_duplicate_name = f"{original_name}" # Start with original name
+        new_name = base_duplicate_name
+        counter = 1
+        existing_songs = self.song_service.list_song_names()
+        while new_name in existing_songs:
+            new_name = f"{base_duplicate_name} {counter}"
+            counter += 1
+            if counter > 99: # Safety break
+                 self.set_feedback(f"Could not find unique name for '{original_name}'.", is_error=True)
+                 return
+
+        print(f"Initiating duplication: '{original_name}' -> '{new_name}'")
+        self.set_feedback(f"Duplicating '{original_name}'...")
+        pygame.display.flip() # Show feedback immediately
+
+        success, message = self.song_service.duplicate_song(original_name, new_name)
+
+        if success:
+            self.set_feedback(message)
+            # Find the index of the new song to select it
+            old_selected_index = self.selected_index
+            self._refresh_song_list()
+            try:
+                self.selected_index = self.song_list.index(new_name)
+                self._adjust_scroll()
+            except ValueError:
+                print(f"Warning: Could not find duplicated song '{new_name}' in list after refresh.")
+                self.selected_index = old_selected_index # Fallback
         else:
             self.set_feedback(message, is_error=True)
 
