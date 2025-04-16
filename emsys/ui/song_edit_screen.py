@@ -467,6 +467,7 @@ class SongEditScreen(BaseScreen):
 
         try:
             new_segment = Segment()
+            new_segment.dirty = True # <<< ADDED: Mark the new segment itself as dirty
             insert_index = 0
             source_segment = None
 
