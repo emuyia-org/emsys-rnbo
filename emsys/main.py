@@ -35,15 +35,16 @@ RED = settings_module.RED
 BUTTON_REPEAT_DELAY_S = getattr(settings_module, 'BUTTON_REPEAT_DELAY_MS', 500) / 1000.0
 BUTTON_REPEAT_INTERVAL_S = getattr(settings_module, 'BUTTON_REPEAT_INTERVAL_MS', 100) / 1000.0
 
-# --- Import specific CCs and non-repeatable set ---
-from emsys.config.mappings import NEXT_CC, PREV_CC, NON_REPEATABLE_CCS
-
 # --- Refactored Imports ---
 from emsys.services.midi_service import MidiService
 from emsys.services.song_service import SongService # <<< ADDED SongService
+from emsys.services.osc_service import OSCService # <<< ADDED OSCService
 from emsys.ui.screen_manager import ScreenManager
 from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
 # --------------------------
+
+# --- Import specific CCs and non-repeatable set ---
+from emsys.config.mappings import NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC # <<< ADDED KNOB_A1_CC
 
 # Main Application Class
 class App:
@@ -68,6 +69,9 @@ class App:
         print("Instantiating SongService...")
         self.song_service = SongService(status_callback=self.notify_status) # <<< INSTANTIATE SongService
         print("SongService instantiated.")
+        print("Instantiating OSCService...") # <<< ADDED
+        self.osc_service = OSCService(status_callback=self.notify_status) # <<< INSTANTIATE OSCService
+        print("OSCService instantiated.") # <<< ADDED
         # --- Log initial song state after SongService init ---
         initial_song_name = self.song_service.get_current_song_name()
         if initial_song_name:
@@ -214,14 +218,26 @@ class App:
             value = msg.value
             # print(f"Received CC: control={control}, value={value}") # Debugging
 
+            # --- Handle Specific Controls (e.g., Knobs) FIRST ---
+            if control == KNOB_A1_CC:
+                # Define the full OSC path for the parameter
+                rnbo_param_path = "p_obj-6/tempo/Transport.Tempo"
+
+                # Send the raw MIDI value (0-127) using send_rnbo_param
+                # Assuming the RNBO parameter handles this range or normalization internally
+                self.osc_service.send_rnbo_param(rnbo_param_path, value)
+
+                # Optionally, dispatch to screen as well if needed for UI feedback
+                # self._dispatch_action(msg)
+                return # Handled
+
             # --- Handle Button Release (value == 0) ---
             if value == 0:
                 if control in self.pressed_buttons:
                     del self.pressed_buttons[control]
                 # Dispatch release messages so screens can react (e.g., update held state)
                 self._dispatch_action(msg)
-                # <<< REMOVED return statement >>>
-                # return # Stop processing here for releases # <<< REMOVED
+                return # Stop processing here for releases
 
             # --- Handle Button Press (value == 127) ---
             elif value == 127:
@@ -352,11 +368,12 @@ class App:
         if active_screen:
             screen_name = active_screen.__class__.__name__
         midi_status = self.midi_service.get_status_string()
+        osc_status = self.osc_service.get_status_string() # <<< ADDED OSC Status
         # Include basic song statustus)
         song_status = f"Song: {self.song_service.get_current_song_name() or 'None'}"
         if self.song_service.is_current_song_dirty(): song_status += "*"
 
-        combined_status = f"Screen: {screen_name} | {midi_status} | {song_status}"
+        combined_status = f"Screen: {screen_name} | {midi_status} | {osc_status} | {song_status}" # <<< UPDATED
         # Correct the typo on the next line
         self.notify_status(combined_status)
 
@@ -382,6 +399,9 @@ class App:
         self._initial_led_update() # Re-use to turn off LEDs
         time.sleep(0.1)
         self.midi_service.close_ports()
+
+        # Cleanup OSC service # <<< ADDED
+        self.osc_service.stop() # <<< ADDED
 
         # Quit Pygame
         pygame.font.quit()
