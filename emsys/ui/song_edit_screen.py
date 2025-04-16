@@ -701,7 +701,14 @@ class SongEditScreen(BaseScreen):
             is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
             color = HIGHLIGHT_COLOR if (is_selected and is_focused) else WHITE
             dirty_flag = "*" if seg.dirty else "" # Check segment's own dirty flag
-            seg_text = f"{i + 1}{dirty_flag}"
+
+            # <<< MODIFIED: Format segment text with number and program changes >>>
+            seg_num_str = f"{i + 1:02d}" # Zero-pad segment number
+            prog1_str = value_to_elektron_format(seg.program_message_1)
+            prog2_str = value_to_elektron_format(seg.program_message_2)
+            seg_text = f"{seg_num_str}{dirty_flag} {prog1_str}/{prog2_str}"
+            # <<< END MODIFICATION >>>
+
             seg_surf = self.font_small.render(seg_text, True, color)
             seg_rect = seg_surf.get_rect(topleft=(area_rect.left + 10, text_y))
 
