@@ -17,12 +17,12 @@ from emsys.config import settings
 class SongService:
     """Manages the lifecycle and state of the current song."""
 
-    def __init__(self, status_callback: Optional[callable] = None):
+    def __init__(self, status_callback=None):
         """Initialize the SongService."""
         self.current_song: Optional[Song] = None
         self.last_loaded_song_name: Optional[str] = None # Store the name used for loading/saving
         self._status_callback = status_callback if status_callback else lambda msg: print(f"SongService Status: {msg}")
-        self._load_last_song_preference() # Load the name preference on init
+        self._initialize_with_last_song() # Load preference and attempt load
 
     # --- Current Song State Management ---
 
@@ -65,7 +65,9 @@ class SongService:
         Returns:
             A tuple (success: bool, message: str). Success is True if loaded.
         """
-        if self.is_current_song_dirty():
+        # Allow loading even if dirty *if* it's the initial load during __init__
+        # Check if current_song is None to detect initial state
+        if self.current_song is not None and self.is_current_song_dirty():
             # This case should ideally be handled by the UI asking the user first.
             # If called directly, we prevent overwriting dirty data.
             msg = f"Cannot load '{basename}'. Current song '{self.current_song.name}' has unsaved changes."
@@ -291,29 +293,42 @@ class SongService:
         else:
              self._status_callback("No current song or changes to discard.")
 
-
     # --- Last Song Preference (Simple text file storage) ---
-    # Keeps track of the *name* of the last loaded song
 
-    def _get_last_song_file_path(self) -> str:
-        """Gets the path to the file storing the last loaded song name."""
-        # Assuming PROJECT_ROOT is accessible via settings
-        return os.path.join(settings.PROJECT_ROOT, "last_song.txt")
-
-    def _load_last_song_preference(self):
-        """Loads the last song name preference from the file."""
+    def _initialize_with_last_song(self):
+        """Loads the last song name preference and attempts to load the song."""
         last_song_file = self._get_last_song_file_path()
+        preferred_name = None
         if os.path.exists(last_song_file):
             try:
                 with open(last_song_file, "r") as f:
                     last_song_basename = f.read().strip()
                 if last_song_basename:
-                    # Only store the name preference, actual loading happens via load_song_by_name
                     print(f"SongService: Last session preference: '{last_song_basename}'")
-                    # We could try loading it here, but let's keep it lazy
-                    # self.load_song_by_name(last_song_basename)
+                    preferred_name = last_song_basename
+                else:
+                    print("SongService: Last session preference file was empty.")
             except Exception as e:
-                print(f"SongService: Error loading last song name preference: {e}")
+                print(f"SongService: Error reading last song name preference: {e}")
+        else:
+            print("SongService: No last song preference file found.")
+
+        if preferred_name:
+            print(f"SongService: Attempting initial load of '{preferred_name}'...")
+            # Call load_song_by_name, bypassing dirty check logic for init
+            success, msg = self.load_song_by_name(preferred_name)
+            if not success:
+                print(f"SongService: Initial load of '{preferred_name}' failed: {msg}")
+                # Optionally clear the preference if the file is missing/corrupt?
+                # self._save_last_song_preference(None)
+        else:
+            # No preference found or error reading it
+            pass # No initial song to load
+
+    def _get_last_song_file_path(self) -> str:
+        """Gets the path to the file storing the last loaded song name."""
+        # Assuming PROJECT_ROOT is accessible via settings
+        return os.path.join(settings.PROJECT_ROOT, "last_song.txt")
 
     def _save_last_song_preference(self, song_name: Optional[str]):
         """Saves the current song name preference to the file."""
@@ -329,3 +344,16 @@ class SongService:
                 # print("SongService: Removed last song name preference file.")
         except Exception as e:
             print(f"SongService: Error saving last song name preference: {e}")
+
+    def get_preferred_song_name(self) -> Optional[str]:
+        """Reads and returns the song name stored in the preference file, or None."""
+        last_song_file = self._get_last_song_file_path()
+        if os.path.exists(last_song_file):
+            try:
+                with open(last_song_file, "r") as f:
+                    last_song_basename = f.read().strip()
+                return last_song_basename if last_song_basename else None
+            except Exception as e:
+                print(f"SongService: Error reading preference file for get_preferred_song_name: {e}")
+                return None
+        return None

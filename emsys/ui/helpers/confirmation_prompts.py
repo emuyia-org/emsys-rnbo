@@ -140,11 +140,14 @@ class ConfirmationPrompts:
         title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
         surface.blit(title_surf, title_rect)
 
-        # Get current song name from app state if possible
+        # Get current song name from app's song_service
         song_name = "Error"
-        current_song = getattr(self.app, 'current_song', None)
-        if current_song and hasattr(current_song, 'name'):
-            song_name = current_song.name
+        try:
+            # Access song_service through the app reference
+            song_name = self.app.song_service.get_current_song_name() or "None"
+        except AttributeError:
+            print("Error: Could not access song_service via app reference in ConfirmationPrompts.")
+            song_name = "Lookup Error" # Indicate a different error
 
         song_surf = self.font.render(f"in '{song_name}'", True, settings.WHITE)
         song_rect = song_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))

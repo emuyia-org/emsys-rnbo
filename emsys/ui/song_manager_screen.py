@@ -134,14 +134,15 @@ class SongManagerScreen(BaseScreen):
             action = self.prompts.handle_input(cc, value)
             if action:
                 prompt_type = self.prompts.active_prompt
-                self.prompts.deactivate()
+                prompt_data = self.prompts.prompt_data # <<< CAPTURE data before deactivating
+                self.prompts.deactivate() # Deactivate prompt
 
                 if prompt_type == PromptType.DELETE_SONG:
-                    if action == 'confirm': self._perform_delete()
+                    if action == 'confirm': self._perform_delete(prompt_data) # Pass data
                     elif action == 'cancel': self.set_feedback("Delete cancelled.")
                 elif prompt_type == PromptType.UNSAVED_LOAD:
-                    if action == 'confirm': self._save_current_and_load_selected()
-                    elif action == 'discard': self._discard_changes_and_load_selected()
+                    if action == 'confirm': self._save_current_and_load_selected(prompt_data) # Pass data
+                    elif action == 'discard': self._discard_changes_and_load_selected(prompt_data) # Pass data
                     elif action == 'cancel': self._cancel_load_due_to_unsaved()
                 elif prompt_type == PromptType.UNSAVED_CREATE:
                     if action == 'confirm': self._save_current_and_proceed_to_create()
@@ -292,9 +293,9 @@ class SongManagerScreen(BaseScreen):
         else:
             self.set_feedback(message, is_error=True) # Use error message from service
 
-    def _save_current_and_load_selected(self):
+    def _save_current_and_load_selected(self, basename_to_load: str): # <<< ACCEPT argument
         """Handles 'Save' action: save via SongService, then load."""
-        basename_to_load = self.prompts.prompt_data
+        # basename_to_load = self.prompts.prompt_data # <<< REMOVED - Use argument
 
         if not basename_to_load:
             self.set_feedback("Error: State invalid for save/load.", is_error=True)
@@ -312,9 +313,9 @@ class SongManagerScreen(BaseScreen):
         else:
             self.set_feedback(f"Save failed: {save_message} Load cancelled.", is_error=True)
 
-    def _discard_changes_and_load_selected(self):
+    def _discard_changes_and_load_selected(self, basename_to_load: str): # <<< ACCEPT argument
         """Handles 'Discard' action: discard via SongService, then load."""
-        basename_to_load = self.prompts.prompt_data
+        # basename_to_load = self.prompts.prompt_data # <<< REMOVED - Use argument
 
         if not basename_to_load:
             self.set_feedback("Error: No target song to load.", is_error=True)
@@ -500,9 +501,9 @@ class SongManagerScreen(BaseScreen):
         except IndexError:
             self.set_feedback("Selection error.", is_error=True)
 
-    def _perform_delete(self):
+    def _perform_delete(self, song_to_delete: Optional[str]): # <<< ACCEPT argument
         """Performs the actual deletion via SongService after confirmation."""
-        song_to_delete = self.prompts.prompt_data
+        # song_to_delete = self.prompts.prompt_data # <<< REMOVED - Use argument
         if not isinstance(song_to_delete, str):
              self.set_feedback("Error: Invalid state for delete.", is_error=True)
              return
@@ -583,19 +584,26 @@ class SongManagerScreen(BaseScreen):
          for i in range(start_index, end_index):
              song_name = self.song_list[i]
              is_selected = (i == self.selected_index)
-             text_color = HIGHLIGHT_COLOR if is_selected else WHITE
-             is_loaded = current_song_name and current_song_name == song_name # Check name
+             # Use BLACK for selected text, else WHITE.
+             text_color = BLACK if is_selected else WHITE
+             is_loaded = current_song_name and current_song_name == song_name
 
-             prefix = "*> " if is_loaded else "   "
-             item_text = f"{prefix}{song_name}"
-             item_surf = self.font.render(item_text, True, text_color)
-             item_rect = item_surf.get_rect(topleft=(area_rect.left + 5, text_y))
-
+             # Draw selection background only if selected.
              if is_selected:
                  bg_rect = pygame.Rect(area_rect.left, text_y - 2, area_rect.width, LINE_HEIGHT)
                  pygame.draw.rect(screen, GREY, bg_rect)
 
+             # Draw the song name text.
+             item_text = song_name
+             item_surf = self.font.render(item_text, True, text_color)
+             item_rect = item_surf.get_rect(topleft=(area_rect.left + LIST_ITEM_INDENT, text_y))
              screen.blit(item_surf, item_rect)
+
+             # Draw blue outline if the song is loaded.
+             if is_loaded:
+                 outline_rect = pygame.Rect(area_rect.left, text_y - 2, area_rect.width, LINE_HEIGHT)
+                 pygame.draw.rect(screen, BLUE, outline_rect, 2)
+
              text_y += LINE_HEIGHT
 
 

@@ -80,7 +80,6 @@ class SongEditScreen(BaseScreen):
         self.parameter_scroll_offset: int = 0
         self.feedback_message: Optional[Tuple[str, float, Tuple[int, int, int]]] = None
         self.feedback_duration: float = 2.0
-        self.exit_prompt_active: bool = False
         self.text_input_widget = TextInputWidget(app)
 
         # Define parameter order and display names (kept here for drawing)
@@ -117,7 +116,6 @@ class SongEditScreen(BaseScreen):
 
         # Reset screen-specific state
         self.focused_column = FocusColumn.SEGMENT_LIST
-        self.exit_prompt_active = False
         self.segment_scroll_offset = 0
         self.parameter_scroll_offset = 0
         self._adjust_segment_scroll() # Adjust scroll based on selection
@@ -134,7 +132,6 @@ class SongEditScreen(BaseScreen):
         """Called when the screen becomes inactive."""
         super().cleanup()
         print(f"{self.__class__.__name__} is being deactivated.")
-        self.exit_prompt_active = False
         self.text_input_widget.cancel()
         self.clear_feedback()
         # Optionally turn off specific LEDs here using led_handler if needed
@@ -169,14 +166,6 @@ class SongEditScreen(BaseScreen):
             # ... (text input handling logic - currently none needed here)
             return
 
-        # --- Handle Exit Confirmation Prompt ---
-        if self.exit_prompt_active:
-            if value == 127:
-                if cc == mappings.SAVE_CC: self._save_and_exit()
-                elif cc == mappings.DELETE_CC: self._discard_and_exit()
-                elif cc == mappings.NO_NAV_CC: self._cancel_exit()
-            return
-
         # --- Handle Fader for Selection ---
         if cc == mappings.FADER_SELECT_CC:
             self._handle_fader_selection(value)
@@ -208,22 +197,24 @@ class SongEditScreen(BaseScreen):
                 self._reset_or_copy_parameter()
         # --- Navigation Buttons ---
         elif cc == mappings.DOWN_NAV_CC:
-            if self.focused_column == FocusColumn.SEGMENT_LIST: self._change_selected_segment(1)
-            else: self._change_selected_parameter_vertically(1)
+            if self.focused_column == FocusColumn.SEGMENT_LIST: 
+                self._change_selected_segment(1)
+            else: 
+                self._change_selected_parameter_vertically(1)
         elif cc == mappings.UP_NAV_CC:
-            if self.focused_column == FocusColumn.SEGMENT_LIST: self._change_selected_segment(-1)
-            else: self._change_selected_parameter_vertically(-1)
+            if self.focused_column == FocusColumn.SEGMENT_LIST: 
+                self._change_selected_segment(-1)
+            else: 
+                self._change_selected_parameter_vertically(-1)
         elif cc == mappings.RIGHT_NAV_CC:
             self._navigate_focus(1)
         elif cc == mappings.LEFT_NAV_CC:
             self._navigate_focus(-1)
         # --- Parameter Modification Buttons (YES/NO) ---
         elif cc == mappings.YES_NAV_CC:
-            if self.focused_column == FocusColumn.PARAMETER_DETAILS:
-                self._modify_parameter_via_button(1)
+            self._modify_parameter_via_button(1)
         elif cc == mappings.NO_NAV_CC:
-             if self.focused_column == FocusColumn.PARAMETER_DETAILS:
-                self._modify_parameter_via_button(-1)
+            self._modify_parameter_via_button(-1)
 
     # --- Helper to update LEDs using the handler ---
     def _update_leds(self):
@@ -238,9 +229,6 @@ class SongEditScreen(BaseScreen):
     # --- Parameter Modification ---
     def _modify_parameter(self, direction: int):
         """Common logic to modify parameter using the editor and update via SongService."""
-        if self.focused_column != FocusColumn.PARAMETER_DETAILS:
-            return
-
         current_song = self.song_service.get_current_song()
         if not current_song or self.selected_segment_index is None or self.selected_parameter_key is None:
             self.set_feedback("Cannot modify: Invalid selection.", is_error=True)
@@ -418,7 +406,6 @@ class SongEditScreen(BaseScreen):
         """Saves the current song via SongService."""
         success, message = self.song_service.save_current_song() # <<< Use SongService
         self.set_feedback(message, is_error=not success)
-        return success # Return success status
 
     def _add_new_segment(self):
         """Adds a new segment via SongService."""
@@ -525,42 +512,14 @@ class SongEditScreen(BaseScreen):
 
     # --- Exit Prompt Handling ---
     def can_deactivate(self) -> bool:
-        """Checks if the screen can be deactivated using SongService."""
-        if self.song_service.is_current_song_dirty(): # <<< Use SongService
-            self.exit_prompt_active = True
-            self.set_feedback("Current song has unsaved changes!", is_error=True)
-            return False
+        """Checks if the screen can be deactivated. Always returns True now."""
         return True
-
-    def _save_and_exit(self):
-        """Saves the song via SongService and signals readiness to exit."""
-        if self._save_current_song(): # Calls SongService.save_current_song
-            self.exit_prompt_active = False
-            self.clear_feedback()
-            self.app.request_screen_change()
-        else:
-            self.set_feedback("Save failed! Cannot exit.", is_error=True)
-
-    def _discard_and_exit(self):
-        """Discards changes via SongService and signals readiness to exit."""
-        self.song_service.discard_changes_current_song() # <<< Use SongService
-        self.set_feedback("Changes discarded.")
-        self.exit_prompt_active = False
-        self.app.request_screen_change()
-
-    def _cancel_exit(self):
-        """Cancels the exit attempt."""
-        self.exit_prompt_active = False
-        self.clear_feedback()
 
     # --- Drawing Methods ---
     def draw(self, screen, midi_status=None, song_status=None): # <<< ADD song_status
-        """Draw the song editing screen content or prompts."""
+        """Draw the song editing screen content."""
         if self.text_input_widget.is_active:
             self.text_input_widget.draw(screen)
-        elif self.exit_prompt_active:
-            self._draw_normal_content(screen, midi_status, song_status) # Pass song_status
-            self._draw_exit_prompt(screen)
         else:
             self._draw_normal_content(screen, midi_status, song_status) # Pass song_status
             self._draw_feedback(screen)
@@ -708,46 +667,6 @@ class SongEditScreen(BaseScreen):
                                   screen.get_width(), FEEDBACK_AREA_HEIGHT)
             pygame.draw.rect(screen, BLACK, bg_rect)
             screen.blit(feedback_surf, feedback_rect)
-
-    def _draw_exit_prompt(self, screen):
-        """Draws the unsaved changes prompt when trying to exit."""
-        # --- Logic remains the same, but fetches song name from service ---
-        overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 180))
-        screen.blit(overlay, (0, 0))
-
-        box_width, box_height = 400, 200
-        box_x = (screen.get_width() - box_width) // 2
-        box_y = (screen.get_height() - box_height) // 2
-
-        pygame.draw.rect(screen, settings.BLACK, (box_x, box_y, box_width, box_height))
-        pygame.draw.rect(screen, settings.BLUE, (box_x, box_y, box_width, box_height), 2)
-
-        title_surf = self.font_large.render("Unsaved Changes", True, settings.BLUE)
-        title_rect = title_surf.get_rect(midtop=(screen.get_width() // 2, box_y + 15))
-        screen.blit(title_surf, title_rect)
-
-        song_name = self.song_service.get_current_song_name() or "Error" # <<< Use SongService
-        song_surf = self.font.render(f"in '{song_name}'", True, settings.WHITE)
-        song_rect = song_surf.get_rect(midtop=(screen.get_width() // 2, title_rect.bottom + 10))
-        screen.blit(song_surf, song_rect)
-
-        save_btn = mappings.button_map.get(mappings.SAVE_CC, f"CC{mappings.SAVE_CC}")
-        discard_btn = mappings.button_map.get(mappings.DELETE_CC, f"CC{mappings.DELETE_CC}")
-        cancel_btn = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
-
-        instr1_surf = self.font.render(f"Save & Exit? ({save_btn})", True, settings.GREEN)
-        instr1_rect = instr1_surf.get_rect(midtop=(screen.get_width() // 2, song_rect.bottom + 20))
-        screen.blit(instr1_surf, instr1_rect)
-
-        instr2_surf = self.font.render(f"Discard & Exit? ({discard_btn})", True, settings.RED)
-        instr2_rect = instr2_surf.get_rect(midtop=(screen.get_width() // 2, instr1_rect.bottom + 10))
-        screen.blit(instr2_surf, instr2_rect)
-
-        instr3_surf = self.font.render(f"Cancel Exit? ({cancel_btn})", True, settings.WHITE)
-        instr3_rect = instr3_surf.get_rect(midtop=(screen.get_width() // 2, instr2_rect.bottom + 10))
-        screen.blit(instr3_surf, instr3_rect)
-
 
     def _draw_scroll_arrow(self, screen, area_rect, direction):
         """Draws an up or down scroll arrow."""

@@ -65,7 +65,22 @@ class App:
 
         # --- Instantiate Services ---
         self.midi_service = MidiService(status_callback=self.notify_status)
+        print("Instantiating SongService...")
         self.song_service = SongService(status_callback=self.notify_status) # <<< INSTANTIATE SongService
+        print("SongService instantiated.")
+        # --- Log initial song state after SongService init ---
+        initial_song_name = self.song_service.get_current_song_name()
+        if initial_song_name:
+            print(f"SongService initially loaded: '{initial_song_name}'")
+            self.notify_status(f"Initial song: {initial_song_name}")
+        else:
+            print("SongService did not load an initial song.")
+            self.notify_status("No initial song loaded.")
+        
+        # --- Direct MIDI Handler Support ---
+        self.direct_midi_handlers = {}  # Map of control numbers to handler functions
+        # ---------------------------------
+        
         # Pass app reference AND SongService reference to ScreenManager
         self.screen_manager = ScreenManager(app_ref=self, song_service_ref=self.song_service)
         # --------------------------
@@ -84,7 +99,6 @@ class App:
              raise RuntimeError("Application cannot start without any screens.")
 
         self._initial_led_update() # Update LEDs based on initial screen
-        # self._load_last_song() # Now handled by SongService init
         print("App initialization complete.")
 
 
@@ -123,7 +137,7 @@ class App:
             try:
                 midi_messages = self.midi_service.receive_messages()
                 for msg in midi_messages:
-                    self.handle_midi_message(msg)
+                    self.handle_midi_message(msg) # Call the updated handler
             except Exception as e:
                  print(f"\n--- Unhandled Error in MIDI receive loop ---")
                  traceback.print_exc()
@@ -176,43 +190,73 @@ class App:
         self.cleanup()
 
     def handle_midi_message(self, msg):
-        """
-        Process incoming MIDI messages. Routes based on type and CC.
-        Handles button press/release/repeat logic for momentary buttons.
-        Directly dispatches messages for non-repeatable controls.
-        """
+        """Process incoming MIDI messages."""
+        # Filter by channel
         if hasattr(msg, 'channel') and msg.channel != 15:
             return
 
         self.last_midi_message_str = str(msg)
         current_time = time.time()
 
+        # NEW: Check for direct handlers first
+        if msg.type == 'control_change' and msg.control in self.direct_midi_handlers:
+            try:
+                # Call the direct handler and return immediately
+                print(f"[App] Using direct handler for CC {msg.control}")
+                self.direct_midi_handlers[msg.control](msg)
+                return
+            except Exception as e:
+                print(f"[App] Error in direct handler for CC {msg.control}: {e}")
+                traceback.print_exc()
+
+        # Continue with regular handling...
         if msg.type == 'control_change':
             control = msg.control
             value = msg.value
+            # print(f"Received CC: control={control}, value={value}") # Debugging
 
-            if control in NON_REPEATABLE_CCS:
-                self._dispatch_action(msg)
-                return
+            # --- Handle Button Release (value == 0) ---
+            if value == 0:
+                if control in self.pressed_buttons:
+                    # print(f"Button released: CC {control}") # Debug
+                    del self.pressed_buttons[control]
+                # Optional: Dispatch release if screens need it, otherwise just return
+                # self._dispatch_action(msg)
+                return # Stop processing here for releases
 
-            if value == 127:
+            # --- Handle Button Press (value == 127) ---
+            elif value == 127:
+                # If it's a non-repeatable button, dispatch immediately and stop
+                if control in NON_REPEATABLE_CCS:
+                    # print(f"Dispatching non-repeatable button press: CC {control}") # Debug
+                    self._dispatch_action(msg)
+                    return
+
+                # Otherwise, handle as a potentially repeating button press
                 if control not in self.pressed_buttons:
+                    # print(f"Button pressed (repeatable): CC {control}") # Debug
                     self.pressed_buttons[control] = {
                         'press_time': current_time,
-                        'last_repeat_time': current_time,
+                        'last_repeat_time': current_time, # Set initial repeat time for delay calc
                         'message': msg
                     }
+                    # Dispatch the initial press action
                     self._dispatch_action(msg)
-                return
+                # If already pressed (e.g., duplicate MIDI message), do nothing here, repeat logic handles it
+                return # Stop processing here for button presses (127)
 
-            elif value == 0:
-                if control in self.pressed_buttons:
-                    del self.pressed_buttons[control]
-                return
+            # --- Handle ALL OTHER CC Values (Encoders, Faders, etc.) ---
             else:
-                 return
+                # print(f"Dispatching other CC value: control={control}, value={value}") # Debug
+                # Includes encoder values like 1, 65, etc.
+                self._dispatch_action(msg)
+                return # Stop processing here after dispatching
+
+        # --- Handle Non-CC Messages (Notes, Program Changes, etc.) ---
         else:
+            # print(f"Dispatching non-CC message: {msg.type}") # Debug
             self._dispatch_action(msg)
+            # No return needed here as it's the end of the function
 
     def _dispatch_action(self, msg):
         """
@@ -222,39 +266,45 @@ class App:
         """
         active_screen = self.screen_manager.get_active_screen()
 
+        # Check for active input widgets (e.g., text input)
         widget_active = False
         if active_screen:
+            # Example check - adapt if your widget attribute names differ
             text_input_widget = getattr(active_screen, 'text_input_widget', None)
             if text_input_widget and getattr(text_input_widget, 'is_active', False):
                  widget_active = True
+                 # print("[Dispatch] Text input widget is active, blocking global actions.") # Debug
 
-        if msg.type == 'control_change':
+        # --- Handle Global Actions (Screen Switching) ---
+        # Only check for global actions on specific CCs and *only* if a widget isn't active
+        # Crucially, check the value is 127 for button presses to trigger screen changes
+        if not widget_active and msg.type == 'control_change' and msg.value == 127:
             control = msg.control
-            value = msg.value
+            if control == NEXT_CC:
+                print(f"Requesting next screen (via CC #{NEXT_CC})")
+                self.screen_manager.request_next_screen()
+                self.update_combined_status() # Update status after screen change request
+                return # Handled globally, don't pass to screen
+            elif control == PREV_CC:
+                print(f"Requesting previous screen (via CC #{PREV_CC})")
+                self.screen_manager.request_previous_screen()
+                self.update_combined_status() # Update status after screen change request
+                return # Handled globally, don't pass to screen
 
-            if not widget_active and value == 127:
-                if control == NEXT_CC:
-                    print(f"Requesting next screen (via CC #{NEXT_CC})")
-                    self.screen_manager.request_next_screen()
-                    return
-                elif control == PREV_CC:
-                    print(f"Requesting previous screen (via CC #{PREV_CC})")
-                    self.screen_manager.request_previous_screen()
-                    return
-
-            if active_screen and hasattr(active_screen, 'handle_midi'):
-                try:
-                    active_screen.handle_midi(msg)
-                except Exception as screen_midi_err:
-                     print(f"Error in screen {active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
-                     traceback.print_exc()
+        # --- Pass Message to Active Screen ---
+        # If it wasn't a handled global action, pass it to the screen's handler
+        if active_screen and hasattr(active_screen, 'handle_midi'):
+            try:
+                active_screen.handle_midi(msg)
+            except Exception as screen_midi_err:
+                 print(f"Error in screen {active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
+                 traceback.print_exc()
         else:
-            if active_screen and hasattr(active_screen, 'handle_midi'):
-                try:
-                    active_screen.handle_midi(msg)
-                except Exception as screen_midi_err:
-                     print(f"Error in screen {active_screen.__class__.__name__} handling MIDI {msg}: {screen_midi_err}")
-                     traceback.print_exc()
+            # Add debug for the else case too, just in case
+            if not active_screen:
+                 print(f"[App._dispatch_action] Skipping screen handler: No active screen for msg: {msg}")
+            elif not hasattr(active_screen, 'handle_midi'):
+                 print(f"[App._dispatch_action] Skipping screen handler: {active_screen.__class__.__name__} has no handle_midi method for msg: {msg}")
 
 
     def _handle_button_repeats(self, current_time):
@@ -319,6 +369,7 @@ class App:
         if self.song_service.is_current_song_dirty(): song_status += "*"
 
         combined_status = f"Screen: {screen_name} | {midi_status} | {song_status}"
+        # Correct the typo on the next line
         self.notify_status(combined_status)
 
 
