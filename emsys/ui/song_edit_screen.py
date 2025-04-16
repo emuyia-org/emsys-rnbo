@@ -223,6 +223,16 @@ class SongEditScreen(BaseScreen):
                     self._reset_or_copy_parameter()
                 return # DELETE CC handled
 
+            # <<< ADDED: Handle RENAME_CC with NO modifier >>>
+            elif cc == mappings.RENAME_CC:
+                if self.no_button_held:
+                    self._insert_new_segment_unique_pgm()
+                else:
+                    # Placeholder for future regular RENAME action
+                    self.set_feedback("Rename action (not implemented)", duration=1.0)
+                return # RENAME CC handled
+            # <<< END ADDED >>>
+
             # --- Navigation Buttons ---
             elif cc == mappings.DOWN_NAV_CC:
                 if self.focused_column == FocusColumn.SEGMENT_LIST:
@@ -247,7 +257,6 @@ class SongEditScreen(BaseScreen):
                 return # LEFT handled
 
             # --- Parameter Modification Buttons (YES/NO) ---
-            # These are checked last, including the NO button press itself
             elif cc == mappings.YES_NAV_CC:
                 if self.focused_column == FocusColumn.PARAMETER_DETAILS:
                     self._modify_parameter_via_button(1)
@@ -459,7 +468,7 @@ class SongEditScreen(BaseScreen):
         self.set_feedback(message, is_error=not success)
 
     def _add_new_segment(self):
-        """Adds a new segment via SongService."""
+        """Adds a new segment via SongService, copying params from selected/last."""
         current_song = self.song_service.get_current_song()
         if not current_song:
             self.set_feedback("No song loaded", is_error=True)
@@ -503,6 +512,96 @@ class SongEditScreen(BaseScreen):
         except Exception as e:
             self.set_feedback(f"Error adding segment: {e}", is_error=True)
             print(f"Error in _add_new_segment: {e}")
+
+    # <<< NEW METHOD: Insert segment with unique PGM values >>>
+    def _insert_new_segment_unique_pgm(self):
+        """
+        Inserts a new segment after the selected one, copying parameters but
+        assigning the next available unique program change values for PGM1 and PGM2.
+        """
+        current_song = self.song_service.get_current_song()
+        if not current_song:
+            self.set_feedback("No song loaded", is_error=True)
+            return
+
+        try:
+            # --- Find Next Unique PGM Values ---
+            existing_pgm1 = {seg.program_message_1 for seg in current_song.segments}
+            existing_pgm2 = {seg.program_message_2 for seg in current_song.segments}
+
+            next_pgm1 = -1
+            for i in range(mappings.MIN_PROGRAM_MSG, mappings.MAX_PROGRAM_MSG + 1):
+                if i not in existing_pgm1:
+                    next_pgm1 = i
+                    break
+
+            next_pgm2 = -1
+            for i in range(mappings.MIN_PROGRAM_MSG, mappings.MAX_PROGRAM_MSG + 1):
+                if i not in existing_pgm2:
+                    next_pgm2 = i
+                    break
+
+            if next_pgm1 == -1 or next_pgm2 == -1:
+                pgm_unavailable = "PGM1" if next_pgm1 == -1 else "PGM2"
+                self.set_feedback(f"Cannot insert: All {pgm_unavailable} values used!", is_error=True, duration=3.0)
+                return
+
+            # --- Create and Configure New Segment ---
+            new_segment = Segment()
+            new_segment.dirty = True
+            new_segment.program_message_1 = next_pgm1
+            new_segment.program_message_2 = next_pgm2
+            # Mark the unique params as dirty initially
+            new_segment.dirty_params.add('program_message_1')
+            new_segment.dirty_params.add('program_message_2')
+
+
+            insert_index = 0
+            source_segment = None
+
+            if self.selected_segment_index is not None and current_song.segments:
+                insert_index = self.selected_segment_index + 1
+                try: source_segment = current_song.get_segment(self.selected_segment_index)
+                except IndexError: pass
+            elif current_song.segments:
+                 insert_index = len(current_song.segments)
+                 try: source_segment = current_song.get_segment(insert_index - 1) # Copy last if adding at end
+                 except IndexError: pass
+
+            # Copy parameters (except PGM values) if a source was found
+            if source_segment:
+                copied_params_count = 0
+                for key in self.parameter_keys:
+                    # Skip the PGM values we just set
+                    if key in ['program_message_1', 'program_message_2']:
+                        continue
+                    if hasattr(source_segment, key):
+                        value_to_copy = getattr(source_segment, key)
+                        setattr(new_segment, key, value_to_copy)
+                        copied_params_count += 1
+                print(f"Copied {copied_params_count} parameters (excluding PGMs) for unique insert.")
+
+            # --- Add via Service ---
+            success, message = self.song_service.add_segment_to_current(new_segment, index=insert_index)
+
+            if success:
+                pgm1_str = value_to_elektron_format(next_pgm1)
+                pgm2_str = value_to_elektron_format(next_pgm2)
+                self.set_feedback(f"Inserted segment {insert_index + 1} ({pgm1_str}/{pgm2_str})")
+                # Select the newly added segment and update UI
+                self.selected_segment_index = insert_index
+                self._adjust_segment_scroll()
+                self._ensure_parameter_selection() # Ensure a param is selected
+                self.focused_column = FocusColumn.SEGMENT_LIST # Keep focus on segments
+                self._update_leds()
+            else:
+                self.set_feedback(message, is_error=True)
+
+        except Exception as e:
+            self.set_feedback(f"Error inserting unique segment: {e}", is_error=True)
+            print(f"Error in _insert_new_segment_unique_pgm: {e}")
+            traceback.print_exc()
+    # <<< END NEW METHOD >>>
 
     def _delete_current_segment(self):
         """Deletes the currently selected segment via SongService."""
@@ -596,7 +695,6 @@ class SongEditScreen(BaseScreen):
             self.set_feedback(f"Error pasting segment: {e}", is_error=True)
             print(f"Error in _paste_copied_segment: {e}")
     # --- END Copy/Paste ---
-
 
     def _reset_selection_on_error(self):
         """Resets selection state after an error."""

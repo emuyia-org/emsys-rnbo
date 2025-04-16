@@ -22,6 +22,10 @@ SAVE_CC = 86 # SAVE
 DELETE_CC = 93 # DELETE
 CREATE_CC = 94 # CREATE
 
+# --- Program Change Range ---
+MIN_PROGRAM_MSG = 0
+MAX_PROGRAM_MSG = 127
+
 # --- Encoder CCs (Rotation/Value & Push) ---
 # Assuming standard X-TOUCH MINI mapping for Layer B
 # Knobs B1-B8 Rotation: CC 9-16
