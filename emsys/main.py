@@ -442,6 +442,36 @@ class App:
         # If reboot fails, we might want to exit the app anyway or handle it differently
         self.running = False # Ensure the app loop stops if reboot fails
 
+    def trigger_service_stop(self):
+        """Initiate systemd service stop for emsys-python and rnbooscquery-emsys."""
+        print("Service stop requested for emsys-python and rnbooscquery-emsys.")
+        self.notify_status("Stopping services...")
+        # NOTE: This requires the script user (pi) to have passwordless sudo configured for systemctl
+        try:
+            # Stop both services
+            subprocess.run(['sudo', 'systemctl', 'stop', 'emsys-python.service', 'rnbooscquery-emsys.service'], check=True)
+            # If the command succeeds, this process will likely be terminated before the next line.
+            self.running = False
+        except Exception as e:
+            print(f"Failed to execute service stop command: {e}")
+            self.notify_status(f"Service stop failed: {e}")
+            # If stop fails, the app continues running.
+
+    def trigger_service_restart(self):
+        """Initiate systemd service restart for emsys-python and rnbooscquery-emsys."""
+        print("Service restart requested for emsys-python and rnbooscquery-emsys.")
+        self.notify_status("Restarting services...")
+        # NOTE: This requires the script user (pi) to have passwordless sudo configured for systemctl
+        try:
+            # Restart both services
+            subprocess.run(['sudo', 'systemctl', 'restart', 'emsys-python.service', 'rnbooscquery-emsys.service'], check=True)
+            # If the command succeeds, this process will likely be terminated before the next line.
+            self.running = False
+        except Exception as e:
+            print(f"Failed to execute service restart command: {e}")
+            self.notify_status(f"Service restart failed: {e}")
+            # If restart fails, the app continues running.
+
 
 # Script Entry Point
 def main():

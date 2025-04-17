@@ -204,10 +204,15 @@ class PlaceholderScreen(BaseScreen):
                         self.app.trigger_shutdown()
                     elif active_prompt_type == PromptType.REBOOT:
                         print("Reboot confirmed, triggering app reboot.")
-                        # Call the App's method to handle cleanup and reboot
                         self.app.trigger_reboot()
+                    elif active_prompt_type == PromptType.STOP_SERVICE: # Added
+                        print("Service stop confirmed, triggering service stop.")
+                        self.app.trigger_service_stop()
+                    elif active_prompt_type == PromptType.RESTART_SERVICE: # Added
+                        print("Service restart confirmed, triggering service restart.")
+                        self.app.trigger_service_restart()
                 elif action == 'cancel':
-                    print("Shutdown/Reboot cancelled.")
+                    print("Shutdown/Reboot/Service Action cancelled.")
             return # Input was handled by the prompt
 
         # --- Handle Button State and Combinations (No active prompt) ---
@@ -231,6 +236,18 @@ class PlaceholderScreen(BaseScreen):
                 print("Reboot combination detected (NO + RENAME)")
                 self.confirmation_prompts.activate(PromptType.REBOOT)
                 return # Combination handled
+
+        # --- Handle Single Button Presses (No active prompt, NO not held) ---
+        if not self.no_button_held and value == 127:
+            if cc == mappings.DELETE_CC:
+                print("Stop Service button detected (DELETE)")
+                self.confirmation_prompts.activate(PromptType.STOP_SERVICE)
+                return # Action handled
+            elif cc == mappings.RENAME_CC:
+                print("Restart Service button detected (RENAME)")
+                self.confirmation_prompts.activate(PromptType.RESTART_SERVICE)
+                return # Action handled
+
 
         # If no combination or prompt was handled, pass to base or do nothing
         # super().handle_midi(msg) # Optional: if base class has MIDI handling

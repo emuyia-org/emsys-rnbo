@@ -26,6 +26,7 @@ BUTTON_REPEAT_INTERVAL_MS = 25
 
 # --- Colors ---
 WHITE = (255, 255, 255)
+CYAN = (0, 255, 255)
 BLACK = (0, 0, 0)
 GREY = (100, 100, 100)
 RED = (255, 0, 0)
