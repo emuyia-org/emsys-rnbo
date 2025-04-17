@@ -1,7 +1,6 @@
 # sudo cp /home/pi/emsys-rnbo/scripts/rnbooscquery-emsys.service /lib/systemd/system/rnbooscquery-emsys.service
 # sudo systemctl daemon-reload
 # sudo systemctl enable rnbooscquery-emsys.service
-# sudo systemctl start rnbooscquery-emsys.service
 
 [Unit]
 Description=RNBO OSCQuery Service (emsys version)

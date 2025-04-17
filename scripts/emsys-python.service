@@ -1,7 +1,6 @@
 # sudo cp /home/pi/emsys-rnbo/scripts/emsys-python.service /etc/systemd/system/emsys-python.service
 # sudo systemctl daemon-reload
 # sudo systemctl enable emsys-python.service
-# sudo systemctl start emsys-python.service
 
 [Unit]
 Description=Emsys Python Division Service (UI, Sequencer, MIDI Handler)

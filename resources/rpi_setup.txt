@@ -79,6 +79,14 @@ sudo ln -sf "$REBOOT_SCRIPT_SRC" "$REBOOT_SCRIPT_DST"
 # Terminal font size setup
 sudo dpkg-reconfigure console-setup # UTF-8, Guess optimal, TerminusBold, 16x32
 
+# systemd services
+sudo cp /home/pi/emsys-rnbo/scripts/emsys-python.service /etc/systemd/system/emsys-python.service
+sudo cp /home/pi/emsys-rnbo/scripts/rnbooscquery-emsys.service /lib/systemd/system/rnbooscquery-emsys.service
+sudo systemctl daemon-reload
+sudo systemctl enable emsys-python.service
+sudo systemctl disable rnbooscquery.service
+sudo systemctl enable rnbooscquery-emsys.service
+
 # cleanup
 sudo apt autoremove -y
 sudo apt clean
