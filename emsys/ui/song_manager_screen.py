@@ -32,6 +32,9 @@ from emsys.config.settings import (WHITE, BLACK, GREEN, RED, BLUE, GREY,
                                    HIGHLIGHT_COLOR, FEEDBACK_COLOR, ERROR_COLOR,
                                    FEEDBACK_AREA_HEIGHT)
 
+# Import SongEditScreen for type checking
+from .song_edit_screen import SongEditScreen
+
 # Define layout constants
 LEFT_MARGIN = 15
 TOP_MARGIN = 15
@@ -276,10 +279,10 @@ class SongManagerScreen(BaseScreen):
 
             if current_song_name == basename_to_load:
                 self.set_feedback(f"'{basename_to_load}' is already loaded.")
-                # Navigate to edit screen
-                edit_screen = self.app.screen_manager.screens[2] # Assuming Edit is 3rd screen
-                if edit_screen: self.app.set_active_screen(edit_screen)
-                return
+                # <<< REMOVED: Attempt to switch to edit screen >>>
+                # edit_screen = self.app.screen_manager.screens[2] # Assuming Edit is 3rd screen
+                # if edit_screen: self.app.set_active_screen(edit_screen)
+                return # <<< ADDED: Stop processing here if already loaded
 
             if self.song_service.is_current_song_dirty(): # <<< Use SongService
                  self.prompts.activate(PromptType.UNSAVED_LOAD, data=basename_to_load)
@@ -288,7 +291,10 @@ class SongManagerScreen(BaseScreen):
                 self._perform_load(basename_to_load) # Load directly via SongService
 
         except IndexError:
+            # This error should be less likely now with the check above, but keep as fallback
             self.set_feedback("Error: Invalid selection index.", is_error=True)
+            # Attempt to reset selection safely
+            self._refresh_song_list()
         except AttributeError: # Handle if screen_manager or screens list is somehow None
              self.set_feedback("Error accessing screens.", is_error=True)
 
@@ -301,15 +307,27 @@ class SongManagerScreen(BaseScreen):
 
         if success:
             self.set_feedback(message) # Use message from service
-            # Navigate to Song Edit Screen
+            # --- Find Edit Screen by Type (Robust) ---
+            edit_screen_instance = None
             try:
-                 edit_screen = self.app.screen_manager.screens[2] # Assuming Edit is 3rd screen
-                 if edit_screen:
-                     self.app.set_active_screen(edit_screen) # Request screen change
-                 else:
-                     self.set_feedback(f"{message}, but edit screen unavailable.", is_error=True)
-            except (AttributeError, IndexError):
-                 self.set_feedback(f"{message}, but error finding edit screen.", is_error=True)
+                for screen in self.app.screen_manager.screens:
+                    if isinstance(screen, SongEditScreen):
+                        edit_screen_instance = screen
+                        break
+                
+                if edit_screen_instance:
+                    # <<< REMOVED: Print statement about not switching >>>
+                    # print(f"Song '{basename_to_load}' loaded. Edit screen found but not switching.")
+                    # Keep the actual switch commented out or remove entirely
+                    # self.app.set_active_screen(edit_screen_instance) # Request screen change
+                    pass # Successfully loaded, no switch needed.
+                else:
+                    # This feedback replaces the old error message
+                    self.set_feedback(f"{message}, but edit screen instance not found.", is_error=True)
+            except AttributeError:
+                 # This handles if screen_manager or screens list is missing
+                 self.set_feedback(f"{message}, but error accessing screen manager.", is_error=True)
+            # --- End Find Edit Screen ---
         else:
             self.set_feedback(message, is_error=True) # Use error message from service
 
@@ -399,7 +417,7 @@ class SongManagerScreen(BaseScreen):
             try:
                  edit_screen = self.app.screen_manager.screens[2] # Assuming Edit is 3rd screen
                  if edit_screen:
-                     self.app.set_active_screen(edit_screen) # Request change
+                     self.app.set_active_screen(edit_screen) # Request screen change
                  else:
                      print("Warning: Edit screen not found after create.")
             except (AttributeError, IndexError):
@@ -585,19 +603,21 @@ class SongManagerScreen(BaseScreen):
 
 
     # --- Drawing Methods ---
-    def draw(self, screen_surface, midi_status=None, song_status=None): # <<< ADD song_status
+    def draw(self, screen_surface, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
         """Draws the screen content, prompts, or the text input widget."""
         if self.text_input_widget.is_active:
             self.text_input_widget.draw(screen_surface)
         elif self.prompts.is_active():
-            self._draw_normal_content(screen_surface, midi_status, song_status) # Draw list underneath
+            # Pass both status strings down
+            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status) # Draw list underneath
             self.prompts.draw(screen_surface) # Draw the active prompt
         else:
-            self._draw_normal_content(screen_surface, midi_status, song_status)
+            # Pass both status strings down
+            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status)
             self._draw_feedback(screen_surface) # Draw feedback only if no prompt/widget
 
 
-    def _draw_normal_content(self, screen_surface, midi_status=None, song_status=None): # <<< ADD song_status
+    def _draw_normal_content(self, screen_surface, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
         """Draws the main list view."""
         screen_surface.fill(BLACK)
 
@@ -607,18 +627,21 @@ class SongManagerScreen(BaseScreen):
         self.title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
         screen_surface.blit(title_surf, self.title_rect)
 
-        # Draw Currently Loaded Song Indicator (using song_status passed from App)
-        # loaded_text = "Loaded: None"
-        # current_song_name = self.song_service.get_current_song_name() # <<< Use SongService
-        # if current_song_name:
-        #     dirty_flag = "*" if self.song_service.is_current_song_dirty() else "" # <<< Use SongService
-        #     loaded_text = f"Loaded: {current_song_name}{dirty_flag}"
-        loaded_text = song_status or "Song: ?" # Use status passed from App
+        # --- Draw Song Status (Name + Dirty) ---
+        loaded_text = song_status or "Song: ?" # Use song_status passed from App
         loaded_surf = self.font_small.render(loaded_text, True, GREY)
         loaded_rect = loaded_surf.get_rect(topright=(screen_surface.get_width() - LEFT_MARGIN, TOP_MARGIN + 5))
         screen_surface.blit(loaded_surf, loaded_rect)
 
-        # Draw Song List Area
+        # --- Draw Duration Status below Song Status ---
+        duration_text = duration_status or "Duration: ??" # Use duration_status passed from App
+        duration_surf = self.font_small.render(duration_text, True, GREY)
+        # Position below the song status, aligned to the right
+        duration_rect = duration_surf.get_rect(topright=(screen_surface.get_width() - LEFT_MARGIN, loaded_rect.bottom + 2))
+        screen_surface.blit(duration_surf, duration_rect)
+        # --- End Duration Drawing ---
+
+        # Draw Song List Area (adjust top if needed, though likely fine)
         list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
         list_area_bottom = screen_surface.get_height() - FEEDBACK_AREA_HEIGHT
         list_area_rect = pygame.Rect(LEFT_MARGIN, list_area_top,

@@ -12,10 +12,10 @@ import mido
 import time
 import sys
 import os
-import sdnotify # For systemd notification
-import traceback # For detailed error logs
+import sdnotify
+import traceback
 from typing import Optional, Dict, Any
-import subprocess # Added for shutdown/reboot
+import subprocess
 
 # Add the project root directory to the path to enable absolute imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -175,11 +175,15 @@ class App:
             if active_screen and hasattr(active_screen, 'draw'):
                 try:
                     midi_status_str = self.midi_service.get_status_string()
-                    # Pass SongService status (e.g., current song name/dirty state) if needed
-                    song_status_str = f"Song: {self.song_service.get_current_song_name() or 'None'}"
-                    if self.song_service.is_current_song_dirty(): song_status_str += "*"
+                    # <<< Fetch song name/dirty and duration separately >>>
+                    song_name = self.song_service.get_current_song_name() or 'None'
+                    dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
+                    song_status_str = f"Song: {song_name}{dirty_flag}" # Name and dirty flag only
+                    duration_status_str = f"Duration: {self.song_service.get_current_song_duration_str()}" # Duration string
+                    # <<< END Fetch >>>
 
-                    active_screen.draw(self.screen, midi_status=midi_status_str, song_status=song_status_str)
+                    # Pass both strings to the draw method
+                    active_screen.draw(self.screen, midi_status=midi_status_str, song_status=song_status_str, duration_status=duration_status_str)
                 except Exception as e:
                     print(f"Error in {active_screen.__class__.__name__} draw: {e}")
                     traceback.print_exc()
@@ -369,13 +373,16 @@ class App:
         if active_screen:
             screen_name = active_screen.__class__.__name__
         midi_status = self.midi_service.get_status_string()
-        osc_status = self.osc_service.get_status_string() # <<< ADDED OSC Status
-        # Include basic song statustus)
-        song_status = f"Song: {self.song_service.get_current_song_name() or 'None'}"
-        if self.song_service.is_current_song_dirty(): song_status += "*"
+        osc_status = self.osc_service.get_status_string()
+        # <<< Separate song status and duration >>>
+        song_name = self.song_service.get_current_song_name() or 'None'
+        dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
+        song_status = f"Song: {song_name}{dirty_flag}" # Name and dirty flag only
+        duration_str = self.song_service.get_current_song_duration_str() # Duration string
+        # <<< END Separate >>>
 
-        combined_status = f"Screen: {screen_name} | {midi_status} | {osc_status} | {song_status}" # <<< UPDATED
-        # Correct the typo on the next line
+        # Combine for systemd status (might need truncation adjustment)
+        combined_status = f"Screen: {screen_name} | {midi_status} | {osc_status} | {song_status} | Dur: {duration_str}"
         self.notify_status(combined_status)
 
 

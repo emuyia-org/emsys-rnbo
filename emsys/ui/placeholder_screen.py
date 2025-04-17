@@ -6,7 +6,7 @@ import random # Import random module for randomizing animation timing
 import subprocess # Import subprocess to run git command
 from emsys.ui.base_screen import BaseScreen
 # Import necessary colors
-from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY #, SCREEN_WIDTH, SCREEN_HEIGHT
+from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY, BLACK, SCREEN_WIDTH, SCREEN_HEIGHT # <<< ADDED SCREEN_WIDTH, SCREEN_HEIGHT
 from emsys.config import mappings # Import mappings for button CCs
 from emsys.ui.helpers.confirmation_prompts import ConfirmationPrompts, PromptType # Import prompt helper
 
@@ -18,6 +18,10 @@ class PlaceholderScreen(BaseScreen):
     def __init__(self, app):
         # Initialize the BaseScreen (sets self.app and self.font)
         super().__init__(app)
+
+        # --- Message to Display ---
+        self.message = "Placeholder Screen" # <<< ADDED: Initialize the message attribute
+        # --- End Message ---
 
         # --- Title ---
         self.title_text = "emsys"
@@ -56,12 +60,11 @@ class PlaceholderScreen(BaseScreen):
         self.randomize_animation_timing()
         
         # Track when we last started a cycle
-        self.last_cycle_start_time = time.time()
+        self.last_cycle_start_time = time.time() # <<< ADDED: Initialize last_cycle_start_time
         # --- End Persistent Animation ---
 
         # --- Confirmation Prompts ---
-        self.confirmation_prompts = ConfirmationPrompts(self.app)
-        # --- End Confirmation Prompts ---
+        self.confirmation_prompts = ConfirmationPrompts() # Initialize the confirmation prompts manager
 
         # --- Button State Tracking ---
         self.no_button_held = False
@@ -104,11 +107,27 @@ class PlaceholderScreen(BaseScreen):
             self.base_wink_duration * 1.1
         )
 
-    def draw(self, screen, midi_status=None, song_status=None):
-        """Draw the placeholder content with a MIDI status indicator, song status and animation."""
-        # Get screen dimensions dynamically
-        screen_width = screen.get_width()
-        screen_height = screen.get_height()
+    def draw(self, screen_surface, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
+        screen_surface.fill(BLACK)
+        # <<< RESTORED: Render the message (optional, can be removed if not needed) >>>
+        # text_surf = self.font.render(self.message, True, WHITE)
+        # text_rect = text_surf.get_rect(center=screen_surface.get_rect().center)
+        # screen_surface.blit(text_surf, text_rect)
+        # <<< END RESTORED >>>
+
+        # Optionally display status info if needed for debugging placeholders
+        # y_offset = 10
+        # if song_status:
+        #     status_surf = self.small_font.render(song_status, True, WHITE)
+        #     screen_surface.blit(status_surf, (10, y_offset))
+        #     y_offset += 20
+        # if duration_status:
+        #     status_surf = self.small_font.render(duration_status, True, WHITE)
+        #     screen_surface.blit(status_surf, (10, y_offset))
+        #     y_offset += 20
+        # if midi_status:
+        #     status_surf = self.small_font.render(midi_status, True, WHITE)
+        #     screen_surface.blit(status_surf, (10, y_offset))
 
         # --- Handle Persistent Animation ---
         current_time = time.time()
@@ -135,15 +154,15 @@ class PlaceholderScreen(BaseScreen):
 
         if kaomoji_to_draw and rect_to_use:
             # Center the kaomoji horizontally, position vertically (e.g., 1/3 down)
-            rect_to_use.centerx = screen_width // 2
-            rect_to_use.centery = screen_height // 3
-            screen.blit(kaomoji_to_draw, rect_to_use)
+            rect_to_use.centerx = SCREEN_WIDTH // 2 # <<< Use SCREEN_WIDTH
+            rect_to_use.centery = SCREEN_HEIGHT // 3 # <<< Use SCREEN_HEIGHT
+            screen_surface.blit(kaomoji_to_draw, rect_to_use)
 
             # --- Draw Title Below Kaomoji ---
             # Position title centered horizontally, below the kaomoji rect
-            self.title_rect.centerx = screen_width // 2
+            self.title_rect.centerx = SCREEN_WIDTH // 2 # <<< Use SCREEN_WIDTH
             self.title_rect.top = rect_to_use.bottom + 10 # Add 10px padding
-            screen.blit(self.title_surf, self.title_rect)
+            screen_surface.blit(self.title_surf, self.title_rect)
             # --- End Draw Title ---
 
         # --- End Persistent Animation ---
@@ -162,24 +181,21 @@ class PlaceholderScreen(BaseScreen):
             # Add more specific checks if needed based on main.py's status strings
 
         # Calculate indicator position (top-right corner)
-        indicator_pos = (screen_width - self.indicator_padding - self.indicator_radius,
+        indicator_pos = (SCREEN_WIDTH - self.indicator_padding - self.indicator_radius, # <<< Use SCREEN_WIDTH
                          self.indicator_padding + self.indicator_radius)
 
         # Draw the indicator circle
-        pygame.draw.circle(screen, indicator_color, indicator_pos, self.indicator_radius)
+        pygame.draw.circle(screen_surface, indicator_color, indicator_pos, self.indicator_radius) # <<< Use screen_surface
 
         # --- Draw Git Commit ID ---
         # Position commit ID in the bottom-left corner
-        self.commit_rect.bottomleft = (self.indicator_padding, screen_height - self.indicator_padding)
-        screen.blit(self.commit_surf, self.commit_rect)
+        self.commit_rect.bottomleft = (self.indicator_padding, SCREEN_HEIGHT - self.indicator_padding) # <<< Use SCREEN_HEIGHT
+        screen_surface.blit(self.commit_surf, self.commit_rect)
         # --- End Draw Git Commit ID ---
 
         # --- Draw Confirmation Prompt (if active) ---
-        self.confirmation_prompts.draw(screen)
+        self.confirmation_prompts.draw(screen_surface) # <<< Use screen_surface
         # --- End Draw Confirmation Prompt ---
-
-        # Additional rendering for song_status can be added here if needed.
-        # ...
 
     # Implement other methods like handle_event, handle_midi, update if needed
     def handle_midi(self, msg):

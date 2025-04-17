@@ -150,7 +150,14 @@ class Song:
         for key, value in kwargs.items():
             if hasattr(segment, key):
                 # Only mark as modified if the value actually changes
-                if getattr(segment, key) != value:
+                current_value = getattr(segment, key)
+                # Handle potential type differences (e.g., float vs int for tempo)
+                try:
+                    values_differ = float(current_value) != float(value)
+                except (ValueError, TypeError):
+                    values_differ = current_value != value # Fallback for non-numeric types
+
+                if values_differ:
                     setattr(segment, key, value)
                     segment.dirty_params.add(key) # <<< ADDED: Track specific dirty param
                     modified = True
@@ -161,6 +168,40 @@ class Song:
         if modified:
             segment.dirty = True # Mark the specific segment as dirty
             self.dirty = True # Mark the whole song as dirty
+
+    def calculate_estimated_duration(self) -> float:
+        """
+        Calculates the estimated total duration of the song in seconds.
+        Ignores tempo ramp times for simplicity.
+
+        Returns:
+            Total estimated duration in seconds.
+        """
+        total_duration_seconds = 0.0
+        for segment in self.segments:
+            try:
+                tempo = float(segment.tempo)
+                loop_length = int(segment.loop_length)
+                repetitions = int(segment.repetitions)
+
+                if tempo <= 0 or loop_length <= 0 or repetitions <= 0:
+                    # Skip segments with invalid parameters for duration calculation
+                    continue
+
+                # Calculate duration of one loop in seconds
+                seconds_per_beat = 60.0 / tempo
+                duration_of_one_loop = loop_length * seconds_per_beat
+
+                # Calculate total duration for this segment
+                segment_duration = duration_of_one_loop * repetitions
+                total_duration_seconds += segment_duration
+
+            except (ValueError, TypeError, AttributeError):
+                # Skip segment if attributes are missing or have wrong types
+                print(f"Warning: Skipping segment in duration calculation due to invalid data: {segment}")
+                continue
+
+        return total_duration_seconds
 
     def to_dict(self) -> Dict[str, Any]:
         """

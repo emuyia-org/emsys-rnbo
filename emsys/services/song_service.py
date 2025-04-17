@@ -8,11 +8,33 @@ and modification operations, centralizing song state management.
 from typing import Optional, List, Any, Tuple
 import os
 import traceback
+import math
 
 # Use absolute imports
 from emsys.core.song import Song, Segment
 from emsys.utils import file_io
 from emsys.config import settings
+
+# --- Helper Function ---
+def _format_duration(total_seconds: float) -> str:
+    """Formats total seconds into 'Xhr Xm Xs' string."""
+    if total_seconds < 0:
+        return "??hr ??m ??s"
+    total_seconds = math.ceil(total_seconds) # Round up to nearest second
+    
+    seconds = total_seconds % 60
+    total_minutes = total_seconds // 60
+    minutes = total_minutes % 60
+    hours = total_minutes // 60
+    
+    if hours > 0:
+        return f"{hours}hr {minutes}m {seconds}s"
+    elif minutes > 0: # If less than an hour but more than 0 minutes
+        return f"{minutes}m {seconds}s"
+    else: # If less than a minute
+        return f"{seconds}s"
+# --- End Helper ---
+
 
 class SongService:
     """Manages the lifecycle and state of the current song."""
@@ -37,6 +59,22 @@ class SongService:
     def get_current_song_name(self) -> Optional[str]:
         """Returns the name of the currently loaded song."""
         return self.current_song.name if self.current_song else None
+
+    def get_current_song_duration_str(self) -> str:
+        """
+        Calculates and returns the estimated duration of the current song
+        formatted as 'Xhr Xm Xs'. Returns '??hr ??m ??s' if no song is loaded or
+        calculation fails.
+        """
+        if self.current_song:
+            try:
+                duration_seconds = self.current_song.calculate_estimated_duration()
+                return _format_duration(duration_seconds)
+            except Exception as e:
+                print(f"Error calculating song duration: {e}")
+                return "??hr ??m ??s" # <<< Updated fallback format
+        else:
+            return "??hr ??m ??s" # <<< Updated fallback format
 
     def _set_current_song(self, song: Optional[Song], name_used_for_load: Optional[str] = None):
         """Internal method to update the current song and related state."""

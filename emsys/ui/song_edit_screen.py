@@ -888,21 +888,23 @@ class SongEditScreen(BaseScreen):
         return True
 
     # --- Drawing Methods ---
-    def draw(self, screen, midi_status=None, song_status=None): # <<< ADD song_status
+    def draw(self, screen, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
         """Draw the song editing screen content."""
         if self.text_input_widget.is_active:
             self.text_input_widget.draw(screen)
         else:
-            self._draw_normal_content(screen, midi_status, song_status) # Pass song_status
+            # Pass all status strings down, even if not all are used
+            self._draw_normal_content(screen, midi_status, song_status, duration_status)
             self._draw_feedback(screen)
 
-    def _draw_normal_content(self, screen, midi_status=None, song_status=None): # <<< ADD song_status
+    def _draw_normal_content(self, screen, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
         """Draws the main content: title, segments, parameters."""
         # Get current song from service for drawing
         current_song = self.song_service.get_current_song()
 
         # --- Draw Title ---
         # Use song_status passed from App which includes name and dirty flag
+        # Duration is ignored on this screen's title
         title_text = song_status or "Song: ?" # Use status from App
         title_surf = self.font_large.render(title_text, True, WHITE)
         self.title_rect = title_surf.get_rect(midtop=(screen.get_width() // 2, TOP_MARGIN))
