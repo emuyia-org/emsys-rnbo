@@ -15,6 +15,7 @@ import os
 import sdnotify # For systemd notification
 import traceback # For detailed error logs
 from typing import Optional, Dict, Any
+import subprocess # Added for shutdown/reboot
 
 # Add the project root directory to the path to enable absolute imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,7 +45,7 @@ from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
 # --------------------------
 
 # --- Import specific CCs and non-repeatable set ---
-from emsys.config.mappings import NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC # <<< ADDED KNOB_A1_CC
+from emsys.config.mappings import NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC
 
 # Main Application Class
 class App:
@@ -409,6 +410,37 @@ class App:
         print("Pygame quit.")
         self.notifier.notify("STOPPING=1")
         print("Cleanup finished.")
+
+    # --- System Control Methods ---
+    def trigger_shutdown(self):
+        """Perform cleanup and initiate system shutdown."""
+        print("Shutdown requested. Cleaning up...")
+        self.notify_status("System Shutting Down...")
+        self.cleanup() # Perform application cleanup first
+        print("Cleanup complete. Initiating system shutdown.")
+        # NOTE: This requires the script to run with sudo or have passwordless sudo configured for shutdown
+        try:
+            subprocess.run(['sudo', 'shutdown', 'now'], check=True)
+        except Exception as e:
+            print(f"Failed to execute shutdown command: {e}")
+            self.notify_status(f"Shutdown failed: {e}")
+        # If shutdown fails, we might want to exit the app anyway or handle it differently
+        self.running = False # Ensure the app loop stops if shutdown fails
+
+    def trigger_reboot(self):
+        """Perform cleanup and initiate system reboot."""
+        print("Reboot requested. Cleaning up...")
+        self.notify_status("System Rebooting...")
+        self.cleanup() # Perform application cleanup first
+        print("Cleanup complete. Initiating system reboot.")
+        # NOTE: This requires the script to run with sudo or have passwordless sudo configured for reboot
+        try:
+            subprocess.run(['sudo', 'reboot'], check=True)
+        except Exception as e:
+            print(f"Failed to execute reboot command: {e}")
+            self.notify_status(f"Reboot failed: {e}")
+        # If reboot fails, we might want to exit the app anyway or handle it differently
+        self.running = False # Ensure the app loop stops if reboot fails
 
 
 # Script Entry Point

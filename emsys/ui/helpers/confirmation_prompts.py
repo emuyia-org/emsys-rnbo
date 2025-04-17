@@ -6,6 +6,7 @@ Handles state and drawing for confirmation prompts used in screens like SongMana
 import pygame
 from typing import Optional, Tuple, Callable, Any
 from enum import Enum, auto
+import subprocess # Added for potential future use, though commands are in main.py
 
 # Use absolute imports
 from emsys.config import settings, mappings
@@ -16,6 +17,8 @@ class PromptType(Enum):
     DELETE_SONG = auto()
     UNSAVED_LOAD = auto()
     UNSAVED_CREATE = auto()
+    SHUTDOWN = auto() # Added
+    REBOOT = auto()   # Added
 
 class ConfirmationPrompts:
     """Manages the state and drawing of various confirmation prompts."""
@@ -80,6 +83,9 @@ class ConfirmationPrompts:
             if cc == mappings.SAVE_CC: action = 'confirm'    # Corresponds to "Save Changes?"
             elif cc == mappings.DELETE_CC: action = 'discard'   # Corresponds to "Discard Changes?"
             elif cc == mappings.NO_NAV_CC: action = 'cancel'     # Corresponds to "Cancel Operation?"
+        elif self.active_prompt in [PromptType.SHUTDOWN, PromptType.REBOOT]: # Added block
+            if cc == mappings.YES_NAV_CC: action = 'confirm'
+            elif cc == mappings.NO_NAV_CC: action = 'cancel'
 
         # if action: print(f"Prompt action selected: {action}") # Debug
         return action
@@ -102,6 +108,10 @@ class ConfirmationPrompts:
             self._draw_unsaved_prompt(surface, "Load Song")
         elif self.active_prompt == PromptType.UNSAVED_CREATE:
              self._draw_unsaved_prompt(surface, "Create Song")
+        elif self.active_prompt == PromptType.SHUTDOWN: # Added
+            self._draw_shutdown_confirmation(surface)
+        elif self.active_prompt == PromptType.REBOOT:   # Added
+            self._draw_reboot_confirmation(surface)
         # Add other prompt drawing methods if needed
 
 
@@ -172,3 +182,47 @@ class ConfirmationPrompts:
         instr3_surf = self.font.render(instr3_text, True, settings.WHITE)
         instr3_rect = instr3_surf.get_rect(midtop=(surface.get_width() // 2, instr2_rect.bottom + 10))
         surface.blit(instr3_surf, instr3_rect)
+
+    def _draw_shutdown_confirmation(self, surface: pygame.Surface):
+        """Draws the system shutdown confirmation dialog."""
+        box_width, box_height = 400, 150
+        box_x = (surface.get_width() - box_width) // 2
+        box_y = (surface.get_height() - box_height) // 2
+        pygame.draw.rect(surface, settings.BLACK, (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(surface, settings.RED, (box_x, box_y, box_width, box_height), 2)
+
+        title_surf = self.font_large.render("Confirm Shutdown", True, settings.RED)
+        title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
+        surface.blit(title_surf, title_rect)
+
+        msg_surf = self.font.render("Shutdown the system?", True, settings.WHITE)
+        msg_rect = msg_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
+        surface.blit(msg_surf, msg_rect)
+
+        yes_btn = mappings.button_map.get(mappings.YES_NAV_CC, f"CC{mappings.YES_NAV_CC}")
+        no_btn = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
+        instr_surf = self.font.render(f"Confirm: {yes_btn} | Cancel: {no_btn}", True, settings.WHITE)
+        instr_rect = instr_surf.get_rect(midbottom=(surface.get_width() // 2, box_y + box_height - 15))
+        surface.blit(instr_surf, instr_rect)
+
+    def _draw_reboot_confirmation(self, surface: pygame.Surface):
+        """Draws the system reboot confirmation dialog."""
+        box_width, box_height = 400, 150
+        box_x = (surface.get_width() - box_width) // 2
+        box_y = (surface.get_height() - box_height) // 2
+        pygame.draw.rect(surface, settings.BLACK, (box_x, box_y, box_width, box_height))
+        pygame.draw.rect(surface, settings.YELLOW, (box_x, box_y, box_width, box_height), 2) # Yellow border for reboot
+
+        title_surf = self.font_large.render("Confirm Reboot", True, settings.YELLOW)
+        title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
+        surface.blit(title_surf, title_rect)
+
+        msg_surf = self.font.render("Reboot the system?", True, settings.WHITE)
+        msg_rect = msg_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
+        surface.blit(msg_surf, msg_rect)
+
+        yes_btn = mappings.button_map.get(mappings.YES_NAV_CC, f"CC{mappings.YES_NAV_CC}")
+        no_btn = mappings.button_map.get(mappings.NO_NAV_CC, f"CC{mappings.NO_NAV_CC}")
+        instr_surf = self.font.render(f"Confirm: {yes_btn} | Cancel: {no_btn}", True, settings.WHITE)
+        instr_rect = instr_surf.get_rect(midbottom=(surface.get_width() // 2, box_y + box_height - 15))
+        surface.blit(instr_surf, instr_rect)

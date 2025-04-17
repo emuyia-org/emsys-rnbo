@@ -7,11 +7,13 @@ import subprocess # Import subprocess to run git command
 from emsys.ui.base_screen import BaseScreen
 # Import necessary colors
 from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY #, SCREEN_WIDTH, SCREEN_HEIGHT
+from emsys.config import mappings # Import mappings for button CCs
+from emsys.ui.helpers.confirmation_prompts import ConfirmationPrompts, PromptType # Import prompt helper
 
 class PlaceholderScreen(BaseScreen):
     """
     A simple placeholder screen displaying basic info, a MIDI status indicator,
-    a persistent winking animation, and the Git commit ID.
+    a persistent winking animation, the Git commit ID, and handling shutdown/reboot prompts.
     """
     def __init__(self, app):
         # Initialize the BaseScreen (sets self.app and self.font)
@@ -56,6 +58,14 @@ class PlaceholderScreen(BaseScreen):
         # Track when we last started a cycle
         self.last_cycle_start_time = time.time()
         # --- End Persistent Animation ---
+
+        # --- Confirmation Prompts ---
+        self.confirmation_prompts = ConfirmationPrompts(self.app)
+        # --- End Confirmation Prompts ---
+
+        # --- Button State Tracking ---
+        self.no_button_held = False
+        # --- End Button State Tracking ---
 
         # Add any other specific initializations for PlaceholderScreen
         print("PlaceholderScreen initialized")
@@ -164,11 +174,75 @@ class PlaceholderScreen(BaseScreen):
         screen.blit(self.commit_surf, self.commit_rect)
         # --- End Draw Git Commit ID ---
 
+        # --- Draw Confirmation Prompt (if active) ---
+        self.confirmation_prompts.draw(screen)
+        # --- End Draw Confirmation Prompt ---
+
         # Additional rendering for song_status can be added here if needed.
         # ...
 
     # Implement other methods like handle_event, handle_midi, update if needed
-    # ...
+    def handle_midi(self, msg):
+        """Handle MIDI input, checking for shutdown/reboot combinations and prompts."""
+        if msg.type != 'control_change':
+            return # Only interested in CC messages
+
+        cc = msg.control
+        value = msg.value
+
+        # --- Handle Active Confirmation Prompt ---
+        if self.confirmation_prompts.is_active():
+            action = self.confirmation_prompts.handle_input(cc, value)
+            if action:
+                active_prompt_type = self.confirmation_prompts.active_prompt
+                self.confirmation_prompts.deactivate() # Deactivate prompt after action
+
+                if action == 'confirm':
+                    if active_prompt_type == PromptType.SHUTDOWN:
+                        print("Shutdown confirmed, triggering app shutdown.")
+                        # Call the App's method to handle cleanup and shutdown
+                        self.app.trigger_shutdown()
+                    elif active_prompt_type == PromptType.REBOOT:
+                        print("Reboot confirmed, triggering app reboot.")
+                        # Call the App's method to handle cleanup and reboot
+                        self.app.trigger_reboot()
+                elif action == 'cancel':
+                    print("Shutdown/Reboot cancelled.")
+            return # Input was handled by the prompt
+
+        # --- Handle Button State and Combinations (No active prompt) ---
+        # Track NO button state
+        if cc == mappings.NO_NAV_CC:
+            if value == 127:
+                self.no_button_held = True
+                # print("NO button held") # Debug
+            elif value == 0:
+                self.no_button_held = False
+                # print("NO button released") # Debug
+            return # Don't process NO button further for combinations
+
+        # Check for combinations ONLY on button press (value 127) while NO is held
+        if self.no_button_held and value == 127:
+            if cc == mappings.DELETE_CC:
+                print("Shutdown combination detected (NO + DELETE)")
+                self.confirmation_prompts.activate(PromptType.SHUTDOWN)
+                return # Combination handled
+            elif cc == mappings.RENAME_CC:
+                print("Reboot combination detected (NO + RENAME)")
+                self.confirmation_prompts.activate(PromptType.REBOOT)
+                return # Combination handled
+
+        # If no combination or prompt was handled, pass to base or do nothing
+        # super().handle_midi(msg) # Optional: if base class has MIDI handling
+
+    def cleanup(self):
+        """Called when the screen becomes inactive."""
+        # Reset button state if screen changes while NO is held
+        self.no_button_held = False
+        # Deactivate any active prompt if screen changes
+        self.confirmation_prompts.deactivate()
+        print("PlaceholderScreen cleaned up.")
+        super().cleanup() # Call base class cleanup if it exists
 
     def get_pixel_font(self, size):
         """
