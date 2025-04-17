@@ -6,7 +6,7 @@ import random # Import random module for randomizing animation timing
 import subprocess # Import subprocess to run git command
 from emsys.ui.base_screen import BaseScreen
 # Import necessary colors
-from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY, BLACK, SCREEN_WIDTH, SCREEN_HEIGHT # <<< ADDED SCREEN_WIDTH, SCREEN_HEIGHT
+from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY, BLACK#, SCREEN_WIDTH, SCREEN_HEIGHT # <<< ADDED SCREEN_WIDTH, SCREEN_HEIGHT
 from emsys.config import mappings # Import mappings for button CCs
 from emsys.ui.helpers.confirmation_prompts import ConfirmationPrompts, PromptType # Import prompt helper
 
@@ -64,7 +64,9 @@ class PlaceholderScreen(BaseScreen):
         # --- End Persistent Animation ---
 
         # --- Confirmation Prompts ---
-        self.confirmation_prompts = ConfirmationPrompts() # Initialize the confirmation prompts manager
+        # Pass the app reference to ConfirmationPrompts
+        self.confirmation_prompts = ConfirmationPrompts(app_ref=self.app) # <<< MODIFIED: Pass app_ref
+        # --- End Confirmation Prompts ---
 
         # --- Button State Tracking ---
         self.no_button_held = False
@@ -108,26 +110,12 @@ class PlaceholderScreen(BaseScreen):
         )
 
     def draw(self, screen_surface, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
-        screen_surface.fill(BLACK)
-        # <<< RESTORED: Render the message (optional, can be removed if not needed) >>>
-        # text_surf = self.font.render(self.message, True, WHITE)
-        # text_rect = text_surf.get_rect(center=screen_surface.get_rect().center)
-        # screen_surface.blit(text_surf, text_rect)
-        # <<< END RESTORED >>>
+        # <<< ADDED: Get screen dimensions from the passed surface >>>
+        screen_width = screen_surface.get_width()
+        screen_height = screen_surface.get_height()
+        # <<< END ADDED >>>
 
-        # Optionally display status info if needed for debugging placeholders
-        # y_offset = 10
-        # if song_status:
-        #     status_surf = self.small_font.render(song_status, True, WHITE)
-        #     screen_surface.blit(status_surf, (10, y_offset))
-        #     y_offset += 20
-        # if duration_status:
-        #     status_surf = self.small_font.render(duration_status, True, WHITE)
-        #     screen_surface.blit(status_surf, (10, y_offset))
-        #     y_offset += 20
-        # if midi_status:
-        #     status_surf = self.small_font.render(midi_status, True, WHITE)
-        #     screen_surface.blit(status_surf, (10, y_offset))
+        screen_surface.fill(BLACK)
 
         # --- Handle Persistent Animation ---
         current_time = time.time()
@@ -154,13 +142,13 @@ class PlaceholderScreen(BaseScreen):
 
         if kaomoji_to_draw and rect_to_use:
             # Center the kaomoji horizontally, position vertically (e.g., 1/3 down)
-            rect_to_use.centerx = SCREEN_WIDTH // 2 # <<< Use SCREEN_WIDTH
-            rect_to_use.centery = SCREEN_HEIGHT // 3 # <<< Use SCREEN_HEIGHT
+            rect_to_use.centerx = screen_width // 2 # <<< Use screen_width from surface
+            rect_to_use.centery = screen_height // 3 # <<< Use screen_height from surface
             screen_surface.blit(kaomoji_to_draw, rect_to_use)
 
             # --- Draw Title Below Kaomoji ---
             # Position title centered horizontally, below the kaomoji rect
-            self.title_rect.centerx = SCREEN_WIDTH // 2 # <<< Use SCREEN_WIDTH
+            self.title_rect.centerx = screen_width // 2 # <<< Use screen_width from surface
             self.title_rect.top = rect_to_use.bottom + 10 # Add 10px padding
             screen_surface.blit(self.title_surf, self.title_rect)
             # --- End Draw Title ---
@@ -181,7 +169,7 @@ class PlaceholderScreen(BaseScreen):
             # Add more specific checks if needed based on main.py's status strings
 
         # Calculate indicator position (top-right corner)
-        indicator_pos = (SCREEN_WIDTH - self.indicator_padding - self.indicator_radius, # <<< Use SCREEN_WIDTH
+        indicator_pos = (screen_width - self.indicator_padding - self.indicator_radius, # <<< Use screen_width from surface
                          self.indicator_padding + self.indicator_radius)
 
         # Draw the indicator circle
@@ -189,7 +177,7 @@ class PlaceholderScreen(BaseScreen):
 
         # --- Draw Git Commit ID ---
         # Position commit ID in the bottom-left corner
-        self.commit_rect.bottomleft = (self.indicator_padding, SCREEN_HEIGHT - self.indicator_padding) # <<< Use SCREEN_HEIGHT
+        self.commit_rect.bottomleft = (self.indicator_padding, screen_height - self.indicator_padding) # <<< Use screen_height from surface
         screen_surface.blit(self.commit_surf, self.commit_rect)
         # --- End Draw Git Commit ID ---
 
