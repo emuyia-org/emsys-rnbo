@@ -449,7 +449,7 @@ class App:
         # NOTE: This requires the script user (pi) to have passwordless sudo configured for systemctl
         try:
             # Stop both services
-            subprocess.run(['sudo', 'systemctl', 'stop', 'emsys-python.service', 'rnbooscquery-emsys.service'], check=True)
+            subprocess.run(['sudo', 'systemctl', 'stop', 'rnbooscquery-emsys.service', 'emsys-python.service'], check=True)
             # If the command succeeds, this process will likely be terminated before the next line.
             self.running = False
         except Exception as e:

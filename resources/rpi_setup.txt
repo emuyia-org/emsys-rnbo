@@ -82,10 +82,12 @@ sudo dpkg-reconfigure console-setup # UTF-8, Guess optimal, TerminusBold, 16x32
 # systemd services
 sudo cp /home/pi/emsys-rnbo/scripts/emsys-python.service /etc/systemd/system/emsys-python.service
 sudo cp /home/pi/emsys-rnbo/scripts/rnbooscquery-emsys.service /lib/systemd/system/rnbooscquery-emsys.service
+sudo cp /home/pi/emsys-rnbo/scripts/emsys-python.service /etc/systemd/system/emsys-starter.service
 sudo systemctl daemon-reload
 sudo systemctl enable emsys-python.service
 sudo systemctl disable rnbooscquery.service
 sudo systemctl enable rnbooscquery-emsys.service
+sudo systemctl enable emsys-starter.service
 
 # cleanup
 sudo apt autoremove -y

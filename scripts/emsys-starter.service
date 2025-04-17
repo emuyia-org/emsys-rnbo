@@ -1,0 +1,30 @@
+# sudo cp /home/pi/emsys-rnbo/scripts/emsys-starter.service /etc/systemd/system/emsys-starter.service
+# sudo systemctl daemon-reload
+# sudo systemctl enable emsys-starter.service
+# sudo systemctl start emsys-starter.service
+
+[Unit]
+Description=Emsys MIDI Starter Service
+# Start after basic system and sound services are up
+After=multi-user.target sound.target network.target
+# Doesn't strictly depend on the other services, it *starts* them
+# Conflicts=emsys-python.service rnbooscquery-emsys.service # Optional: Prevent running if others are already running? Maybe not needed.
+
+[Service]
+Type=simple
+User=pi
+# Group=audio # Ensure access to MIDI devices
+
+WorkingDirectory=/home/pi/emsys-rnbo
+# Make sure the script is executable: chmod +x /home/pi/emsys-rnbo/scripts/emsys_starter.py
+# Use the virtual environment's python
+ExecStart=/home/pi/emsys-rnbo/.venv/bin/python /home/pi/emsys-rnbo/scripts/emsys_starter.py
+
+Restart=on-failure
+RestartSec=5s
+# Optional: Add environment variables if needed, e.g., for display or specific libs
+# Environment="DISPLAY=:0"
+
+[Install]
+WantedBy=multi-user.target
+
