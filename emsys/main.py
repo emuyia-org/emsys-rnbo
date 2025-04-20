@@ -226,6 +226,8 @@ class App:
                     dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
                     song_status_str = f"Song: {song_name}{dirty_flag}"
                     duration_status_str = f"Duration: {self.song_service.get_current_song_duration_str()}"
+                    # <<< ADD Tempo Status String >>>
+                    tempo_status_str = f"Tempo: {self.current_tempo:.1f}"
 
                     # --- Calculate Playback Status String (only needed for PlaybackScreen) ---
                     playback_status_str = None
@@ -258,7 +260,8 @@ class App:
                             song_status=song_status_str,
                             duration_status=duration_status_str,
                             playback_status=playback_status_str, # Pass playback status
-                            osc_status=osc_status_str          # Pass OSC status
+                            osc_status=osc_status_str,          # Pass OSC status
+                            tempo_status=tempo_status_str       # <<< Pass Tempo Status >>>
                         )
                     else:
                         # Other screens expect only the base arguments
@@ -327,10 +330,11 @@ class App:
                         print(f"DEBUG: Sending OSC: {param_name} = {param_value}")
                         self.osc_service.send_rnbo_param(param_name, param_value)
                         # Reset state after prime
-                        self.is_playing = False
-                        self.current_segment_index = 0
-                        self.current_repetition = 1
-                        self._send_segment_params(self.current_segment_index) # Send params for segment 0
+                        # self.is_playing = False # <<< REMOVED: Let OSC feedback handle play state >>>
+                        # self.current_segment_index = 0 # <<< REMOVED: Don't reset segment >>>
+                        # self.current_repetition = 1 # <<< REMOVED: Don't reset repetition >>>
+                        self.current_beat_count = 0 # <<< ADDED: Reset only beat count >>>
+                        # self._send_segment_params(self.current_segment_index) # <<< REMOVED: Don't resend params >>>
                         self.update_combined_status()
                     else:
                         print("DEBUG: Triggering CONTINUE")
@@ -374,11 +378,11 @@ class App:
                 if 1 <= value <= 63:   direction = 1
                 elif 65 <= value <= 127: direction = -1
                 if direction != 0:
-                    new_t = self.current_tempo + direction * 1.0
+                    new_tempo = self.current_tempo + direction * 1.0
                     # clamp to valid range
-                    new_t = max(MIN_TEMPO, min(MAX_TEMPO, new_t))
-                    self.current_tempo = new_t
-                    self.osc_service.send_rnbo_param("p_obj-6/tempo/Transport.Tempo", new_t)
+                    new_tempo = max(MIN_TEMPO, min(MAX_TEMPO, new_tempo))
+                    self.current_tempo = new_tempo
+                    self.osc_service.send_rnbo_param("p_obj-6/tempo/Transport.Tempo", new_tempo)
                 return  # Handled
 
             # --- Handle Button Release (value == 0) ---
@@ -501,6 +505,9 @@ class App:
              knob_led_cc = 9 + i
              self.send_midi_cc(control=knob_led_cc, value=0)
 
+        # <<< REMOVED Transport LED update call >>>
+        # self._update_transport_leds() # Initial state
+
         active_screen = self.screen_manager.get_active_screen()
         # Delegate LED updates to screens or their helpers
         if active_screen and hasattr(active_screen, '_update_leds'):
@@ -555,13 +562,25 @@ class App:
                     print(f"Transport Status changed: {'Playing' if self.is_playing else 'Stopped'}")
                     if not self.is_playing:
                         # Reset counters if stopping (unless Prime logic handles it)
-                        self._reset_playback_state() # Reset reps/beats on stop
+                        # self._reset_playback_state() # <<< REMOVED: Don't reset on stop/pause >>>
                         pass
                     self.update_combined_status() # Update status display
-                    self._update_transport_leds() # Update LEDs based on new state
+                    # self._update_transport_leds() # <<< REMOVED Call >>>
             except (ValueError, TypeError):
                  print(f"Warning: Could not parse Transport.Status value: {value}")
 
+        # <<< ADD Tempo Handling >>>
+        elif outport_name == "Transport.Tempo":
+            try:
+                new_tempo = float(value)
+                if new_tempo != self.current_tempo:
+                    self.current_tempo = new_tempo
+                    print(f"Tempo updated via OSC: {self.current_tempo:.1f}")
+                    # Optionally update status immediately if needed
+                    # self.update_combined_status()
+            except (ValueError, TypeError):
+                print(f"Warning: Could not parse Transport.Tempo value: {value}")
+        # <<< END Tempo Handling >>>
 
         # <<< Beat Count Handling (Looks Correct) >>>
         elif outport_name == "Transport.4nCount":

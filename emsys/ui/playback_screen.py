@@ -37,7 +37,8 @@ class PlaybackScreen(BaseScreen):
              song_status: Optional[str] = None,
              duration_status: Optional[str] = None,
              playback_status: Optional[str] = None,
-             osc_status: Optional[str] = None):     # Keep signature consistent
+             osc_status: Optional[str] = None,
+             tempo_status: Optional[str] = None):     # <<< ADD tempo_status parameter >>>
         """Draws the playback status information."""
         screen_width = screen_surface.get_width()
         screen_height = screen_surface.get_height()
@@ -53,6 +54,12 @@ class PlaybackScreen(BaseScreen):
         song_surf = self.font_small.render(song_name_text, True, GREY)
         song_rect = song_surf.get_rect(centerx=screen_width // 2, top=title_rect.bottom + 10)
         screen_surface.blit(song_surf, song_rect)
+
+        # --- Draw Tempo ---
+        tempo_text = tempo_status or "Tempo: -" # Get from passed status
+        tempo_surf = self.font_small.render(tempo_text, True, GREY)
+        tempo_rect = tempo_surf.get_rect(centerx=screen_width // 2, top=song_rect.bottom + 5) # Position below song
+        screen_surface.blit(tempo_surf, tempo_rect)
 
         # --- Draw Playback Status ---
         play_status_text = playback_status or "Playback: -"
@@ -80,7 +87,7 @@ class PlaybackScreen(BaseScreen):
         # <<< END CORRECTED PARSING LOGIC >>>
 
         # Display components
-        y_start = song_rect.bottom + 40
+        y_start = tempo_rect.bottom + 30 # <<< Adjust y_start based on tempo_rect >>>
         line_spacing = 45
 
         # Play/Stop Symbol
