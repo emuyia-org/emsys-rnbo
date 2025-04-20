@@ -888,16 +888,22 @@ class SongEditScreen(BaseScreen):
         return True
 
     # --- Drawing Methods ---
-    def draw(self, screen, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
+    def draw(self, screen_surface: pygame.Surface,
+             midi_status: Optional[str] = None,
+             song_status: Optional[str] = None,
+             duration_status: Optional[str] = None):
         """Draw the song editing screen content."""
         if self.text_input_widget.is_active:
-            self.text_input_widget.draw(screen)
+            self.text_input_widget.draw(screen_surface)
         else:
-            # Pass all status strings down, even if not all are used
-            self._draw_normal_content(screen, midi_status, song_status, duration_status)
-            self._draw_feedback(screen)
+            # Pass remaining status strings down
+            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status)
+            self._draw_feedback(screen_surface)
 
-    def _draw_normal_content(self, screen, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
+    def _draw_normal_content(self, screen_surface: pygame.Surface,
+                             midi_status: Optional[str] = None,
+                             song_status: Optional[str] = None,
+                             duration_status: Optional[str] = None):
         """Draws the main content: title, segments, parameters."""
         # Get current song from service for drawing
         current_song = self.song_service.get_current_song()
@@ -907,31 +913,30 @@ class SongEditScreen(BaseScreen):
         # Duration is ignored on this screen's title
         title_text = song_status or "Song: ?" # Use status from App
         title_surf = self.font_large.render(title_text, True, WHITE)
-        self.title_rect = title_surf.get_rect(midtop=(screen.get_width() // 2, TOP_MARGIN))
-        screen.blit(title_surf, self.title_rect)
+        self.title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
+        screen_surface.blit(title_surf, self.title_rect)
 
         # Calculate layout areas
         list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-        available_height = screen.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT
+        available_height = screen_surface.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT
         seg_list_rect = pygame.Rect(LEFT_MARGIN, list_area_top, SEGMENT_LIST_WIDTH, available_height)
         param_detail_rect = pygame.Rect(PARAM_AREA_X, list_area_top,
-                                        screen.get_width() - PARAM_AREA_X - LEFT_MARGIN, available_height)
+                                        screen_surface.get_width() - PARAM_AREA_X - LEFT_MARGIN, available_height)
 
         # --- Draw Segment List ---
-        self._draw_segment_list(screen, seg_list_rect, current_song) # Pass current_song
+        self._draw_segment_list(screen_surface, seg_list_rect, current_song) # Pass current_song
 
         # --- Draw Parameter Details ---
-        self._draw_parameter_details(screen, param_detail_rect, current_song) # Pass current_song
+        self._draw_parameter_details(screen_surface, param_detail_rect, current_song) # Pass current_song
 
         # --- Draw Column Focus Borders ---
         # (Logic remains the same, depends on self.focused_column)
         if self.focused_column == FocusColumn.SEGMENT_LIST:
-            pygame.draw.rect(screen, FOCUS_BORDER_COLOR, seg_list_rect, COLUMN_BORDER_WIDTH)
-            pygame.draw.rect(screen, WHITE, param_detail_rect, COLUMN_BORDER_WIDTH)
+            pygame.draw.rect(screen_surface, FOCUS_BORDER_COLOR, seg_list_rect, COLUMN_BORDER_WIDTH)
+            pygame.draw.rect(screen_surface, WHITE, param_detail_rect, COLUMN_BORDER_WIDTH)
         else:
-            pygame.draw.rect(screen, WHITE, seg_list_rect, COLUMN_BORDER_WIDTH)
-            pygame.draw.rect(screen, FOCUS_BORDER_COLOR, param_detail_rect, COLUMN_BORDER_WIDTH)
-
+            pygame.draw.rect(screen_surface, WHITE, seg_list_rect, COLUMN_BORDER_WIDTH)
+            pygame.draw.rect(screen_surface, FOCUS_BORDER_COLOR, param_detail_rect, COLUMN_BORDER_WIDTH)
 
     def _draw_segment_list(self, screen, area_rect: pygame.Rect, current_song):
         """Draws the scrollable segment list, highlighting multi-select."""

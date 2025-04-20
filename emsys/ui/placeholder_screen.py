@@ -5,6 +5,7 @@ import time # Import the time module
 import random # Import random module for randomizing animation timing
 import subprocess # Import subprocess to run git command
 from emsys.ui.base_screen import BaseScreen
+from typing import Optional
 # Import necessary colors
 from emsys.config.settings import WHITE, GREEN, YELLOW, RED, GREY, BLACK#, SCREEN_WIDTH, SCREEN_HEIGHT # <<< ADDED SCREEN_WIDTH, SCREEN_HEIGHT
 from emsys.config import mappings # Import mappings for button CCs
@@ -109,7 +110,11 @@ class PlaceholderScreen(BaseScreen):
             self.base_wink_duration * 1.1
         )
 
-    def draw(self, screen_surface, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
+    def draw(self, screen_surface: pygame.Surface,
+             midi_status: Optional[str] = None,
+             song_status: Optional[str] = None,
+             duration_status: Optional[str] = None):
+             # Removed playback_status and osc_status
         # <<< ADDED: Get screen dimensions from the passed surface >>>
         screen_width = screen_surface.get_width()
         screen_height = screen_surface.get_height()

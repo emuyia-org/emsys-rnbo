@@ -603,22 +603,29 @@ class SongManagerScreen(BaseScreen):
 
 
     # --- Drawing Methods ---
-    def draw(self, screen_surface, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
+    def draw(self, screen_surface: pygame.Surface,
+             midi_status: Optional[str] = None,
+             song_status: Optional[str] = None,
+             duration_status: Optional[str] = None):
+             # Removed playback_status and osc_status
         """Draws the screen content, prompts, or the text input widget."""
         if self.text_input_widget.is_active:
             self.text_input_widget.draw(screen_surface)
         elif self.prompts.is_active():
-            # Pass both status strings down
+            # Pass remaining status strings down
             self._draw_normal_content(screen_surface, midi_status, song_status, duration_status) # Draw list underneath
             self.prompts.draw(screen_surface) # Draw the active prompt
         else:
-            # Pass both status strings down
+            # Pass remaining status strings down
             self._draw_normal_content(screen_surface, midi_status, song_status, duration_status)
             self._draw_feedback(screen_surface) # Draw feedback only if no prompt/widget
 
-
-    def _draw_normal_content(self, screen_surface, midi_status=None, song_status=None, duration_status=None): # <<< ADD duration_status
-        """Draws the main list view."""
+    def _draw_normal_content(self, screen_surface: pygame.Surface,
+                             midi_status: Optional[str] = None,
+                             song_status: Optional[str] = None,
+                             duration_status: Optional[str] = None):
+                             # Removed playback_status and osc_status
+        """Draws the main list view and status lines."""
         screen_surface.fill(BLACK)
 
         # Draw Title

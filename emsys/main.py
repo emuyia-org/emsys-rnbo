@@ -14,7 +14,7 @@ import sys
 import os
 import sdnotify
 import traceback
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple # <<< Added Tuple
 import subprocess
 
 # Add the project root directory to the path to enable absolute imports
@@ -42,10 +42,14 @@ from emsys.services.song_service import SongService # <<< ADDED SongService
 from emsys.services.osc_service import OSCService # <<< ADDED OSCService
 from emsys.ui.screen_manager import ScreenManager
 from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
+from emsys.ui.playback_screen import PlaybackScreen # <<< Make sure this import exists
 # --------------------------
 
 # --- Import specific CCs and non-repeatable set ---
-from emsys.config.mappings import NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC
+from emsys.config.mappings import (
+    NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC,
+    PLAY_CC, STOP_CC # <<< Added transport CCs
+)
 
 # Main Application Class
 class App:
@@ -54,7 +58,16 @@ class App:
     def __init__(self):
         """Initialize Pygame, services, and application state."""
         print("Initializing App...")
-        self.notifier = sdnotify.SystemdNotifier()
+
+        # <<< MOVE TYPE HINTS FOR SERVICES HERE >>>
+        self.osc_service: Optional[OSCService] = None
+        self.screen_manager: Optional[ScreenManager] = None
+        self.song_service: Optional[SongService] = None
+        self.midi_service: Optional[MidiService] = None
+        self.notifier: Optional[sdnotify.SystemdNotifier] = None
+        # <<< END MOVE >>>
+
+        self.notifier = sdnotify.SystemdNotifier() # Now assign the instance
         self.notify_status("Initializing Pygame...")
 
         pygame.init()
@@ -66,13 +79,17 @@ class App:
         self.running = False
 
         # --- Instantiate Services ---
+        # Now assign instances to the pre-declared attributes
         self.midi_service = MidiService(status_callback=self.notify_status)
         print("Instantiating SongService...")
-        self.song_service = SongService(status_callback=self.notify_status) # <<< INSTANTIATE SongService
+        self.song_service = SongService(status_callback=self.notify_status)
         print("SongService instantiated.")
-        print("Instantiating OSCService...") # <<< ADDED
-        self.osc_service = OSCService(status_callback=self.notify_status) # <<< INSTANTIATE OSCService
-        print("OSCService instantiated.") # <<< ADDED
+        print("Instantiating OSCService...")
+        self.osc_service = OSCService(
+            status_callback=self.notify_status,
+            rnbo_outport_callback=self._handle_rnbo_outport
+        )
+        print("OSCService instantiated.")
         # --- Log initial song state after SongService init ---
         initial_song_name = self.song_service.get_current_song_name()
         if initial_song_name:
@@ -83,27 +100,46 @@ class App:
             self.notify_status("No initial song loaded.")
         
         # --- Direct MIDI Handler Support ---
-        self.direct_midi_handlers = {}  # Map of control numbers to handler functions
-        # ---------------------------------
-        
+        self.direct_midi_handlers = {}
+
         # Pass app reference AND SongService reference to ScreenManager
-        self.screen_manager = ScreenManager(app_ref=self, song_service_ref=self.song_service)
+        self.screen_manager = ScreenManager(app_ref=self, song_service_ref=self.song_service) # Assign instance
         # --------------------------
 
-        # --- Application State ---
-        # self.current_song removed - managed by SongService
-        self.last_midi_message_str = None # Keep for potential display
-        # Dictionary mapping control_number to {'press_time': float, 'last_repeat_time': float, 'message': mido.Message}
+        # --- Application State (Remove redundant declarations) ---
+        self.last_midi_message_str = None
         self.pressed_buttons: Dict[int, Dict[str, Any]] = {}
+
+        # <<< REMOVE THESE REDUNDANT DECLARATIONS >>>
+        # self.osc_service: Optional[OSCService] = None
+        # self.screen_manager: Optional[ScreenManager] = None
+        # self.song_service: Optional[SongService] = None
+        # self.midi_service: Optional[MidiService] = None
+        # self.notifier: Optional[sdnotify.SystemdNotifier] = None
+        # <<< END REMOVAL >>>
+
+        # --- Playback State ---
+        self.is_playing: bool = False
+        self.current_segment_index: int = 0
+        self.current_repetition: int = 1 # Repetitions are 1-based
+        self.current_beat_count: int = 0 # <<< USE THIS for beat count >>>
+        self.stop_button_held: bool = False
+        # --- RNBO Outport State ---
+        self.tin_toggle_state: bool = False # <<< Changed to bool >>>
+        # self.last_4n_count: int = 0 # <<< REMOVED redundant state >>>
+        # self.last_transport_status: int = 0 # <<< REMOVED redundant state >>>
         # -------------------------
+        self.transport_base_path = "p_obj-6"
+        self.set_base_path = "p_obj-10"
 
         # --- Final Initialization Steps ---
-        self.screen_manager.set_initial_screen() # Set the first screen active
+        self.screen_manager.set_initial_screen() # <<< Should work now >>>
         if not self.screen_manager.get_active_screen():
              self.notify_status("FAIL: No UI screens loaded.")
              raise RuntimeError("Application cannot start without any screens.")
 
         self._initial_led_update() # Update LEDs based on initial screen
+        self._send_initial_segment_params() # Send params for segment 0
         print("App initialization complete.")
 
 
@@ -174,16 +210,57 @@ class App:
             self.screen.fill(BLACK)
             if active_screen and hasattr(active_screen, 'draw'):
                 try:
+                    # --- Gather Status Strings ---
                     midi_status_str = self.midi_service.get_status_string()
-                    # <<< Fetch song name/dirty and duration separately >>>
+                    osc_status_str = self.osc_service.get_status_string()
                     song_name = self.song_service.get_current_song_name() or 'None'
                     dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
-                    song_status_str = f"Song: {song_name}{dirty_flag}" # Name and dirty flag only
-                    duration_status_str = f"Duration: {self.song_service.get_current_song_duration_str()}" # Duration string
-                    # <<< END Fetch >>>
+                    song_status_str = f"Song: {song_name}{dirty_flag}"
+                    duration_status_str = f"Duration: {self.song_service.get_current_song_duration_str()}"
 
-                    # Pass both strings to the draw method
-                    active_screen.draw(self.screen, midi_status=midi_status_str, song_status=song_status_str, duration_status=duration_status_str)
+                    # --- Calculate Playback Status String (only needed for PlaybackScreen) ---
+                    playback_status_str = None
+                    if isinstance(active_screen, PlaybackScreen): # Check if it's the PlaybackScreen
+                        play_state_char = ">" if self.is_playing else "||"
+                        current_song = self.song_service.get_current_song()
+                        total_segments = len(current_song.segments) if current_song else 0
+                        total_reps = 0
+                        if current_song and 0 <= self.current_segment_index < total_segments:
+                            try:
+                                total_reps = current_song.segments[self.current_segment_index].repetitions
+                            except IndexError:
+                                total_reps = '?' # Should not happen if song data is valid
+
+                        # <<< USE self.current_beat_count and add 1 for display >>>
+                        beat_display = self.current_beat_count + 1
+                        playback_status_str = f"Play: {play_state_char} Seg:{self.current_segment_index + 1}/{total_segments} Rep:{self.current_repetition}/{total_reps} Beat:{beat_display}"
+                        # <<< END CHANGE >>>
+                    # --- End Calculate Playback Status ---
+
+                    # --- CONDITIONAL DRAW CALL (Looks Correct) ---
+                    if isinstance(active_screen, PlaybackScreen):
+                        # PlaybackScreen expects all arguments
+                        # <<< ADD PRINT >>>
+                        print(f"DEBUG App: Passing to PlaybackScreen: '{playback_status_str}'")
+                        # <<< END PRINT >>>
+                        active_screen.draw(
+                            self.screen,
+                            midi_status=midi_status_str,
+                            song_status=song_status_str,
+                            duration_status=duration_status_str,
+                            playback_status=playback_status_str, # Pass playback status
+                            osc_status=osc_status_str          # Pass OSC status
+                        )
+                    else:
+                        # Other screens expect only the base arguments
+                        active_screen.draw(
+                            self.screen,
+                            midi_status=midi_status_str,
+                            song_status=song_status_str,
+                            duration_status=duration_status_str
+                        )
+                    # --- END CONDITIONAL DRAW CALL ---
+
                 except Exception as e:
                     print(f"Error in {active_screen.__class__.__name__} draw: {e}")
                     traceback.print_exc()
@@ -201,7 +278,12 @@ class App:
     def handle_midi_message(self, msg):
         """Process incoming MIDI messages."""
         # Filter by channel
-        if hasattr(msg, 'channel') and msg.channel != 15:
+        if hasattr(msg, 'channel') and msg.channel != 15: # Layer A is usually Ch 16 (index 15)
+            # Allow Layer B (Ch 15 / index 14) through as well for editing? Let's assume 15 for now.
+            # Revisit if X-Touch uses different channels for A/B.
+            # According to xtouch_midi_ref.txt, both layers seem to use the same channel.
+            # Let's filter for channel 15 (MIDI channel 16) for now.
+            # print(f"Ignoring MIDI message on channel {msg.channel + 1}")
             return
 
         self.last_midi_message_str = str(msg)
@@ -221,7 +303,59 @@ class App:
         if msg.type == 'control_change':
             control = msg.control
             value = msg.value
-            # print(f"Received CC: control={control}, value={value}") # Debugging
+            # print(f"Received CC: control={control}, value={value}, channel={msg.channel}") # Debugging
+
+            # --- Handle Transport Controls ---
+            if control == PLAY_CC:
+                if value == 127: # Button Press
+                    print(f"DEBUG: PLAY_CC ({PLAY_CC}) pressed (value={value})")
+                    if self.stop_button_held:
+                        print("DEBUG: STOP was held, triggering PRIME")
+                        param_name = "p_obj-6/transport/Transport.Prime"
+                        # <<< CHANGE VALUE TO INT 1 >>>
+                        param_value = 1
+                        print(f"DEBUG: Sending OSC: {param_name} = {param_value}")
+                        self.osc_service.send_rnbo_param(param_name, param_value)
+                        # Reset state after prime
+                        self.is_playing = False
+                        self.current_segment_index = 0
+                        self.current_repetition = 1
+                        self._send_segment_params(self.current_segment_index) # Send params for segment 0
+                        self.update_combined_status()
+                    else:
+                        print("DEBUG: Triggering CONTINUE")
+                        param_name = "p_obj-6/transport/Transport.Continue"
+                        # <<< CHANGE VALUE TO INT 1 >>>
+                        param_value = 1
+                        print(f"DEBUG: Sending OSC: {param_name} = {param_value}")
+                        self.osc_service.send_rnbo_param(param_name, param_value)
+                        # self.is_playing = True # State is set via OSC feedback
+                        self.update_combined_status()
+                    # Play doesn't usually repeat, clear from pressed state immediately?
+                    if control in self.pressed_buttons: del self.pressed_buttons[control]
+                elif value == 0: # Button Release
+                    print(f"DEBUG: PLAY_CC ({PLAY_CC}) released (value={value})")
+                return # Handled
+
+            elif control == STOP_CC:
+                if value == 127: # Button Press
+                    print("STOP pressed")
+                    param_name = "p_obj-6/transport/Transport.Stop"
+                    # <<< CHANGE VALUE TO INT 1 >>>
+                    param_value = 1
+                    print(f"DEBUG: Sending OSC: {param_name} = {param_value}")
+                    self.osc_service.send_rnbo_param(param_name, param_value)
+                    self.stop_button_held = True
+                    # self.is_playing = False # Set based on Transport.Status feedback
+                    self.update_combined_status()
+                    # Add to pressed buttons for hold detection, but don't repeat STOP command itself
+                    if control not in self.pressed_buttons:
+                         self.pressed_buttons[control] = {'press_time': current_time, 'last_repeat_time': current_time, 'message': msg}
+                elif value == 0: # Button Release
+                     print("STOP released")
+                     self.stop_button_held = False
+                     if control in self.pressed_buttons: del self.pressed_buttons[control]
+                return # Handled
 
             # --- Handle Specific Controls (e.g., Knobs) FIRST ---
             if control == KNOB_A1_CC:
@@ -239,13 +373,19 @@ class App:
             # --- Handle Button Release (value == 0) ---
             if value == 0:
                 if control in self.pressed_buttons:
-                    del self.pressed_buttons[control]
+                    # Check if it was the STOP button release, already handled above
+                    if control != STOP_CC:
+                        del self.pressed_buttons[control]
                 # Dispatch release messages so screens can react (e.g., update held state)
                 self._dispatch_action(msg)
                 return # Stop processing here for releases
 
             # --- Handle Button Press (value == 127) ---
             elif value == 127:
+                # Check if it was PLAY/STOP press, already handled above
+                if control in [PLAY_CC, STOP_CC]:
+                    return # Already handled
+
                 # If it's a non-repeatable button, dispatch immediately and stop
                 if control in NON_REPEATABLE_CCS:
                     self._dispatch_action(msg)
@@ -366,23 +506,165 @@ class App:
         print(f"Direct request to set active screen to {screen_instance.__class__.__name__}")
         self.screen_manager.pending_screen_change = screen_instance # Handled by main loop
 
+    # --- OSC Callback Handler ---
+    def _handle_rnbo_outport(self, outport_name: str, value: Any):
+        """Callback function passed to OSCService to handle incoming messages."""
+        # print(f"App received OSC: {outport_name} = {value}") # Debug
+        current_song = self.song_service.get_current_song()
+        if not current_song: return # No song loaded, nothing to do
+
+        if outport_name == "Transport.LoadNowBeat":
+            # This is a bang (value is usually 1 or similar)
+            # Triggered just before the start of the *next* loop/repetition
+            print(f"Received LoadNowBeat (Value: {value}) - Current Seg: {self.current_segment_index+1}, Rep: {self.current_repetition}")
+            self._process_segment_transition()
+
+        elif outport_name == "Tin.Toggle":
+             try:
+                 # <<< Update boolean state >>>
+                 self.tin_toggle_state = bool(int(value))
+                 print(f"Tin.Toggle state changed: {'ON' if self.tin_toggle_state else 'OFF'}")
+             except (ValueError, TypeError):
+                 print(f"Warning: Could not parse Tin.Toggle value: {value}")
+
+        elif outport_name == "Transport.Status":
+            try:
+                new_is_playing = (int(value) == 1)
+                if new_is_playing != self.is_playing:
+                    self.is_playing = new_is_playing # <<< Update primary state >>>
+                    print(f"Transport Status changed: {'Playing' if self.is_playing else 'Stopped'}")
+                    if not self.is_playing:
+                        # Reset counters if stopping (unless Prime logic handles it)
+                        self._reset_playback_state() # Reset reps/beats on stop
+                        pass
+                    self.update_combined_status() # Update status display
+                    self._update_transport_leds() # Update LEDs based on new state
+            except (ValueError, TypeError):
+                 print(f"Warning: Could not parse Transport.Status value: {value}")
+
+
+        # <<< Beat Count Handling (Looks Correct) >>>
+        elif outport_name == "Transport.4nCount":
+            try:
+                new_beat_count = int(value)
+                # <<< ADD CHECK AND PRINT >>>
+                if new_beat_count != self.current_beat_count:
+                    print(f"DEBUG App: Received Transport.4nCount = {new_beat_count}") # Log reception
+                    self.current_beat_count = new_beat_count
+                # <<< END CHECK AND PRINT >>>
+            except (ValueError, TypeError):
+                print(f"Warning: Could not parse beat count value: {value}")
+        # <<< END Beat Count Handling >>>
+
+        # Add handlers for other outports like Tempo, PGM changes if needed
+        # elif outport_name == "Set.PGM1":
+        #     print(f"RNBO reported PGM1 change: {value}") # Example
+        # elif outport_name == "Transport.Tempo":
+        #     print(f"RNBO reported Tempo change: {value}") # Example
+
+    # --- Playback Logic ---
+    def _process_segment_transition(self):
+        """Handles logic when LoadNowBeat is received."""
+        current_song = self.song_service.get_current_song()
+        if not current_song or not current_song.segments:
+            print("LoadNowBeat ignored: No song or segments loaded.")
+            return
+
+        num_segments = len(current_song.segments)
+        if not (0 <= self.current_segment_index < num_segments):
+            print(f"LoadNowBeat ignored: Invalid segment index {self.current_segment_index}")
+            self.current_segment_index = 0 # Reset index
+            self.current_repetition = 1
+            return
+
+        current_segment = current_song.segments[self.current_segment_index]
+        total_repetitions = current_segment.repetitions
+
+        # Check if the repetition that just *finished* was the last one
+        is_last_repetition = (self.current_repetition >= total_repetitions)
+
+        next_segment_index = self.current_segment_index
+        next_repetition = self.current_repetition + 1
+
+        if is_last_repetition:
+            print(f"Segment {self.current_segment_index + 1} finished.")
+            # --- Check for Auto Stop ---
+            if current_segment.automatic_transport_interrupt:
+                print(f"Auto-stopping transport after segment {self.current_segment_index + 1}.")
+                self.osc_service.send_rnbo_param("p_obj-6/transport/Transport.Stop", 1)
+                # Don't advance segment index or send PGM, transport is stopping.
+                # State will be updated via Transport.Status message.
+                return # Stop processing here
+
+            # --- Advance to Next Segment ---
+            next_segment_index = (self.current_segment_index + 1) % num_segments
+            next_repetition = 1 # Reset repetition count for the new segment
+            print(f"Advancing to segment {next_segment_index + 1}")
+
+            # --- Send PGM messages for the NEXT segment IF Tin.Toggle is ON ---
+            if self.tin_toggle_state == 1:
+                next_segment = current_song.segments[next_segment_index]
+                print(f"Tin.Toggle is ON. Sending PGM messages for segment {next_segment_index + 1}: PGM1={next_segment.program_message_1}, PGM2={next_segment.program_message_2}")
+                self.osc_service.send_rnbo_param("p_obj-10/Set.PGM1", next_segment.program_message_1)
+                self.osc_service.send_rnbo_param("p_obj-10/Set.PGM2", next_segment.program_message_2)
+            else:
+                print("Tin.Toggle is OFF. Skipping PGM messages.")
+
+            # --- Update State AFTER processing the finished segment ---
+            self.current_segment_index = next_segment_index
+            self.current_repetition = next_repetition
+
+            # --- Send Parameters for the NEW Current Segment ---
+            self._send_segment_params(self.current_segment_index)
+
+        else:
+            # --- Still within the same segment, just increment repetition ---
+            self.current_repetition = next_repetition
+            print(f"Starting repetition {self.current_repetition}/{total_repetitions} of segment {self.current_segment_index + 1}")
+            # No need to send PGM or segment params again
+
+        self.update_combined_status() # Update status display
+
+    def _send_segment_params(self, segment_index: int):
+        """Sends the Tempo, Loop Length, and Repetitions for the given segment index to RNBO."""
+        current_song = self.song_service.get_current_song()
+        if not current_song or not current_song.segments: return
+        num_segments = len(current_song.segments)
+        if not (0 <= segment_index < num_segments):
+            print(f"Error sending params: Invalid segment index {segment_index}")
+            return
+
+        segment = current_song.segments[segment_index]
+        print(f"Sending params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}, Reps={segment.repetitions}")
+
+        # Tempo path is correct: p_obj-6/tempo/Transport.Tempo
+        self.osc_service.send_rnbo_param("p_obj-6/tempo/Transport.Tempo", float(segment.tempo))
+
+        # PGM paths are correct: p_obj-10/Set.PGM1, p_obj-10/Set.PGM2
+        print(f"Sending initial PGM for segment {segment_index + 1}: PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
+        self.osc_service.send_rnbo_param("p_obj-10/Set.PGM1", segment.program_message_1)
+        self.osc_service.send_rnbo_param("p_obj-10/Set.PGM2", segment.program_message_2)
+
+    def _send_initial_segment_params(self):
+        """Sends parameters for the very first segment when the app starts."""
+        self._send_segment_params(0)
+
+    # --- Status Update ---
     def update_combined_status(self):
-        """Updates the systemd status with screen and MIDI info."""
+        """Updates the systemd status with screen, MIDI, OSC, and Song info."""
         screen_name = "No Screen"
         active_screen = self.screen_manager.get_active_screen()
         if active_screen:
             screen_name = active_screen.__class__.__name__
         midi_status = self.midi_service.get_status_string()
         osc_status = self.osc_service.get_status_string()
-        # <<< Separate song status and duration >>>
         song_name = self.song_service.get_current_song_name() or 'None'
         dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
-        song_status = f"Song: {song_name}{dirty_flag}" # Name and dirty flag only
-        duration_str = self.song_service.get_current_song_duration_str() # Duration string
-        # <<< END Separate >>>
+        song_status = f"Song: {song_name}{dirty_flag}"
+        # duration_str = self.song_service.get_current_song_duration_str() # Duration not needed for systemd status
 
-        # Combine for systemd status (might need truncation adjustment)
-        combined_status = f"Screen: {screen_name} | {midi_status} | {osc_status} | {song_status} | Dur: {duration_str}"
+        # Combine for systemd status (Removed playback_status)
+        combined_status = f"{screen_name} | {midi_status} | {osc_status} | {song_status}"
         self.notify_status(combined_status)
 
 
@@ -390,6 +672,13 @@ class App:
         """Clean up resources before exiting."""
         print("Cleaning up application...")
         self.notify_status("Application Shutting Down")
+
+        # Stop transport before quitting
+        if self.osc_service and self.osc_service.client:
+            print("Sending STOP command to RNBO...")
+            # <<< CHANGE VALUE TO INT 1 >>>
+            self.osc_service.send_rnbo_param("p_obj-6/transport/Transport.Stop", 1)
+            time.sleep(0.1) # Give OSC message time to send
 
         # Check for unsaved changes via SongService
         if self.song_service.is_current_song_dirty():
@@ -408,8 +697,9 @@ class App:
         time.sleep(0.1)
         self.midi_service.close_ports()
 
-        # Cleanup OSC service # <<< ADDED
-        self.osc_service.stop() # <<< ADDED
+        # Cleanup OSC service # <<< ENSURE THIS IS CALLED >>>
+        if self.osc_service:
+            self.osc_service.stop()
 
         # Quit Pygame
         pygame.font.quit()
@@ -478,6 +768,14 @@ class App:
             print(f"Failed to execute service restart command: {e}")
             self.notify_status(f"Service restart failed: {e}")
             # If restart fails, the app continues running.
+
+    def _reset_playback_state(self, reset_segment: bool = False):
+        """Resets repetition and beat counters. Optionally resets segment index."""
+        print("Resetting playback state...")
+        if reset_segment:
+            self.current_segment_index = 0
+        self.current_repetition = 1
+        self.current_beat_count = 0 # <<< RESET Beat Count >>>
 
 
 # Script Entry Point

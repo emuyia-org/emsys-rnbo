@@ -16,26 +16,11 @@
 		"title" : "tin",
 		"boxes" : [ 			{
 				"box" : 				{
-					"id" : "obj-14",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 69.0, 409.0, 24.0, 24.0 ],
-					"rnbo_classname" : "button",
-					"rnbo_serial" : 1,
-					"rnbo_uniqueid" : "button_obj-14"
-				}
-
-			}
-, 			{
-				"box" : 				{
 					"id" : "obj-12",
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 69.0, 449.0, 69.0, 23.0 ],
+					"patching_rect" : [ 69.0, 413.0, 69.0, 23.0 ],
 					"rnbo_classname" : "s",
 					"rnbo_serial" : 1,
 					"rnbo_uniqueid" : "s_obj-12",
@@ -53,22 +38,22 @@
 					"patching_rect" : [ 69.0, 367.0, 235.0, 23.0 ],
 					"rnbo_classname" : "param",
 					"rnbo_extra_attributes" : 					{
-						"displayname" : "",
+						"fromnormalized" : "",
 						"sendinit" : 1,
+						"order" : "0",
+						"displayname" : "",
+						"exponent" : 1.0,
 						"preset" : 1,
-						"enum" : "",
 						"displayorder" : "-",
 						"value" : 0.0,
-						"unit" : "",
-						"ctlin" : 0.0,
 						"tonormalized" : "",
-						"order" : "0",
-						"meta" : "",
-						"exponent" : 1.0,
-						"fromnormalized" : ""
+						"ctlin" : 0.0,
+						"enum" : "",
+						"unit" : "",
+						"meta" : ""
 					}
 ,
-					"rnbo_serial" : 3,
+					"rnbo_serial" : 1,
 					"rnbo_uniqueid" : "Tin.Toggle",
 					"rnboinfo" : 					{
 						"needsInstanceInfo" : 1,
@@ -472,8 +457,8 @@
 					"patching_rect" : [ 253.0, 266.0, 24.0, 24.0 ],
 					"rnbo_classname" : "toggle",
 					"rnbo_extra_attributes" : 					{
-						"preset" : 0,
-						"order" : ""
+						"order" : "",
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 1,
@@ -539,8 +524,8 @@
 					"patching_rect" : [ 121.0, 202.0, 24.0, 24.0 ],
 					"rnbo_classname" : "toggle",
 					"rnbo_extra_attributes" : 					{
-						"preset" : 0,
-						"order" : ""
+						"order" : "",
+						"preset" : 0
 					}
 ,
 					"rnbo_serial" : 2,
@@ -879,13 +864,6 @@
 			}
 , 			{
 				"patchline" : 				{
-					"destination" : [ "obj-12", 0 ],
-					"source" : [ "obj-14", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
 					"destination" : [ "obj-15", 0 ],
 					"order" : 0,
 					"source" : [ "obj-16", 0 ]
@@ -930,7 +908,7 @@
 			}
 , 			{
 				"patchline" : 				{
-					"destination" : [ "obj-14", 0 ],
+					"destination" : [ "obj-12", 0 ],
 					"source" : [ "obj-6", 0 ]
 				}
 

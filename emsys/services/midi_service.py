@@ -55,7 +55,7 @@ class MidiService:
                 self.is_searching = False
                 print(f"Successfully opened MIDI Input: '{self.input_port_name}'")
                 self._status_callback(f"MIDI Input Connected: '{self.input_port_name}'")
-            except (IOError, OSError, mido.MidiError) as e:
+            except (IOError, OSError) as e:
                 self.input_port = None
                 self.input_port_name = None
                 self.error_message = f"Error opening Input '{found_input_port_name}': {e}"
@@ -75,7 +75,7 @@ class MidiService:
                 self.output_port_name = found_output_port_name
                 print(f"Successfully opened MIDI Output: '{self.output_port_name}'")
                 self._status_callback(f"MIDI Output Connected: '{self.output_port_name}'")
-            except (IOError, OSError, mido.MidiError) as e:
+            except (IOError, OSError) as e:
                 self.output_port = None
                 self.output_port_name = None
                 print(f"Warning: Error opening Output '{found_output_port_name}': {e}")
@@ -165,7 +165,7 @@ class MidiService:
                 print(f"\nSuccessfully Reconnected MIDI Input: '{self.input_port_name}'")
                 self._status_callback(f"MIDI Input Reconnected: '{self.input_port_name}'")
                 self.last_connection_check_time = time.time() # Reset check timer
-            except (IOError, OSError, mido.MidiError) as e:
+            except (IOError, OSError) as e:
                 self.input_port = None
                 self.input_port_name = None
                 self.error_message = f"Found Input '{found_input_port_name}', but open failed: {e}. Retrying..."
@@ -185,7 +185,7 @@ class MidiService:
                         self.output_port_name = found_output_port_name
                         print(f"Successfully Reconnected MIDI Output: '{self.output_port_name}'")
                         self._status_callback(f"MIDI Output Reconnected: '{self.output_port_name}'")
-                    except (IOError, OSError, mido.MidiError) as e:
+                    except (IOError, OSError) as e:
                         self.output_port = None
                         self.output_port_name = None
                         print(f"Warning: Reconnected Input, but failed to reopen Output '{found_output_port_name}': {e}")
@@ -215,7 +215,7 @@ class MidiService:
                 # Use iter_pending() for non-blocking receive
                 for msg in self.input_port.iter_pending():
                     messages.append(msg)
-            except (IOError, OSError, mido.MidiError) as e:
+            except (IOError, OSError) as e:
                 print(f"\nMIDI Read Error: {e}")
                 self._handle_disconnection(reason=f"Read Error: {e}")
             except Exception as e:

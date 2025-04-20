@@ -56,5 +56,5 @@ SONGS_DIR = os.path.join(PROJECT_ROOT, "data", "songs")
 # --- OSC Settings ---
 RNBO_TARGET_IP = "127.0.0.1" # IP address of the RNBO runner
 RNBO_TARGET_PORT = 1234      # Port the RNBO runner is listening on for OSC
-# OSC_RECEIVE_IP = "127.0.0.1" # IP address for this app to listen on (if needed)
-# OSC_RECEIVE_PORT = 1235      # Port for this app to listen on (if needed)
+OSC_RECEIVE_IP = "127.0.0.1" # IP address for this app to listen on (if needed)
+OSC_RECEIVE_PORT = 1235      # Port for this app to listen on (if needed)

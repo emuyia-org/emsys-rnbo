@@ -23,24 +23,20 @@ class BaseScreen:
         """Update screen state (called once per frame)."""
         pass # Default implementation does nothing
 
-    # --- MODIFICATION HERE ---
-    def draw(self, screen_surface: pygame.Surface, midi_status: Optional[str] = None, song_status: Optional[str] = None, duration_status: Optional[str] = None):
+    # --- REVERTED MODIFICATION ---
+    def draw(self, screen_surface: pygame.Surface,
+             midi_status: Optional[str] = None,
+             song_status: Optional[str] = None,
+             duration_status: Optional[str] = None):
         """
         Base draw method. Subclasses should override this.
-        Added duration_status parameter.
+        Accepts midi_status, song_status, duration_status.
         """
         # Default implementation (e.g., fill black) or raise NotImplementedError
         screen_surface.fill((0, 0, 0)) # Example: Fill black
-        # You might want to draw basic status here or leave it to subclasses
-        # font = pygame.font.Font(None, 24)
-        # if song_status:
-        #     text_surf = font.render(song_status, True, (200, 200, 200))
-        #     screen_surface.blit(text_surf, (10, 10))
-        # if duration_status:
-        #     text_surf = font.render(duration_status, True, (200, 200, 200))
-        #     screen_surface.blit(text_surf, (10, 30))
+        # Base class doesn't draw status lines by default, subclasses should handle it.
 
-    # --- END MODIFICATION ---
+    # --- END REVERTED MODIFICATION ---
 
     def init(self):
         """Called when the screen becomes active."""

@@ -22,6 +22,11 @@ SAVE_CC = 86 # SAVE
 DELETE_CC = 93 # DELETE
 CREATE_CC = 94 # CREATE
 
+# --- Transport Control CCs (Layer A) ---
+PLAY_CC = 32 # PLAY/CONTINUE (Button A16)
+STOP_CC = 31 # STOP (Button A15)
+# PRIME is STOP (hold) + PLAY (press)
+
 # --- Program Change Range ---
 MIN_PROGRAM_MSG = 0
 MAX_PROGRAM_MSG = 127
@@ -76,6 +81,9 @@ NON_REPEATABLE_CCS = {
     KNOB_B6_CC,
     KNOB_B7_CC,
     KNOB_B8_CC,
+    # Add transport controls if they shouldn't repeat? Play/Stop are usually momentary.
+    # PLAY_CC, # Let's allow repeat for now, might be useful? Revisit if needed.
+    # STOP_CC,
 }
 # -------------------------------------------------------------
 
@@ -95,6 +103,8 @@ button_map = {
     SAVE_CC: "SAVE",
     DELETE_CC: "DELETE",
     CREATE_CC: "CREATE",
+    PLAY_CC: "PLAY", # Added
+    STOP_CC: "STOP", # Added
     # Add other CCs if they correspond to named buttons
     # FADER_SELECT_CC is not a button, so not typically added here unless needed for UI hints
 }
