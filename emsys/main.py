@@ -44,6 +44,7 @@ from emsys.ui.screen_manager import ScreenManager
 from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
 from emsys.ui.playback_screen import PlaybackScreen # <<< Make sure this import exists
 # --------------------------
+from emsys.core.song import MIN_TEMPO, MAX_TEMPO # <<< ADD THIS IMPORT
 
 # --- Import specific CCs and non-repeatable set ---
 from emsys.config.mappings import (
@@ -121,9 +122,12 @@ class App:
         # --- Playback State ---
         self.is_playing: bool = False
         self.current_segment_index: int = 0
-        self.current_repetition: int = 1 # Repetitions are 1-based
-        self.current_beat_count: int = 0 # <<< USE THIS for beat count >>>
+        self.current_repetition: int = 1
+        self.current_beat_count: int = 0
         self.stop_button_held: bool = False
+        # Track current tempo for endless encoder
+        self.current_tempo: float = 120.0  # will be synced from RNBO outport
+
         # --- RNBO Outport State ---
         self.tin_toggle_state: bool = False # <<< Changed to bool >>>
         # self.last_4n_count: int = 0 # <<< REMOVED redundant state >>>
@@ -139,7 +143,12 @@ class App:
              raise RuntimeError("Application cannot start without any screens.")
 
         self._initial_led_update() # Update LEDs based on initial screen
-        self._send_initial_segment_params() # Send params for segment 0
+        self._send_initial_segment_params()  # sends initial tempo
+        # initialize from first segment if available
+        song0 = self.song_service.get_current_song()
+        if song0 and song0.segments:
+            self.current_tempo = song0.segments[0].tempo
+
         print("App initialization complete.")
 
 
@@ -241,7 +250,7 @@ class App:
                     if isinstance(active_screen, PlaybackScreen):
                         # PlaybackScreen expects all arguments
                         # <<< ADD PRINT >>>
-                        print(f"DEBUG App: Passing to PlaybackScreen: '{playback_status_str}'")
+                        # print(f"DEBUG App: Passing to PlaybackScreen: '{playback_status_str}'")
                         # <<< END PRINT >>>
                         active_screen.draw(
                             self.screen,
@@ -303,6 +312,7 @@ class App:
         if msg.type == 'control_change':
             control = msg.control
             value = msg.value
+            cc = control # Added for clarity
             # print(f"Received CC: control={control}, value={value}, channel={msg.channel}") # Debugging
 
             # --- Handle Transport Controls ---
@@ -359,16 +369,17 @@ class App:
 
             # --- Handle Specific Controls (e.g., Knobs) FIRST ---
             if control == KNOB_A1_CC:
-                # Define the full OSC path for the parameter
-                rnbo_param_path = "p_obj-6/tempo/Transport.Tempo"
-
-                # Send the raw MIDI value (0-127) using send_rnbo_param
-                # Assuming the RNBO parameter handles this range or normalization internally
-                self.osc_service.send_rnbo_param(rnbo_param_path, value)
-
-                # Optionally, dispatch to screen as well if needed for UI feedback
-                # self._dispatch_action(msg)
-                return # Handled
+                # endless encoder: adjust BPM step=1
+                direction = 0
+                if 1 <= value <= 63:   direction = 1
+                elif 65 <= value <= 127: direction = -1
+                if direction != 0:
+                    new_t = self.current_tempo + direction * 1.0
+                    # clamp to valid range
+                    new_t = max(MIN_TEMPO, min(MAX_TEMPO, new_t))
+                    self.current_tempo = new_t
+                    self.osc_service.send_rnbo_param("p_obj-6/tempo/Transport.Tempo", new_t)
+                return  # Handled
 
             # --- Handle Button Release (value == 0) ---
             if value == 0:
@@ -395,23 +406,23 @@ class App:
                 if control not in self.pressed_buttons:
                     self.pressed_buttons[control] = {
                         'press_time': current_time,
-                        'last_repeat_time': current_time, # Set initial repeat time for delay calc
-                        'message': msg
+                        'last_repeat_time': current_time, # Initialize last repeat time
+                        'message': msg # Store the original message
                     }
-                    # Dispatch the initial press action
-                    self._dispatch_action(msg)
-                # If already pressed (e.g., duplicate MIDI message), do nothing here, repeat logic handles it
-                return # Stop processing here for button presses (127)
+                self._dispatch_action(msg) # Dispatch press action immediately
+            elif value == 0: # Button Release
+                if cc in self.pressed_buttons:
+                    del self.pressed_buttons[cc] # Remove from repeat tracking
+                # Optionally dispatch release action if needed (currently not used)
+                # self._dispatch_action(msg)
+            else: # Handle other CC values (like faders, non-repeating knobs)
+                 self._dispatch_action(msg)
 
-            # --- Handle ALL OTHER CC Values (Encoders, Faders, etc.) ---
-            else:
-                self._dispatch_action(msg)
-                return # Stop processing here after dispatching
-
-        # --- Handle Non-CC Messages (Notes, Program Changes, etc.) ---
         else:
-            self._dispatch_action(msg)
-            # No return needed here as it's the end of the function
+            # Handle non-CC messages if necessary
+            # print(f"Received non-CC MIDI: {msg}")
+            pass # Pass other message types if needed by screens
+
 
     def _dispatch_action(self, msg):
         """
@@ -422,33 +433,32 @@ class App:
 
         active_screen = self.screen_manager.get_active_screen()
 
-        # Check for active input widgets (e.g., text input)
+        # --- Check if a UI widget (like text input) is currently active ---
         widget_active = False
         if active_screen:
-            # Example check - adapt if your widget attribute names differ
+            # Check for a text input widget specifically
             text_input_widget = getattr(active_screen, 'text_input_widget', None)
             if text_input_widget and getattr(text_input_widget, 'is_active', False):
                  widget_active = True
                  # print("[Dispatch] Text input widget is active, blocking global actions.") # Debug
 
-        # --- Handle Global Actions (Screen Switching) ---
-        # Only check for global actions on specific CCs and *only* if a widget isn't active
-        # Crucially, check the value is 127 for button presses to trigger screen changes
+        # --- Handle Global Actions (like screen switching) ---
+        # Only process global actions if NO widget is active AND it's a button press (value 127)
         if not widget_active and msg.type == 'control_change' and msg.value == 127:
             control = msg.control
             if control == NEXT_CC:
                 print(f"Requesting next screen (via CC #{NEXT_CC})")
                 self.screen_manager.request_next_screen()
                 self.update_combined_status() # Update status after screen change request
-                return # Handled globally, don't pass to screen
+                return # Action handled globally, stop processing here
             elif control == PREV_CC:
                 print(f"Requesting previous screen (via CC #{PREV_CC})")
                 self.screen_manager.request_previous_screen()
                 self.update_combined_status() # Update status after screen change request
-                return # Handled globally, don't pass to screen
+                return # Action handled globally, stop processing here
 
-        # --- Pass Message to Active Screen ---
-        # If it wasn't a handled global action, pass it to the screen's handler
+        # --- Pass Message to Active Screen's Handler ---
+        # If the message wasn't handled as a global action, let the active screen process it.
         if active_screen and hasattr(active_screen, 'handle_midi'):
             try:
                 active_screen.handle_midi(msg)
@@ -458,21 +468,31 @@ class App:
 
     def _handle_button_repeats(self, current_time):
         """Check and handle button repeats based on the current time."""
+        # Iterate safely over a copy of keys in case the dictionary changes
         pressed_controls = list(self.pressed_buttons.keys())
         for control in pressed_controls:
-            if control not in self.pressed_buttons: continue
+            # Re-check if the button is still considered pressed
+            if control not in self.pressed_buttons:
+                continue
 
+            # Skip controls marked as non-repeatable (like knobs/faders)
             if control in NON_REPEATABLE_CCS:
                 continue
 
             state = self.pressed_buttons[control]
             time_held = current_time - state['press_time']
 
+            # Check if the initial delay has passed
             if time_held >= BUTTON_REPEAT_DELAY_S:
+                # Check if the repeat interval has passed since the last repeat (or initial press)
                 if (current_time - state['last_repeat_time']) >= BUTTON_REPEAT_INTERVAL_S:
+                    print(f"Repeating action for CC {control}") # Debug
+                    # Dispatch the original press message again
                     self._dispatch_action(state['message'])
+                    # Update the last repeat time
                     state['last_repeat_time'] = current_time
 
+    # ...rest of the App class...
 
     def _initial_led_update(self):
         """Send initial LED values via MidiService, potentially based on active screen."""
@@ -776,7 +796,6 @@ class App:
             self.current_segment_index = 0
         self.current_repetition = 1
         self.current_beat_count = 0 # <<< RESET Beat Count >>>
-
 
 # Script Entry Point
 def main():
