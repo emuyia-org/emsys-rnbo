@@ -127,6 +127,13 @@ class App:
         self.stop_button_held: bool = False
         # Track current tempo for endless encoder
         self.current_tempo: float = 120.0  # will be synced from RNBO outport
+        self.next_segment_prepared: bool = False
+        self.prime_action_occurred: bool = False # <<< ADD THIS LINE
+
+        # --- Flags for Segment Transition ---
+        self.next_segment_prepared: bool = False
+        self.prepared_next_segment_index: Optional[int] = None
+        # --- End Flags ---
 
         # --- RNBO Outport State ---
         self.tin_toggle_state: bool = False # <<< Changed to bool >>>
@@ -334,6 +341,7 @@ class App:
                         # self.current_segment_index = 0 # <<< REMOVED: Don't reset segment >>>
                         # self.current_repetition = 1 # <<< REMOVED: Don't reset repetition >>>
                         self.current_beat_count = 0 # <<< ADDED: Reset only beat count >>>
+                        self.prime_action_occurred = True
                         # self._send_segment_params(self.current_segment_index) # <<< REMOVED: Don't resend params >>>
                         self.update_combined_status()
                     else:
@@ -496,6 +504,11 @@ class App:
                     # Update the last repeat time
                     state['last_repeat_time'] = current_time
 
+    def _clear_preparation_flags(self):
+        """Resets the flags used for segment transition."""
+        self.next_segment_prepared = False
+        self.prepared_next_segment_index = None
+
     # ...rest of the App class...
 
     def _initial_led_update(self):
@@ -536,15 +549,18 @@ class App:
     # --- OSC Callback Handler ---
     def _handle_rnbo_outport(self, outport_name: str, value: Any):
         """Callback function passed to OSCService to handle incoming messages."""
-        # print(f"App received OSC: {outport_name} = {value}") # Debug
         current_song = self.song_service.get_current_song()
-        if not current_song: return # No song loaded, nothing to do
+        # No song? Do nothing. Check added here for robustness.
+        if not current_song:
+            # Clear flags if no song is loaded to prevent stale state
+            self._clear_preparation_flags()
+            return
 
         if outport_name == "Transport.LoadNowBeat":
-            # This is a bang (value is usually 1 or similar)
             # Triggered just before the start of the *next* loop/repetition
+            # This signal is now ONLY for PREPARATION (sending PGMs)
             print(f"Received LoadNowBeat (Value: {value}) - Current Seg: {self.current_segment_index+1}, Rep: {self.current_repetition}")
-            self._process_segment_transition()
+            self._prepare_next_segment_or_rep() # Renamed function call
 
         elif outport_name == "Tin.Toggle":
              try:
@@ -584,36 +600,84 @@ class App:
 
         # <<< Beat Count Handling (Looks Correct) >>>
         elif outport_name == "Transport.4nCount":
+            # Signal indicating current beat position.
+            # Use Beat 1 to trigger ACTIVATION of a prepared segment or increment repetition.
             try:
                 new_beat_count = int(value)
-                # <<< ADD CHECK AND PRINT >>>
-                if new_beat_count != self.current_beat_count:
-                    print(f"DEBUG App: Received Transport.4nCount = {new_beat_count}") # Log reception
-                    self.current_beat_count = new_beat_count
-                # <<< END CHECK AND PRINT >>>
-            except (ValueError, TypeError):
-                print(f"Warning: Could not parse beat count value: {value}")
-        # <<< END Beat Count Handling >>>
+                # Store the raw beat count (0-indexed from RNBO likely)
+                self.current_beat_count = new_beat_count
 
-        # Add handlers for other outports like Tempo, PGM changes if needed
-        # elif outport_name == "Set.PGM1":
-        #     print(f"RNBO reported PGM1 change: {value}") # Example
-        # elif outport_name == "Transport.Tempo":
-        #     print(f"RNBO reported Tempo change: {value}") # Example
+                # Check if it's the first beat (assuming 0 from RNBO marks the start of the cycle)
+                # Or adjust to '1' if your RNBO patch sends 1-based counts. Let's assume 0 for now.
+                is_first_beat_of_cycle = (new_beat_count == 0) # <<< ADJUST 0 or 1 based on RNBO output >>>
+
+                if is_first_beat_of_cycle:
+                    print(f"Beat 0/1 received. Checking for activation...") # Log start of cycle
+
+                    if self.next_segment_prepared and self.prepared_next_segment_index is not None:
+                        print(f"Beat 0/1: Activating prepared segment {self.prepared_next_segment_index + 1}.")
+                        # --- Activate the prepared segment ---
+                        self.current_segment_index = self.prepared_next_segment_index
+                        self.current_repetition = 1 # Start rep 1 of the new segment
+                        # Send Tempo and Loop Length for the *newly activated* segment
+                        self._send_segment_activation_params(self.current_segment_index)
+                        # Clear the flags now that activation is done
+                        self._clear_preparation_flags()
+                        print(f"Activation complete. Now on Seg {self.current_segment_index + 1}, Rep 1.")
+                    else:
+                        # --- No segment activation, means the current segment continues ---
+                        # Increment repetition count ONLY when the new cycle starts and we are NOT changing segments
+                        print(f"Beat 0/1: No segment prepared. Incrementing repetition for segment {self.current_segment_index + 1}.")
+                        if current_song and current_song.segments and 0 <= self.current_segment_index < len(current_song.segments):
+                             # Only increment if we are actually playing and within a valid segment
+                             if self.is_playing:
+                                 # <<< ADD CHECK FOR PRIME FLAG >>>
+                                if self.prime_action_occurred:
+                                    print("Prime action occurred, skipping rep increment for this cycle.")
+                                    self.prime_action_occurred = False # Reset the flag
+                                else:
+                                    self.current_repetition += 1
+                                    print(f"Segment {self.current_segment_index + 1} starting repetition {self.current_repetition}.")
+                                # <<< END CHECK >>>
+                             else:
+                                 # If stopped on beat 1, reset rep to 1 for consistency when restarting
+                                 self.current_repetition = 1
+                                 print(f"Stopped on Beat 0/1, repetition reset to 1.")
+                        else:
+                             # Reset if state is invalid
+                             self.current_repetition = 1
+                             print(f"Invalid state on Beat 0/1, repetition reset to 1.")
+
+                # Update status display after processing beat count changes
+                self.update_combined_status()
+
+            except (ValueError, TypeError):
+                print(f"Error parsing Transport.4nCount: {value}")
+
+        # ... potentially handle other outports ...
 
     # --- Playback Logic ---
-    def _process_segment_transition(self):
-        """Handles logic when LoadNowBeat is received."""
+    def _prepare_next_segment_or_rep(self):
+        """
+        Handles logic when LoadNowBeat is received. PREPARES the next segment transition.
+        Checks if the current segment is finishing its last repetition.
+        If YES: Sends PGM messages for the next segment (if Tin.Toggle ON),
+                sets preparation flags, handles auto-stop. Resets internal rep count for next segment.
+        If NO: Clears preparation flags.
+        Does NOT change self.current_segment_index or self.current_repetition directly.
+        """
         current_song = self.song_service.get_current_song()
         if not current_song or not current_song.segments:
             print("LoadNowBeat ignored: No song or segments loaded.")
+            self._clear_preparation_flags() # Ensure flags are clear
             return
 
         num_segments = len(current_song.segments)
         if not (0 <= self.current_segment_index < num_segments):
             print(f"LoadNowBeat ignored: Invalid segment index {self.current_segment_index}")
-            self.current_segment_index = 0 # Reset index
+            self.current_segment_index = 0 # Reset index if invalid
             self.current_repetition = 1
+            self._clear_preparation_flags()
             return
 
         current_segment = current_song.segments[self.current_segment_index]
@@ -622,47 +686,45 @@ class App:
         # Check if the repetition that just *finished* was the last one
         is_last_repetition = (self.current_repetition >= total_repetitions)
 
-        next_segment_index = self.current_segment_index
-        next_repetition = self.current_repetition + 1
-
         if is_last_repetition:
-            print(f"Segment {self.current_segment_index + 1} finished.")
+            print(f"Segment {self.current_segment_index + 1} finished last repetition ({self.current_repetition}/{total_repetitions}). Preparing next.")
+
             # --- Check for Auto Stop ---
             if current_segment.automatic_transport_interrupt:
                 print(f"Auto-stopping transport after segment {self.current_segment_index + 1}.")
-                self.osc_service.send_rnbo_param("p_obj-6/transport/Transport.Stop", 1)
-                # Don't advance segment index or send PGM, transport is stopping.
-                # State will be updated via Transport.Status message.
+                self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.Stop", 1)
+                # Don't prepare next segment if stopping. Clear flags.
+                self._clear_preparation_flags()
                 return # Stop processing here
 
-            # --- Advance to Next Segment ---
+            # --- Calculate Next Segment Index ---
             next_segment_index = (self.current_segment_index + 1) % num_segments
-            next_repetition = 1 # Reset repetition count for the new segment
-            print(f"Advancing to segment {next_segment_index + 1}")
+            print(f"Preparing transition to segment {next_segment_index + 1}")
 
-            # --- Send PGM messages for the NEXT segment IF Tin.Toggle is ON ---
-            if self.tin_toggle_state == 1:
+            # --- Send PREPARATORY PGM messages for the NEXT segment IF Tin.Toggle is ON ---
+            if self.tin_toggle_state: # Check the boolean state directly
                 next_segment = current_song.segments[next_segment_index]
-                print(f"Tin.Toggle is ON. Sending PGM messages for segment {next_segment_index + 1}: PGM1={next_segment.program_message_1}, PGM2={next_segment.program_message_2}")
-                self.osc_service.send_rnbo_param("p_obj-10/Set.PGM1", next_segment.program_message_1)
-                self.osc_service.send_rnbo_param("p_obj-10/Set.PGM2", next_segment.program_message_2)
+                print(f"Tin.Toggle is ON. Sending PREPARATORY PGM messages for upcoming segment {next_segment_index + 1}: PGM1={next_segment.program_message_1}, PGM2={next_segment.program_message_2}")
+                self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", next_segment.program_message_1)
+                self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", next_segment.program_message_2)
             else:
-                print("Tin.Toggle is OFF. Skipping PGM messages.")
+                print("Tin.Toggle is OFF. Skipping preparatory PGM messages.")
 
-            # --- Update State AFTER processing the finished segment ---
-            self.current_segment_index = next_segment_index
-            self.current_repetition = next_repetition
-
-            # --- Send Parameters for the NEW Current Segment ---
-            self._send_segment_params(self.current_segment_index)
+            # --- Set Preparation Flags ---
+            print(f"LoadNowBeat: Setting preparation flags for segment {next_segment_index + 1}.")
+            self.next_segment_prepared = True
+            self.prepared_next_segment_index = next_segment_index
+            # DO NOT change self.current_segment_index or self.current_repetition here.
 
         else:
-            # --- Still within the same segment, just increment repetition ---
-            self.current_repetition = next_repetition
-            print(f"Starting repetition {self.current_repetition}/{total_repetitions} of segment {self.current_segment_index + 1}")
-            # No need to send PGM or segment params again
+            # --- Still within the same segment, finished a repetition but not the last one ---
+            print(f"Segment {self.current_segment_index + 1} finished repetition {self.current_repetition}/{total_repetitions}. No segment change prepared.")
+            # Ensure preparation flags are clear if we are just finishing a rep but not the segment
+            self._clear_preparation_flags()
+            # DO NOT increment self.current_repetition here. It increments on Beat 1.
 
-        self.update_combined_status() # Update status display
+        # Update status display immediately after LoadNowBeat processing
+        self.update_combined_status()
 
     def _send_segment_params(self, segment_index: int):
         """Sends the Tempo, Loop Length, and Repetitions for the given segment index to RNBO."""
@@ -684,9 +746,56 @@ class App:
         self.osc_service.send_rnbo_param("p_obj-10/Set.PGM1", segment.program_message_1)
         self.osc_service.send_rnbo_param("p_obj-10/Set.PGM2", segment.program_message_2)
 
+    def _send_segment_activation_params(self, segment_index: int):
+        """Sends the Tempo and Loop Length for the given segment index to RNBO.
+           Called when a segment becomes active (on Beat 1). Does NOT send PGMs."""
+        current_song = self.song_service.get_current_song()
+        if not current_song or not current_song.segments: return
+        num_segments = len(current_song.segments)
+        if not (0 <= segment_index < num_segments):
+            print(f"Error sending activation params: Invalid segment index {segment_index}")
+            return
+
+        segment = current_song.segments[segment_index]
+        print(f"Sending ACTIVATION params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}")
+
+        # Send Tempo
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
+        # Send Loop Length (Assuming path exists - replace with actual path if different)
+        # Example path, adjust as needed:
+        # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
+        print(f"Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
+
+        # DO NOT SEND PGMs HERE - They were sent on LoadNowBeat
+
     def _send_initial_segment_params(self):
-        """Sends parameters for the very first segment when the app starts."""
-        self._send_segment_params(0)
+        """Sends ALL parameters (Tempo, Loop Length, PGMs) for the very
+           first segment (index 0) when the app starts or song loads."""
+        current_song = self.song_service.get_current_song()
+        segment_index = 0 # Always send for the first segment initially
+        if not current_song or not current_song.segments:
+            print("Cannot send initial params: No song or segments.")
+            return
+        num_segments = len(current_song.segments)
+        if not (0 <= segment_index < num_segments):
+             print(f"Error sending initial params: Invalid segment index {segment_index}")
+             return
+
+        segment = current_song.segments[segment_index]
+        print(f"Sending INITIAL params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}, PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
+
+        # Send Tempo
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
+        # Send Loop Length (Adjust path as needed)
+        # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
+        print(f"Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
+
+        # Send PGMs for the initial segment
+        self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", segment.program_message_1)
+        self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", segment.program_message_2)
+
+        # Update internal tempo state as well
+        self.current_tempo = segment.tempo
 
     # --- Status Update ---
     def update_combined_status(self):
