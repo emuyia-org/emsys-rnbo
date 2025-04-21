@@ -196,7 +196,7 @@ class SongEditScreen(BaseScreen):
                 return
 
         # --- Handle Fader for Selection ---
-        if cc == mappings.FADER_SELECT_CC:
+        if cc == mappings.FADER_B_CC:
             self.multi_select_indices.clear() # <<< Clear multi-select on fader use
             self._handle_fader_selection(value)
             return # Fader handled

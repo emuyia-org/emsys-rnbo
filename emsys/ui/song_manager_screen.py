@@ -174,7 +174,7 @@ class SongManagerScreen(BaseScreen):
             return # Return after handling prompt input or NO button state update
 
         # --- Handle Fader Selection ---
-        if cc == mappings.FADER_SELECT_CC:
+        if cc == mappings.FADER_B_CC:
             self._handle_fader_selection(value)
             return # Return after handling fader or NO button state update
 
