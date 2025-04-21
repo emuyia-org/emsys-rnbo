@@ -8,14 +8,13 @@ Handles exit via MIDI CC 47. Includes MIDI device auto-reconnection via MidiServ
 Implements universal button hold-repeat for MIDI CC messages.
 """
 import pygame
-import mido
-import time
 import sys
 import os
-import sdnotify
+import time
 import traceback
+import sdnotify # For systemd notifications
+import subprocess # For shutdown/reboot/service control
 from typing import Optional, Dict, Any, Tuple # <<< Added Tuple
-import subprocess
 
 # Add the project root directory to the path to enable absolute imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,7 +41,7 @@ from emsys.services.song_service import SongService # <<< ADDED SongService
 from emsys.services.osc_service import OSCService # <<< ADDED OSCService
 from emsys.ui.screen_manager import ScreenManager
 from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
-from emsys.ui.playback_screen import PlaybackScreen # <<< Make sure this import exists
+# from emsys.ui.playback_screen import PlaybackScreen # <<< REMOVE PlaybackScreen import
 # --------------------------
 from emsys.core.song import MIN_TEMPO, MAX_TEMPO # <<< ADD THIS IMPORT
 
@@ -67,6 +66,11 @@ class App:
         self.midi_service: Optional[MidiService] = None
         self.notifier: Optional[sdnotify.SystemdNotifier] = None
         # <<< END MOVE >>>
+        
+        # Add this for status notification rate limiting
+        self.last_status_notification_time = 0
+        self.status_notification_interval = 2.0  # seconds between status updates
+        self.last_status_message = ""
 
         self.notifier = sdnotify.SystemdNotifier() # Now assign the instance
         self.notify_status("Initializing Pygame...")
@@ -160,20 +164,30 @@ class App:
 
 
     def notify_status(self, status_message):
-        """Helper function to print status and notify systemd."""
-        max_len = 80 # Limit systemd status length
-        truncated_message = status_message[:max_len] + '...' if len(status_message) > max_len else status_message
-        print(f"Status: {status_message}") # Print full message to console
-        try:
-            self.notifier.notify(f"STATUS={truncated_message}")
-        except Exception as e:
-            print(f"Could not notify systemd: {e}")
+        """Helper function to print status and notify systemd with rate limiting."""
+        current_time = time.time()
+        
+        # Always print to console for debugging (optional)
+        if self.last_status_message != status_message:
+            print(f"Status: {status_message}")
+            self.last_status_message = status_message
+        
+        # Only send to systemd if enough time has passed since last notification
+        if current_time - self.last_status_notification_time >= self.status_notification_interval:
+            max_len = 80  # Limit systemd status length
+            truncated_message = status_message[:max_len] + '...' if len(status_message) > max_len else status_message
+            
+            try:
+                self.notifier.notify(f"STATUS={truncated_message}")
+                self.last_status_notification_time = current_time
+            except Exception as e:
+                print(f"Could not notify systemd: {e}")
 
     def run(self):
         """Main application loop."""
         self.running = True
         self.notify_status("Application Running") # Initial running status
-        self.update_combined_status()
+        # self.update_combined_status() # <<< Moved initial call inside loop
         self.notifier.notify("READY=1")
         print("Application loop started.")
 
@@ -194,21 +208,26 @@ class App:
             try:
                 midi_messages = self.midi_service.receive_messages()
                 for msg in midi_messages:
-                    self.handle_midi_message(msg) # Call the updated handler
+                    self.handle_midi_message(msg) # <<< Ensure messages are handled
             except Exception as e:
                  print(f"\n--- Unhandled Error in MIDI receive loop ---")
                  traceback.print_exc()
+                 # Potentially add a short sleep to prevent tight loop on error
+                 time.sleep(0.01)
+
 
             # --- Process Pygame Events ---
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    self.running = False
+                    self.running = False # <<< Set running to False
+                # Pass event to active screen if it has a handler
                 if active_screen and hasattr(active_screen, 'handle_event'):
                     try:
                         active_screen.handle_event(event)
                     except Exception as e:
-                        print(f"Error in {active_screen.__class__.__name__} handle_event: {e}")
+                        print(f"Error in screen {active_screen.__class__.__name__} handling event {event}: {e}")
                         traceback.print_exc()
+
 
             # --- Handle Button Repeats ---
             self._handle_button_repeats(current_time)
@@ -216,76 +235,51 @@ class App:
             # --- Update Active Screen ---
             if active_screen and hasattr(active_screen, 'update'):
                 try:
-                    active_screen.update()
+                    active_screen.update() # <<< Call update method
                 except Exception as e:
-                    print(f"Error in {active_screen.__class__.__name__} update: {e}")
+                    print(f"Error in screen {active_screen.__class__.__name__} update: {e}")
                     traceback.print_exc()
 
+
+            # --- Prepare Status Strings ---
+            # <<< Moved status preparation before drawing >>>
+            midi_status = self.midi_service.get_status_string()
+            osc_status = self.osc_service.get_status_string()
+            song_name = self.song_service.get_current_song_name() or 'None'
+            dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
+            song_status = f"Song: {song_name}{dirty_flag}"
+            duration_str = self.song_service.get_current_song_duration_str() # Calculate duration if needed by screen
+
+            # <<< Get detailed playback status components >>>
+            playback_components = self._get_playback_status_components()
+
+            # <<< Update combined systemd status >>>
+            # This call updates the systemd status, but doesn't print to console itself
+            self.update_combined_status(playback_components)
 
             # --- Drawing ---
             self.screen.fill(BLACK)
             if active_screen and hasattr(active_screen, 'draw'):
                 try:
-                    # --- Gather Status Strings ---
-                    midi_status_str = self.midi_service.get_status_string()
-                    osc_status_str = self.osc_service.get_status_string()
-                    song_name = self.song_service.get_current_song_name() or 'None'
-                    dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
-                    song_status_str = f"Song: {song_name}{dirty_flag}"
-                    duration_status_str = f"Duration: {self.song_service.get_current_song_duration_str()}"
-                    # <<< ADD Tempo Status String >>>
-                    tempo_status_str = f"Tempo: {self.current_tempo:.1f}"
-
-                    # --- Calculate Playback Status String (only needed for PlaybackScreen) ---
-                    playback_status_str = None
-                    if isinstance(active_screen, PlaybackScreen): # Check if it's the PlaybackScreen
-                        play_state_char = ">" if self.is_playing else "||"
-                        current_song = self.song_service.get_current_song()
-                        total_segments = len(current_song.segments) if current_song else 0
-                        total_reps = 0
-                        if current_song and 0 <= self.current_segment_index < total_segments:
-                            try:
-                                total_reps = current_song.segments[self.current_segment_index].repetitions
-                            except IndexError:
-                                total_reps = '?' # Should not happen if song data is valid
-
-                        # <<< USE self.current_beat_count and add 1 for display >>>
-                        beat_display = self.current_beat_count + 1
-                        playback_status_str = f"Play: {play_state_char} Seg:{self.current_segment_index + 1}/{total_segments} Rep:{self.current_repetition}/{total_reps} Beat:{beat_display}"
-                        # <<< END CHANGE >>>
-                    # --- End Calculate Playback Status ---
-
-                    # --- CONDITIONAL DRAW CALL (Looks Correct) ---
-                    if isinstance(active_screen, PlaybackScreen):
-                        # PlaybackScreen expects all arguments
-                        # <<< ADD PRINT >>>
-                        # print(f"DEBUG App: Passing to PlaybackScreen: '{playback_status_str}'")
-                        # <<< END PRINT >>>
-                        active_screen.draw(
-                            self.screen,
-                            midi_status=midi_status_str,
-                            song_status=song_status_str,
-                            duration_status=duration_status_str,
-                            playback_status=playback_status_str, # Pass playback status
-                            osc_status=osc_status_str,          # Pass OSC status
-                            tempo_status=tempo_status_str       # <<< Pass Tempo Status >>>
-                        )
-                    else:
-                        # Other screens expect only the base arguments
-                        active_screen.draw(
-                            self.screen,
-                            midi_status=midi_status_str,
-                            song_status=song_status_str,
-                            duration_status=duration_status_str
-                        )
-                    # --- END CONDITIONAL DRAW CALL ---
+                    # <<< Pass detailed playback components to draw >>>
+                    active_screen.draw(
+                        screen_surface=self.screen,
+                        midi_status=midi_status,
+                        song_status=song_status,
+                        duration_status=duration_str, # Pass duration if needed
+                        osc_status=osc_status,
+                        # Pass individual playback components
+                        play_symbol=playback_components['play_symbol'],
+                        seg_text=playback_components['seg_text'],
+                        rep_text=playback_components['rep_text'],
+                        beat_text=playback_components['beat_text'],
+                        tempo_text=playback_components['tempo_text'],
+                        current_playing_segment_index=playback_components['current_playing_segment_index']
+                    )
 
                 except Exception as e:
-                    print(f"Error in {active_screen.__class__.__name__} draw: {e}")
+                    print(f"Error during screen {active_screen.__class__.__name__} draw: {e}")
                     traceback.print_exc()
-                    error_font = pygame.font.Font(None, 30)
-                    error_surf = error_font.render(f"Draw Error in {active_screen.__class__.__name__}!", True, RED)
-                    self.screen.blit(error_surf, (10, self.screen.get_height() // 2))
 
 
             pygame.display.flip()
@@ -628,7 +622,7 @@ class App:
                         # --- No segment activation, means the current segment continues ---
                         # Increment repetition count ONLY when the new cycle starts and we are NOT changing segments
                         print(f"Beat 0/1: No segment prepared. Incrementing repetition for segment {self.current_segment_index + 1}.")
-                        if current_song and current_song.segments and 0 <= self.current_segment_index < len(current_song.segments):
+                        if current_song and 0 <= self.current_segment_index < len(current_song.segments):
                              # Only increment if we are actually playing and within a valid segment
                              if self.is_playing:
                                  # <<< ADD CHECK FOR PRIME FLAG >>>
@@ -798,8 +792,8 @@ class App:
         self.current_tempo = segment.tempo
 
     # --- Status Update ---
-    def update_combined_status(self):
-        """Updates the systemd status with screen, MIDI, OSC, and Song info."""
+    def update_combined_status(self, playback_components: Optional[Dict[str, Any]] = None):
+        """Updates the systemd status with screen, MIDI, OSC, Song, and Playback info."""
         screen_name = "No Screen"
         active_screen = self.screen_manager.get_active_screen()
         if active_screen:
@@ -809,10 +803,20 @@ class App:
         song_name = self.song_service.get_current_song_name() or 'None'
         dirty_flag = "*" if self.song_service.is_current_song_dirty() else ""
         song_status = f"Song: {song_name}{dirty_flag}"
-        # duration_str = self.song_service.get_current_song_duration_str() # Duration not needed for systemd status
 
-        # Combine for systemd status (Removed playback_status)
-        combined_status = f"{screen_name} | {midi_status} | {osc_status} | {song_status}"
+        # Generate playback status string for systemd if components are provided
+        playback_status_str = ""
+        if playback_components:
+            # Format a concise playback status for systemd
+            pb_symbol = playback_components['play_symbol']
+            pb_seg = playback_components['seg_text'].replace("Seg: ", "")
+            pb_rep = playback_components['rep_text'].replace("Rep: ", "")
+            pb_beat = playback_components['beat_text'].replace("Beat: ", "B")
+            pb_tempo = playback_components['tempo_text'].replace("Tempo: ", "T")
+            playback_status_str = f"| {pb_symbol} {pb_seg} {pb_rep} {pb_beat} {pb_tempo}"
+
+        # Combine for systemd status
+        combined_status = f"{screen_name} | {midi_status} | {osc_status} | {song_status}{playback_status_str}"
         self.notify_status(combined_status)
 
 
@@ -924,6 +928,43 @@ class App:
             self.current_segment_index = 0
         self.current_repetition = 1
         self.current_beat_count = 0 # <<< RESET Beat Count >>>
+
+    # <<< NEW METHOD to generate playback status components >>>
+    def _get_playback_status_components(self) -> Dict[str, Any]:
+        """Generates detailed playback status components."""
+        current_song = self.song_service.get_current_song()
+        num_segments = len(current_song.segments) if current_song and current_song.segments else 0
+
+        play_symbol = ">" if self.is_playing else "||"
+        tempo_text = f"Tempo: {self.current_tempo:.1f}" # Use internal tempo state
+
+        seg_text = "Seg: -/-"
+        rep_text = "Rep: -/-"
+        beat_text = f"Beat: {self.current_beat_count + 1}" # Display 1-based beat count
+
+        current_playing_segment_index = None # Default to None
+
+        if current_song and current_song.segments and 0 <= self.current_segment_index < num_segments:
+            current_segment = current_song.segments[self.current_segment_index]
+            total_repetitions = current_segment.repetitions
+            seg_text = f"Seg: {self.current_segment_index + 1}/{num_segments}"
+            rep_text = f"Rep: {self.current_repetition}/{total_repetitions}"
+            current_playing_segment_index = self.current_segment_index # Set the index if valid
+        else:
+            # Handle cases where there's no song or index is invalid
+            seg_text = f"Seg: -/{num_segments}" if num_segments > 0 else "Seg: -/-"
+            rep_text = "Rep: -/-"
+            # beat_text remains as calculated above or default
+
+        return {
+            "play_symbol": play_symbol,
+            "seg_text": seg_text,
+            "rep_text": rep_text,
+            "beat_text": beat_text,
+            "tempo_text": tempo_text,
+            "current_playing_segment_index": current_playing_segment_index
+        }
+    # <<< END NEW METHOD >>>
 
 # Script Entry Point
 def main():

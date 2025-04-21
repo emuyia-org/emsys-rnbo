@@ -13,14 +13,14 @@ from emsys.ui.base_screen import BaseScreen
 from emsys.ui.placeholder_screen import PlaceholderScreen
 from emsys.ui.song_manager_screen import SongManagerScreen
 from emsys.ui.song_edit_screen import SongEditScreen
-from emsys.ui.playback_screen import PlaybackScreen # <<< ADDED
+# from emsys.ui.playback_screen import PlaybackScreen # <<< ADDED
 from emsys.services.song_service import SongService
 
 # Define screen classes in order
 SCREEN_CLASSES = [
     screen for screen in [
         PlaceholderScreen,
-        PlaybackScreen, # <<< ADDED
+        # PlaybackScreen, # <<< ADDED
         SongManagerScreen,
         SongEditScreen,
     ] if screen is not None

@@ -110,11 +110,20 @@ class PlaceholderScreen(BaseScreen):
             self.base_wink_duration * 1.1
         )
 
+    # <<< MODIFIED: Update signature to match BaseScreen and main.py call >>>
     def draw(self, screen_surface: pygame.Surface,
              midi_status: Optional[str] = None,
              song_status: Optional[str] = None,
-             duration_status: Optional[str] = None):
-             # Removed playback_status and osc_status
+             duration_status: Optional[str] = None,
+             osc_status: Optional[str] = None, # Added osc_status
+             # Added detailed playback components (even if not used here)
+             play_symbol: Optional[str] = None,
+             seg_text: Optional[str] = None,
+             rep_text: Optional[str] = None,
+             beat_text: Optional[str] = None,
+             tempo_text: Optional[str] = None,
+             current_playing_segment_index: Optional[int] = None):
+        # <<< END MODIFIED >>>
         # <<< ADDED: Get screen dimensions from the passed surface >>>
         screen_width = screen_surface.get_width()
         screen_height = screen_surface.get_height()

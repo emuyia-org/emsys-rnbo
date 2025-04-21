@@ -2,14 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 Screen for viewing and editing Song objects using SongService.
-Uses helpers for parameter editing and LED feedback.
+Includes integrated playback status display.
 """
-import pygame
-import time
-from typing import List, Optional, Tuple, Any, Dict, Set, Union # <<< Added Set, Union
+import pygame # <<< Ensure pygame is imported
+import time # <<< Ensure time is imported
+import os # <<< Ensure os is imported
+import traceback # <<< Ensure traceback is imported
+from typing import List, Optional, Tuple, Any, Dict, Set, Union
 from enum import Enum, auto
 from dataclasses import asdict
-import traceback # <<< Added traceback
 
 # Core components (Only Segment needed for type hinting, Song managed by service)
 from ..core.song import Segment # Keep direct access to Segment structure for type hinting
@@ -32,9 +33,10 @@ from ..services.song_service import SongService # <<< IMPORT SongService
 from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
                                    BLACK, WHITE, GREY, BLUE, FOCUS_BORDER_COLOR,
                                    FEEDBACK_AREA_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT,
-                                   MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR) # <<< Added MULTI_SELECT colors
+                                   MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR,
+                                   GREEN, RED) # <<< Added GREEN, RED
 
-# Define layout constants (Keep layout definitions here)
+# Define layout constants
 LEFT_MARGIN = 15
 TOP_MARGIN = 15
 LINE_HEIGHT = 36
@@ -43,6 +45,8 @@ SEGMENT_LIST_WIDTH = 180
 PARAM_AREA_X = LEFT_MARGIN + SEGMENT_LIST_WIDTH + 15
 COLUMN_BORDER_WIDTH = 2
 LIST_TOP_PADDING = 10
+# <<< NEW: Height reserved for playback status at the bottom >>>
+PLAYBACK_STATUS_AREA_HEIGHT = 50 # Adjust as needed
 
 # Helper to convert program change value to display format (can stay here or move to utils)
 def value_to_elektron_format(value: int) -> str:
@@ -58,20 +62,19 @@ def value_to_elektron_format(value: int) -> str:
 class SongEditScreen(BaseScreen):
     """Screen for editing song structure and segment parameters via SongService."""
 
-    def __init__(self, app, song_service: SongService): # <<< ACCEPT SongService
+    def __init__(self, app, song_service: SongService):
         """Initialize the song editing screen."""
         super().__init__(app)
-        self.song_service = song_service # <<< STORE SongService reference
-        # --- Initialize Helpers ---
-        self.led_handler = LedFeedbackHandler(app) # Pass app for MIDI sending
-        # ParameterEditor doesn't need app or song_service directly, it operates on data passed to it
+        self.song_service = song_service
+        self.led_handler = LedFeedbackHandler(app)
         self.param_editor = ParameterEditor()
-        # -------------------------
 
         # --- Fonts ---
-        self.font_large = pygame.font.Font(None, 48)
-        self.font_small = pygame.font.Font(None, 32)
-        self.font = pygame.font.Font(None, 36)
+        self.font_large = self.get_pixel_font(48)
+        self.font_medium = self.get_pixel_font(36) # Used for playback status
+        self.font_small = self.get_pixel_font(32) # Used for list items
+        self.font_tiny = self.get_pixel_font(24) # Used for scroll arrows, maybe status details
+        self.font = self.font_small # Default font for items
         self.title_rect = pygame.Rect(0,0,0,0)
 
         # --- State ---
@@ -481,7 +484,7 @@ class SongEditScreen(BaseScreen):
     def _adjust_segment_scroll(self):
         """Adjust segment scroll offset based on selection (anchor)."""
         if self.selected_segment_index is None: return
-        max_visible = self._get_max_visible_segments()
+        max_visible = self._get_max_visible_segments() # <<< REMOVED area_rect argument
         current_song = self.song_service.get_current_song()
         num_segments = len(current_song.segments) if current_song else 0
         if num_segments <= max_visible:
@@ -498,14 +501,14 @@ class SongEditScreen(BaseScreen):
     def _adjust_parameter_scroll(self):
         """Adjust parameter scroll offset based on selection."""
         if self.selected_parameter_key is None or not self.parameter_keys: return
-        max_visible = self._get_max_visible_parameters()
+        max_visible = self._get_max_visible_parameters() # <<< REMOVED area_rect argument
         num_params = len(self.parameter_keys)
         if num_params <= max_visible:
             self.parameter_scroll_offset = 0
             return
 
         try: current_param_index = self.parameter_keys.index(self.selected_parameter_key)
-        except ValueError: return
+        except ValueError: return # Should not happen if key is valid
 
         if current_param_index >= self.parameter_scroll_offset + max_visible:
             self.parameter_scroll_offset = current_param_index - max_visible + 1
@@ -888,49 +891,66 @@ class SongEditScreen(BaseScreen):
         return True
 
     # --- Drawing Methods ---
+    # <<< Updated draw signature to match BaseScreen >>>
     def draw(self, screen_surface: pygame.Surface,
              midi_status: Optional[str] = None,
              song_status: Optional[str] = None,
-             duration_status: Optional[str] = None):
-        """Draw the song editing screen content."""
+             duration_status: Optional[str] = None,
+             osc_status: Optional[str] = None,
+             play_symbol: Optional[str] = None,
+             seg_text: Optional[str] = None,
+             rep_text: Optional[str] = None,
+             beat_text: Optional[str] = None,
+             tempo_text: Optional[str] = None,
+             current_playing_segment_index: Optional[int] = None):
+        """Draw the song editing screen content, including playback status."""
         if self.text_input_widget.is_active:
             self.text_input_widget.draw(screen_surface)
         else:
-            # Pass remaining status strings down
-            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status)
-            self._draw_feedback(screen_surface)
+            # Pass all status info down
+            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status, osc_status,
+                                      play_symbol, seg_text, rep_text, beat_text, tempo_text,
+                                      current_playing_segment_index)
+            self._draw_feedback(screen_surface) # Feedback drawn on top of status
 
+    # <<< Updated signature >>>
     def _draw_normal_content(self, screen_surface: pygame.Surface,
                              midi_status: Optional[str] = None,
                              song_status: Optional[str] = None,
-                             duration_status: Optional[str] = None):
-        """Draws the main content: title, segments, parameters."""
-        # Get current song from service for drawing
+                             duration_status: Optional[str] = None,
+                             osc_status: Optional[str] = None,
+                             play_symbol: Optional[str] = None,
+                             seg_text: Optional[str] = None,
+                             rep_text: Optional[str] = None,
+                             beat_text: Optional[str] = None,
+                             tempo_text: Optional[str] = None,
+                             current_playing_segment_index: Optional[int] = None):
+        """Draws the main content: title, segments, parameters, and playback status."""
         current_song = self.song_service.get_current_song()
 
         # --- Draw Title ---
-        # Use song_status passed from App which includes name and dirty flag
-        # Duration is ignored on this screen's title
-        title_text = song_status or "Song: ?" # Use status from App
+        title_text = song_status or "Song: ?"
         title_surf = self.font_large.render(title_text, True, WHITE)
         self.title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
         screen_surface.blit(title_surf, self.title_rect)
 
-        # Calculate layout areas
+        # --- Calculate layout areas (Adjusted for playback status area) ---
         list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-        available_height = screen_surface.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT
-        seg_list_rect = pygame.Rect(LEFT_MARGIN, list_area_top, SEGMENT_LIST_WIDTH, available_height)
-        param_detail_rect = pygame.Rect(PARAM_AREA_X, list_area_top,
-                                        screen_surface.get_width() - PARAM_AREA_X - LEFT_MARGIN, available_height)
+        # <<< REDUCED height for lists >>>
+        available_list_height = screen_surface.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT - PLAYBACK_STATUS_AREA_HEIGHT
+        available_list_height = max(0, available_list_height) # Ensure non-negative
 
-        # --- Draw Segment List ---
-        self._draw_segment_list(screen_surface, seg_list_rect, current_song) # Pass current_song
+        seg_list_rect = pygame.Rect(LEFT_MARGIN, list_area_top, SEGMENT_LIST_WIDTH, available_list_height)
+        param_detail_rect = pygame.Rect(PARAM_AREA_X, list_area_top,
+                                        screen_surface.get_width() - PARAM_AREA_X - LEFT_MARGIN, available_list_height)
+
+        # --- Draw Segment List (Pass playback info) ---
+        self._draw_segment_list(screen_surface, seg_list_rect, current_song, play_symbol, current_playing_segment_index)
 
         # --- Draw Parameter Details ---
-        self._draw_parameter_details(screen_surface, param_detail_rect, current_song) # Pass current_song
+        self._draw_parameter_details(screen_surface, param_detail_rect, current_song)
 
         # --- Draw Column Focus Borders ---
-        # (Logic remains the same, depends on self.focused_column)
         if self.focused_column == FocusColumn.SEGMENT_LIST:
             pygame.draw.rect(screen_surface, FOCUS_BORDER_COLOR, seg_list_rect, COLUMN_BORDER_WIDTH)
             pygame.draw.rect(screen_surface, WHITE, param_detail_rect, COLUMN_BORDER_WIDTH)
@@ -938,8 +958,19 @@ class SongEditScreen(BaseScreen):
             pygame.draw.rect(screen_surface, WHITE, seg_list_rect, COLUMN_BORDER_WIDTH)
             pygame.draw.rect(screen_surface, FOCUS_BORDER_COLOR, param_detail_rect, COLUMN_BORDER_WIDTH)
 
-    def _draw_segment_list(self, screen, area_rect: pygame.Rect, current_song):
-        """Draws the scrollable segment list, highlighting multi-select."""
+        # --- Draw Playback Status Area ---
+        playback_area_rect = pygame.Rect(
+            0, screen_surface.get_height() - FEEDBACK_AREA_HEIGHT - PLAYBACK_STATUS_AREA_HEIGHT,
+            screen_surface.get_width(), PLAYBACK_STATUS_AREA_HEIGHT
+        )
+        self._draw_playback_status(screen_surface, playback_area_rect,
+                                   play_symbol, seg_text, rep_text, beat_text, tempo_text)
+
+
+    # <<< Updated signature and logic >>>
+    def _draw_segment_list(self, screen, area_rect: pygame.Rect, current_song,
+                           play_symbol: Optional[str], current_playing_segment_index: Optional[int]):
+        """Draws the scrollable segment list, highlighting multi-select and playback."""
         if not current_song:
              no_song_surf = self.font.render("No Song Loaded", True, ERROR_COLOR)
              no_song_rect = no_song_surf.get_rect(center=area_rect.center)
@@ -951,152 +982,265 @@ class SongEditScreen(BaseScreen):
             screen.blit(no_seg_surf, no_seg_rect)
             return
 
-        # --- Drawing logic remains the same, using current_song passed in ---
-        max_visible = self._get_max_visible_segments()
+        max_visible = self._get_max_visible_segments() # <<< REMOVED area_rect argument
         num_segments = len(current_song.segments)
         start_index = self.segment_scroll_offset
         end_index = min(start_index + max_visible, num_segments)
 
-        if self.segment_scroll_offset > 0: self._draw_scroll_arrow(screen, area_rect, 'up')
-        if end_index < num_segments: self._draw_scroll_arrow(screen, area_rect, 'down')
+        # Draw scroll arrows if needed
+        if self.segment_scroll_offset > 0:
+            self._draw_scroll_arrow(screen, area_rect, 'up')
+        if end_index < num_segments:
+            self._draw_scroll_arrow(screen, area_rect, 'down')
 
         text_y = area_rect.top + LIST_TOP_PADDING
         for i in range(start_index, end_index):
-            seg = current_song.segments[i]
-            is_anchor = (i == self.selected_segment_index)
-            is_multi_selected = i in self.multi_select_indices
-            is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
+            segment = current_song.segments[i]
+            is_selected_anchor = (i == self.selected_segment_index)
+            is_multi_selected = (i in self.multi_select_indices)
+            is_playing = (i == current_playing_segment_index) # <<< Check if this segment is playing
+            is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST) # <<< Check focus
 
-            # Determine background and text color based on selection state
+            # Determine background color and text color
             bg_color = None
-            text_color = WHITE
+            text_color = WHITE # Default text color
+
             if is_focused:
-                if is_anchor and is_multi_selected:
-                    bg_color = MULTI_SELECT_ANCHOR_COLOR # Distinct color for anchor in multi-select
-                    text_color = BLACK # Ensure readability on bright background
+                if is_selected_anchor and is_multi_selected:
+                    bg_color = MULTI_SELECT_ANCHOR_COLOR
+                    text_color = BLACK # Ensure readability
                 elif is_multi_selected:
-                    bg_color = MULTI_SELECT_COLOR # Color for other multi-selected items
-                    text_color = BLACK
-                elif is_anchor: # Single selection or anchor before multi-select starts
-                    bg_color = GREY # Original single-select highlight
-                    text_color = HIGHLIGHT_COLOR # Keep original text color for single select? Or BLACK? Let's try HIGHLIGHT_COLOR
-            # If not focused, or not selected, default text_color is WHITE, bg_color is None
+                    bg_color = MULTI_SELECT_COLOR
+                    text_color = BLACK # Ensure readability
+                elif is_selected_anchor: # Single selection or anchor before multi-select starts
+                    bg_color = GREY # <<< Use GREY for focused single select background
+                    text_color = HIGHLIGHT_COLOR # <<< Use HIGHLIGHT_COLOR for focused single select text
+            else: # Not focused
+                if is_selected_anchor and is_multi_selected:
+                    # Indicate anchor even when not focused (subtly)
+                    text_color = MULTI_SELECT_ANCHOR_COLOR # Use the color itself for text
+                elif is_multi_selected:
+                    # Indicate multi-select even when not focused
+                    text_color = MULTI_SELECT_COLOR # Use the color itself for text
+                elif is_selected_anchor:
+                    # Indicate single selection when not focused
+                    text_color = HIGHLIGHT_COLOR # <<< Use HIGHLIGHT_COLOR for non-focused selected text
 
-            dirty_flag = "*" if seg.dirty else ""
-            seg_num_str = f"{i + 1:02d}"
-            prog1_str = value_to_elektron_format(seg.program_message_1)
-            prog2_str = value_to_elektron_format(seg.program_message_2)
-            seg_text = f"{seg_num_str}{dirty_flag} {prog1_str}/{prog2_str}"
-
-            seg_surf = self.font_small.render(seg_text, True, text_color)
-            seg_rect = seg_surf.get_rect(topleft=(area_rect.left + 10, text_y))
-
+            # Draw background highlight if needed
             if bg_color:
-                # Draw background highlight rectangle
-                bg_rect = pygame.Rect(area_rect.left + 2, text_y - 2, area_rect.width - 4, LINE_HEIGHT)
-                pygame.draw.rect(screen, bg_color, bg_rect)
+                pygame.draw.rect(screen, bg_color, (area_rect.left + 1, text_y, area_rect.width - 2, LINE_HEIGHT))
 
+            # <<< Draw Play Symbol if playing >>>
+            play_symbol_surf = None
+            play_symbol_rect = None
+            if is_playing and play_symbol:
+                play_color = GREEN if play_symbol == ">" else RED
+                play_symbol_surf = self.font.render(play_symbol, True, play_color)
+                play_symbol_rect = play_symbol_surf.get_rect(left=area_rect.left + 5, centery=text_y + LINE_HEIGHT // 2)
+                screen.blit(play_symbol_surf, play_symbol_rect)
+
+            # Segment Text (adjust x based on play symbol)
+            text_x = area_rect.left + 5
+            if play_symbol_rect:
+                text_x = play_symbol_rect.right + 5 # Add padding after symbol
+
+            dirty_flag = "*" if segment.dirty else "" # <<< ADD dirty flag check
+            seg_num_str = f"{i + 1:02d}"
+            # Use Elektron format for display in list as well (like old version)
+            prog1_str = value_to_elektron_format(segment.program_message_1)
+            prog2_str = value_to_elektron_format(segment.program_message_2)
+            # seg_text = f"{i + 1:02d}: Seg {i + 1}" # Basic name
+            seg_text = f"{seg_num_str}{dirty_flag} {prog1_str}/{prog2_str}" # <<< Combine number, dirty flag, and PGM values
+
+            seg_surf = self.font.render(seg_text, True, text_color) # Use determined text_color
+            seg_rect = seg_surf.get_rect(left=text_x, centery=text_y + LINE_HEIGHT // 2)
             screen.blit(seg_surf, seg_rect)
+
             text_y += LINE_HEIGHT
 
-    def _draw_parameter_details(self, screen, area_rect: pygame.Rect, current_song): # <<< ADD current_song param
+    # <<< Updated signature >>>
+    def _draw_parameter_details(self, screen, area_rect: pygame.Rect, current_song):
         """Draws the scrollable parameter list for the selected segment."""
         if self.selected_segment_index is None:
-            no_sel_surf = self.font_small.render("Select Segment", True, WHITE)
+            no_sel_surf = self.font_small.render("Select Segment", True, GREY)
             no_sel_rect = no_sel_surf.get_rect(center=area_rect.center)
             screen.blit(no_sel_surf, no_sel_rect)
             return
-        if not current_song or not self.parameter_keys: return
+        if not current_song or not self.parameter_keys:
+            # Handle case where song exists but has no params defined (unlikely)
+            return
 
         try:
-            current_segment = current_song.get_segment(self.selected_segment_index) # Use song passed in
-            # --- Drawing logic remains the same ---
-            max_visible = self._get_max_visible_parameters()
+            segment = current_song.segments[self.selected_segment_index]
+            max_visible = self._get_max_visible_parameters() # <<< REMOVED area_rect argument
             num_params = len(self.parameter_keys)
             start_index = self.parameter_scroll_offset
             end_index = min(start_index + max_visible, num_params)
 
-            if self.parameter_scroll_offset > 0: self._draw_scroll_arrow(screen, area_rect, 'up')
-            if end_index < num_params: self._draw_scroll_arrow(screen, area_rect, 'down')
+            # Draw scroll arrows if needed
+            if self.parameter_scroll_offset > 0:
+                self._draw_scroll_arrow(screen, area_rect, 'up')
+            if end_index < num_params:
+                self._draw_scroll_arrow(screen, area_rect, 'down')
 
             text_y = area_rect.top + LIST_TOP_PADDING
             for i in range(start_index, end_index):
-                param_key = self.parameter_keys[i]
-                display_name = self.parameter_display_names.get(param_key, param_key)
-                value = getattr(current_segment, param_key, "N/A")
+                key = self.parameter_keys[i]
+                display_name = self.parameter_display_names.get(key, key)
+                value = getattr(segment, key, 'N/A')
 
-                if param_key in ['program_message_1', 'program_message_2']: value_str = value_to_elektron_format(int(value)) if isinstance(value, int) else "ERR"
-                elif isinstance(value, bool): value_str = "ON" if value else "OFF"
-                elif isinstance(value, float): value_str = f"{value:.1f}"
-                else: value_str = str(value)
+                # Format value
+                if key in ['program_message_1', 'program_message_2']:
+                    value_str = value_to_elektron_format(value) if isinstance(value, int) else str(value)
+                elif key == 'tempo':
+                    value_str = f"{value:.2f}" if isinstance(value, (int, float)) else str(value)
+                elif key == 'automatic_transport_interrupt':
+                    value_str = "ON" if value else "OFF"
+                else:
+                    value_str = str(value)
 
-                param_dirty_flag = "*" if param_key in current_segment.dirty_params else "" # Use segment's dirty_params
-                param_text = f"{param_dirty_flag}{display_name}: {value_str}"
+                param_dirty_flag = "*" if key in segment.dirty_params else "" # <<< ADD param dirty flag check
+                param_text = f"{param_dirty_flag}{display_name}: {value_str}" # <<< Prepend dirty flag
 
-                is_selected = (param_key == self.selected_parameter_key)
-                text_color = BLACK if is_selected else WHITE
-                bg_color = HIGHLIGHT_COLOR if is_selected else None
+                is_selected = (key == self.selected_parameter_key)
+                is_focused = (self.focused_column == FocusColumn.PARAMETER_DETAILS) # <<< Check focus
+                text_color = WHITE # Default
+                bg_color = None # Default
 
-                param_surf = self.font.render(param_text, True, text_color)
-                param_rect = param_surf.get_rect(topleft=(area_rect.left + PARAM_INDENT, text_y))
+                if is_selected:
+                    if is_focused:
+                        bg_color = GREY # <<< Use GREY for focused background
+                        text_color = HIGHLIGHT_COLOR # <<< Use HIGHLIGHT_COLOR for focused text
+                    else: # Selected but not focused
+                        text_color = HIGHLIGHT_COLOR # <<< Use HIGHLIGHT_COLOR for non-focused selected text
 
-                if bg_color:
-                    highlight_rect = param_rect.inflate(10, 2)
-                    highlight_rect.left = max(area_rect.left + COLUMN_BORDER_WIDTH, highlight_rect.left)
-                    highlight_rect.right = min(area_rect.right - COLUMN_BORDER_WIDTH, highlight_rect.right)
-                    pygame.draw.rect(screen, bg_color, highlight_rect)
+                # Draw background highlight if selected and focused
+                if bg_color: # Only draw background when focused
+                    pygame.draw.rect(screen, bg_color, (area_rect.left + 1, text_y, area_rect.width - 2, LINE_HEIGHT))
 
+                param_surf = self.font.render(param_text, True, text_color) # <<< Use determined text_color
+                param_rect = param_surf.get_rect(left=area_rect.left + PARAM_INDENT, centery=text_y + LINE_HEIGHT // 2)
                 screen.blit(param_surf, param_rect)
+
                 text_y += LINE_HEIGHT
 
         except (IndexError, AttributeError, TypeError) as e:
             error_surf = self.font_small.render(f"Error: {e}", True, ERROR_COLOR)
             error_rect = error_surf.get_rect(center=area_rect.center)
             screen.blit(error_surf, error_rect)
+            print(f"Error drawing parameters: {e}")
+            traceback.print_exc()
 
+    # <<< NEW METHOD to draw playback status >>>
+    def _draw_playback_status(self, screen, area_rect: pygame.Rect,
+                              play_symbol: Optional[str], seg_text: Optional[str],
+                              rep_text: Optional[str], beat_text: Optional[str],
+                              tempo_text: Optional[str]):
+        """Draws the playback status information in the specified area."""
+        # Optional: Draw a faint background or separator line
+        # pygame.draw.rect(screen, GREY, area_rect, 1) # Example border
+        pygame.draw.line(screen, GREY, area_rect.topleft, area_rect.topright, 1)
+
+        # Use a slightly smaller font for status details
+        status_font = self.font_medium # Or self.font_small
+
+        # Defaults
+        play_symbol = play_symbol or "?"
+        seg_text = seg_text or "Seg: -/-"
+        rep_text = rep_text or "Rep: -/-"
+        beat_text = beat_text or "Beat: -"
+        tempo_text = tempo_text or "Tempo: -"
+
+        # Colors
+        play_color = GREEN if play_symbol == ">" else RED
+        text_color = WHITE
+
+        # Layout items horizontally
+        padding = 20 # Space between items
+        x_pos = area_rect.left + LEFT_MARGIN
+
+        # 1. Play Symbol
+        play_surf = self.font_large.render(play_symbol, True, play_color)
+        play_rect = play_surf.get_rect(left=x_pos, centery=area_rect.centery)
+        screen.blit(play_surf, play_rect)
+        x_pos = play_rect.right + padding
+
+        # 2. Segment
+        seg_surf = status_font.render(seg_text, True, text_color)
+        seg_rect = seg_surf.get_rect(left=x_pos, centery=area_rect.centery)
+        screen.blit(seg_surf, seg_rect)
+        x_pos = seg_rect.right + padding
+
+        # 3. Repetition
+        rep_surf = status_font.render(rep_text, True, text_color)
+        rep_rect = rep_surf.get_rect(left=x_pos, centery=area_rect.centery)
+        screen.blit(rep_surf, rep_rect)
+        x_pos = rep_rect.right + padding
+
+        # 4. Beat
+        beat_surf = status_font.render(beat_text, True, text_color)
+        beat_rect = beat_surf.get_rect(left=x_pos, centery=area_rect.centery)
+        screen.blit(beat_surf, beat_rect)
+        x_pos = beat_rect.right + padding
+
+        # 5. Tempo (align to right?) - Or just continue left-to-right
+        tempo_surf = status_font.render(tempo_text, True, text_color)
+        # Align right example:
+        # tempo_rect = tempo_surf.get_rect(right=area_rect.right - LEFT_MARGIN, centery=area_rect.centery)
+        # Left-to-right:
+        tempo_rect = tempo_surf.get_rect(left=x_pos, centery=area_rect.centery)
+        # Ensure it doesn't overflow screen width
+        if tempo_rect.right > area_rect.right - LEFT_MARGIN:
+             tempo_rect.right = area_rect.right - LEFT_MARGIN
+        screen.blit(tempo_surf, tempo_rect)
+
+    # <<< END NEW METHOD >>>
 
     def _draw_feedback(self, screen):
-        """Draws the feedback message at the bottom."""
-        # --- Logic remains the same ---
+        """Draws the feedback message at the bottom (now above playback status)."""
         if self.feedback_message:
             message, timestamp, color = self.feedback_message
-            feedback_surf = self.font.render(message, True, color)
-            feedback_rect = feedback_surf.get_rect(centerx=screen.get_width() // 2,
-                                                   bottom=screen.get_height() - (FEEDBACK_AREA_HEIGHT // 2) + 5)
-            bg_rect = pygame.Rect(0, screen.get_height() - FEEDBACK_AREA_HEIGHT,
-                                  screen.get_width(), FEEDBACK_AREA_HEIGHT)
-            pygame.draw.rect(screen, BLACK, bg_rect)
+            feedback_surf = self.font_small.render(message, True, color)
+            # Position feedback just above the playback status area
+            feedback_rect = feedback_surf.get_rect(
+                centerx=screen.get_width() // 2,
+                bottom=screen.get_height() - PLAYBACK_STATUS_AREA_HEIGHT - 5 # 5px padding
+            )
+            # Optional: Add a background to feedback for better visibility
+            bg_rect = feedback_rect.inflate(10, 4)
+            pygame.draw.rect(screen, BLACK, bg_rect) # Black background
             screen.blit(feedback_surf, feedback_rect)
+
 
     def _draw_scroll_arrow(self, screen, area_rect, direction):
         """Draws an up or down scroll arrow."""
-        # --- Logic remains the same ---
         arrow_char = "^" if direction == 'up' else "v"
-        arrow_surf = self.font_small.render(arrow_char, True, WHITE)
+        arrow_surf = self.font_tiny.render(arrow_char, True, WHITE) # Use tiny font
         if direction == 'up':
              arrow_rect = arrow_surf.get_rect(centerx=area_rect.centerx, top=area_rect.top + 2)
-        else:
+        else: # down
              arrow_rect = arrow_surf.get_rect(centerx=area_rect.centerx, bottom=area_rect.bottom - 2)
         screen.blit(arrow_surf, arrow_rect)
 
 
-    # --- List Size Calculation ---
-    # --- Logic remains the same ---
-    def _get_max_visible_items(self, list_area_rect: pygame.Rect) -> int:
-        available_height = list_area_rect.height - (2 * LIST_TOP_PADDING)
-        if available_height <= 0 or LINE_HEIGHT <= 0: return 0
-        return max(1, available_height // LINE_HEIGHT)
+    # --- List Size Calculation (Adjusted for playback status area) ---
+    def _get_max_visible_items(self) -> int:
+        # Height is now passed via the rect
+        available_height = self.app.screen.get_height() - (2 * LIST_TOP_PADDING) # Use rect's height
+        # Height reserved for feedback and playback status at the bottom
+        bottom_reserved_height = FEEDBACK_AREA_HEIGHT + PLAYBACK_STATUS_AREA_HEIGHT
+        available_height = max(0, available_height - bottom_reserved_height) # Ensure non-negative
 
+        if available_height <= 0 or LINE_HEIGHT <= 0:
+            return 0 # Return 0 if no space
+        return max(1, available_height // LINE_HEIGHT) # Floor division
+
+    # <<< Modified to remove area_rect parameter >>>
     def _get_max_visible_segments(self) -> int:
-        list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-        available_height = self.app.screen.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT
-        seg_list_rect = pygame.Rect(LEFT_MARGIN, list_area_top, SEGMENT_LIST_WIDTH, available_height)
-        return self._get_max_visible_items(seg_list_rect)
+        """Calculates max visible segments based on available height."""
+        return self._get_max_visible_items()
 
+    # <<< Modified to remove area_rect parameter >>>
     def _get_max_visible_parameters(self) -> int:
-        list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-        available_height = self.app.screen.get_height() - list_area_top - FEEDBACK_AREA_HEIGHT
-        param_list_rect = pygame.Rect(PARAM_AREA_X, list_area_top,
-                                      self.app.screen.get_width() - PARAM_AREA_X - LEFT_MARGIN,
-                                      available_height)
-        return self._get_max_visible_items(param_list_rect)
+        """Calculates max visible parameters based on available height."""
+        return self._get_max_visible_items()

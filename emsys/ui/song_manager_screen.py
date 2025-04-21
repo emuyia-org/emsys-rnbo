@@ -314,7 +314,7 @@ class SongManagerScreen(BaseScreen):
                     if isinstance(screen, SongEditScreen):
                         edit_screen_instance = screen
                         break
-                
+
                 if edit_screen_instance:
                     # <<< REMOVED: Print statement about not switching >>>
                     # print(f"Song '{basename_to_load}' loaded. Edit screen found but not switching.")
@@ -603,28 +603,31 @@ class SongManagerScreen(BaseScreen):
 
 
     # --- Drawing Methods ---
+    # <<< MODIFIED: Add **kwargs to accept unused arguments >>>
     def draw(self, screen_surface: pygame.Surface,
              midi_status: Optional[str] = None,
              song_status: Optional[str] = None,
-             duration_status: Optional[str] = None):
-             # Removed playback_status and osc_status
+             duration_status: Optional[str] = None,
+             **kwargs): # <<< ADDED **kwargs
+             # The original removed arguments (osc_status, etc.) will be caught by kwargs
+    # <<< END MODIFIED >>>
         """Draws the screen content, prompts, or the text input widget."""
         if self.text_input_widget.is_active:
             self.text_input_widget.draw(screen_surface)
         elif self.prompts.is_active():
-            # Pass remaining status strings down
-            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status) # Draw list underneath
-            self.prompts.draw(screen_surface) # Draw the active prompt
+            self.prompts.draw(screen_surface)
         else:
-            # Pass remaining status strings down
-            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status)
-            self._draw_feedback(screen_surface) # Draw feedback only if no prompt/widget
+            # Pass all arguments (including kwargs) down, although _draw_normal_content won't use the extras
+            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status, **kwargs) # <<< Pass **kwargs
 
+    # <<< MODIFIED: Add **kwargs to accept unused arguments passed from draw() >>>
     def _draw_normal_content(self, screen_surface: pygame.Surface,
                              midi_status: Optional[str] = None,
                              song_status: Optional[str] = None,
-                             duration_status: Optional[str] = None):
-                             # Removed playback_status and osc_status
+                             duration_status: Optional[str] = None,
+                             **kwargs): # <<< ADDED **kwargs
+                             # The original removed arguments (osc_status, etc.) will be caught by kwargs
+    # <<< END MODIFIED >>>
         """Draws the main list view and status lines."""
         screen_surface.fill(BLACK)
 
@@ -634,13 +637,15 @@ class SongManagerScreen(BaseScreen):
         self.title_rect = title_surf.get_rect(midtop=(screen_surface.get_width() // 2, TOP_MARGIN))
         screen_surface.blit(title_surf, self.title_rect)
 
-        # --- Draw Song Status (Name + Dirty) ---
+        # --- Draw Song Status (Top Right) ---
         loaded_text = song_status or "Song: ?" # Use song_status passed from App
         loaded_surf = self.font_small.render(loaded_text, True, GREY)
+        # Position top right, below title might be too low, use original TOP_MARGIN + 5
         loaded_rect = loaded_surf.get_rect(topright=(screen_surface.get_width() - LEFT_MARGIN, TOP_MARGIN + 5))
         screen_surface.blit(loaded_surf, loaded_rect)
+        # --- End Song Status ---
 
-        # --- Draw Duration Status below Song Status ---
+        # --- Draw Duration Status (Below Song Status) ---
         duration_text = duration_status or "Duration: ??" # Use duration_status passed from App
         duration_surf = self.font_small.render(duration_text, True, GREY)
         # Position below the song status, aligned to the right
@@ -648,19 +653,29 @@ class SongManagerScreen(BaseScreen):
         screen_surface.blit(duration_surf, duration_rect)
         # --- End Duration Drawing ---
 
-        # Draw Song List Area (adjust top if needed, though likely fine)
-        list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-        list_area_bottom = screen_surface.get_height() - FEEDBACK_AREA_HEIGHT
+        # --- REMOVED Status Bar ---
+        # The complex status bar drawing logic previously here is removed.
+        # --- End REMOVED Status Bar ---
+
+
+        # Draw Song List Area
+        list_area_top = max(self.title_rect.bottom, duration_rect.bottom) + LIST_TOP_PADDING # Ensure list starts below title and duration
+        # list_area_bottom = status_rect.top - 10 # <<< CHANGE: Use FEEDBACK_AREA_HEIGHT
+        list_area_bottom = screen_surface.get_height() - FEEDBACK_AREA_HEIGHT # Use constant feedback area height
         list_area_rect = pygame.Rect(LEFT_MARGIN, list_area_top,
                                       screen_surface.get_width() - 2 * LEFT_MARGIN,
                                       list_area_bottom - list_area_top)
 
         if not self.song_list:
-            no_songs_surf = self.font.render("No songs found.", True, WHITE)
+            no_songs_text = "No songs found."
+            no_songs_surf = self.font.render(no_songs_text, True, GREY)
             no_songs_rect = no_songs_surf.get_rect(center=list_area_rect.center)
             screen_surface.blit(no_songs_surf, no_songs_rect)
         else:
             self._draw_song_list_items(screen_surface, list_area_rect)
+
+        # Draw Feedback Area (always drawn, even if empty)
+        self._draw_feedback(screen_surface)
 
 
     def _draw_song_list_items(self, screen, area_rect):
@@ -676,58 +691,78 @@ class SongManagerScreen(BaseScreen):
          if end_index < num_songs:
              self._draw_scroll_arrow(screen, area_rect, 'down')
 
-         text_y = area_rect.top + LIST_TOP_PADDING
+         text_y = area_rect.top # Start drawing from the top of the area
          for i in range(start_index, end_index):
              song_name = self.song_list[i]
              is_selected = (i == self.selected_index)
              # Use BLACK for selected text, else WHITE.
              text_color = BLACK if is_selected else WHITE
              is_loaded = current_song_name and current_song_name == song_name
+             is_dirty = is_loaded and self.song_service.is_current_song_dirty() # Check dirty flag only if loaded
 
              # Draw selection background only if selected.
              if is_selected:
-                 bg_rect = pygame.Rect(area_rect.left, text_y - 2, area_rect.width, LINE_HEIGHT)
-                 pygame.draw.rect(screen, GREY, bg_rect)
+                 bg_rect = pygame.Rect(area_rect.left, text_y, area_rect.width, LINE_HEIGHT)
+                 pygame.draw.rect(screen, GREY, bg_rect) # Use GREY
 
-             # Draw the song name text.
-             item_text = song_name
+             # Construct display text
+             prefix = "> " if is_selected else "  "
+             dirty_indicator = "*" if is_dirty else "" # Second asterisk if dirty
+             item_text = f"{prefix}{song_name}{dirty_indicator}"
+
              item_surf = self.font.render(item_text, True, text_color)
-             item_rect = item_surf.get_rect(topleft=(area_rect.left + LIST_ITEM_INDENT, text_y))
+             # Adjust vertical position slightly for better centering within line height
+             item_rect = item_surf.get_rect(topleft=(area_rect.left + 5, text_y + (LINE_HEIGHT - self.font.get_height()) // 2))
              screen.blit(item_surf, item_rect)
 
-             # Draw blue outline if the song is loaded.
+             # Draw blue outline if the song is loaded (drawn over selection bg if needed)
              if is_loaded:
-                 outline_rect = pygame.Rect(area_rect.left, text_y - 2, area_rect.width, LINE_HEIGHT)
-                 pygame.draw.rect(screen, BLUE, outline_rect, 2)
+                 outline_rect = pygame.Rect(area_rect.left, text_y, area_rect.width, LINE_HEIGHT)
+                 pygame.draw.rect(screen, BLUE, outline_rect, 2) # Thickness 2
 
              text_y += LINE_HEIGHT
 
 
     def _draw_feedback(self, surface):
-        """Draws the feedback message at the bottom."""
+        """Draws the feedback message at the bottom, within the feedback area."""
         if self.feedback_message:
             message, timestamp, color = self.feedback_message
             feedback_surf = self.font_small.render(message, True, color)
-            feedback_rect = feedback_surf.get_rect(centerx=surface.get_width() // 2, bottom=surface.get_height() - 10)
+
+            # Calculate position within the dedicated feedback area at the bottom
+            # status_bar_height = self.font_small.get_height() + 10 # Approximate height of status bar area <-- REMOVE
+            # feedback_rect = feedback_surf.get_rect(centerx=surface.get_width() // 2, bottom=surface.get_height() - status_bar_height - 5) # 5px padding <-- REMOVE
+
+            # Center within the bottom FEEDBACK_AREA_HEIGHT
+            feedback_rect = feedback_surf.get_rect(centerx=surface.get_width() // 2,
+                                                   bottom=surface.get_height() - (FEEDBACK_AREA_HEIGHT - feedback_surf.get_height()) // 2 - 5) # Center vertically in lower area, slight offset up
+
+            # Draw a black background covering the feedback area
             bg_rect = pygame.Rect(0, surface.get_height() - FEEDBACK_AREA_HEIGHT, surface.get_width(), FEEDBACK_AREA_HEIGHT)
             pygame.draw.rect(surface, BLACK, bg_rect)
+
             surface.blit(feedback_surf, feedback_rect)
 
+
     def _draw_scroll_arrow(self, screen, area_rect, direction):
-        """Draws an up or down scroll arrow."""
+        """Draws an up or down scroll arrow to the right of the list."""
         arrow_char = "^" if direction == 'up' else "v"
-        arrow_surf = self.font_small.render(arrow_char, True, WHITE)
+        arrow_surf = self.font_small.render(arrow_char, True, GREY) # Use GREY for arrows
+        arrow_x = area_rect.right - 10 # Position near the right edge
+
         if direction == 'up':
-             arrow_rect = arrow_surf.get_rect(centerx=area_rect.centerx, top=area_rect.top - 5)
+             arrow_rect = arrow_surf.get_rect(centerx=arrow_x, top=area_rect.top)
         else: # down
-             arrow_rect = arrow_surf.get_rect(centerx=area_rect.centerx, bottom=area_rect.bottom + 15)
+             arrow_rect = arrow_surf.get_rect(centerx=arrow_x, bottom=area_rect.bottom)
         screen.blit(arrow_surf, arrow_rect)
 
     # --- List Size Calculation ---
     def _get_max_visible_items(self) -> int:
         """Calculate how many list items fit on the screen."""
-        list_area_top = self.title_rect.bottom + LIST_TOP_PADDING
-        list_area_bottom = self.app.screen.get_height() - FEEDBACK_AREA_HEIGHT
+        list_area_top = max(self.title_rect.bottom, (self.title_rect.bottom + 5 + self.font_small.get_height())) + LIST_TOP_PADDING # Account for title and duration
+        status_bar_height = self.font_small.get_height() + 10 # Approximate status bar height
+        list_area_bottom = self.app.screen.get_height() - status_bar_height - 10 # Space above status bar
         available_height = list_area_bottom - list_area_top
         if available_height <= 0 or LINE_HEIGHT <= 0: return 0
+        # Floor division to get whole items
         return max(1, available_height // LINE_HEIGHT)
