@@ -248,7 +248,7 @@ class ConfirmationPrompts:
         title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
         surface.blit(title_surf, title_rect)
 
-        msg_surf = self.font.render("Stop the emsys-python service?", True, settings.WHITE)
+        msg_surf = self.font.render("Stop emsys services?", True, settings.WHITE)
         msg_rect = msg_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
         surface.blit(msg_surf, msg_rect)
 
@@ -270,7 +270,7 @@ class ConfirmationPrompts:
         title_rect = title_surf.get_rect(midtop=(surface.get_width() // 2, box_y + 15))
         surface.blit(title_surf, title_rect)
 
-        msg_surf = self.font.render("Restart the emsys-python service?", True, settings.WHITE)
+        msg_surf = self.font.render("Restart emsys services?", True, settings.WHITE)
         msg_rect = msg_surf.get_rect(midtop=(surface.get_width() // 2, title_rect.bottom + 10))
         surface.blit(msg_surf, msg_rect)
 

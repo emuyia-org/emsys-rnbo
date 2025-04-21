@@ -34,7 +34,7 @@ except ImportError:
 
 RESCAN_INTERVAL_SECONDS = 5.0
 PYTHON_SERVICE_NAME = "emsys-python.service"
-RNBO_SERVICE_NAME = "rnbooscquery-emsys.service"
+# RNBO_SERVICE_NAME = "rnbooscquery-emsys.service" # No longer needed here
 # --- End Configuration ---
 
 def find_midi_input_port(device_name):
@@ -49,25 +49,27 @@ def find_midi_input_port(device_name):
     return None
 
 def start_services():
-    """Executes the systemctl command to start the services."""
-    command = ['sudo', 'systemctl', 'start', PYTHON_SERVICE_NAME, RNBO_SERVICE_NAME]
+    """Executes the systemctl command to start the main Python service."""
+    # Only start the main Python service.
+    # systemd will handle starting rnbooscquery-emsys.service due to the 'Requires=' dependency.
+    command = ['sudo', 'systemctl', 'start', PYTHON_SERVICE_NAME]
     print(f"Executing: {' '.join(command)}")
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True)
-        print("Services started successfully.")
+        print(f"Service '{PYTHON_SERVICE_NAME}' start command issued successfully.")
         print(result.stdout)
         return True
     except FileNotFoundError:
         print(f"Error: 'sudo' command not found. Make sure sudo is installed and in PATH.")
     except subprocess.CalledProcessError as e:
-        print(f"Error starting services:")
+        print(f"Error starting service '{PYTHON_SERVICE_NAME}':")
         print(f"  Command: {' '.join(e.cmd)}")
         print(f"  Return Code: {e.returncode}")
         print(f"  Stderr: {e.stderr.strip()}")
         print(f"  Stdout: {e.stdout.strip()}")
         print("Ensure passwordless sudo is configured correctly for this command.")
     except Exception as e:
-        print(f"An unexpected error occurred while starting services: {e}")
+        print(f"An unexpected error occurred while starting service '{PYTHON_SERVICE_NAME}': {e}")
     return False
 
 def main_loop():

@@ -12,9 +12,15 @@ import sys
 import os
 import time
 import traceback
-import sdnotify # For systemd notifications
-import subprocess # For shutdown/reboot/service control
-from typing import Optional, Dict, Any, Tuple # <<< Added Tuple
+import sdnotify
+import subprocess
+import logging # <<< ADD logging import
+from typing import Optional, Dict, Any, Tuple
+
+# --- Configure Logging Early --- <<< ADD THIS BLOCK
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__) # Optional: Get logger for main.py itself
+# --- End Logging Config ---
 
 # Add the project root directory to the path to enable absolute imports
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +57,9 @@ from emsys.config.mappings import (
     PLAY_CC, STOP_CC # <<< Added transport CCs
 )
 
+# --- Import the utility function ---
+from emsys.utils.system import start_rnbo_service_if_needed # Corrected import path
+
 # Main Application Class
 class App:
     """Encapsulates the main application logic and state."""
@@ -66,7 +75,7 @@ class App:
         self.midi_service: Optional[MidiService] = None
         self.notifier: Optional[sdnotify.SystemdNotifier] = None
         # <<< END MOVE >>>
-        
+
         # Add this for status notification rate limiting
         self.last_status_notification_time = 0
         self.status_notification_interval = 2.0  # seconds between status updates
@@ -85,10 +94,22 @@ class App:
 
         # --- Instantiate Services ---
         # Now assign instances to the pre-declared attributes
+        self.notify_status("Initializing MIDI Service...") # <<< Added status
         self.midi_service = MidiService(status_callback=self.notify_status)
+        print("MidiService instantiated.") # <<< Added print
+
+        # --- Attempt to start RNBO service (if running directly) --- <<< ADD THIS BLOCK
+        # This happens *after* MidiService is initialized, giving it priority for the device.
+        # The function checks if it's running under systemd and skips if so.
+        self.notify_status("Checking/Starting RNBO Service...")
+        start_rnbo_service_if_needed()
+        # --- End RNBO service start attempt ---
+
+        self.notify_status("Initializing Song Service...") # <<< Added status
         print("Instantiating SongService...")
         self.song_service = SongService(status_callback=self.notify_status)
         print("SongService instantiated.")
+        self.notify_status("Initializing OSC Service...") # <<< Added status
         print("Instantiating OSCService...")
         self.osc_service = OSCService(
             status_callback=self.notify_status,
@@ -103,12 +124,14 @@ class App:
         else:
             print("SongService did not load an initial song.")
             self.notify_status("No initial song loaded.")
-        
+
         # --- Direct MIDI Handler Support ---
         self.direct_midi_handlers = {}
 
         # Pass app reference AND SongService reference to ScreenManager
+        self.notify_status("Initializing Screen Manager...") # <<< Added status
         self.screen_manager = ScreenManager(app_ref=self, song_service_ref=self.song_service) # Assign instance
+        print("ScreenManager instantiated.") # <<< Added print
         # --------------------------
 
         # --- Application State (Remove redundant declarations) ---
@@ -148,12 +171,15 @@ class App:
         self.set_base_path = "p_obj-10"
 
         # --- Final Initialization Steps ---
+        self.notify_status("Setting initial screen...") # <<< Added status
         self.screen_manager.set_initial_screen() # <<< Should work now >>>
         if not self.screen_manager.get_active_screen():
              self.notify_status("FAIL: No UI screens loaded.")
              raise RuntimeError("Application cannot start without any screens.")
 
+        self.notify_status("Updating initial LEDs...") # <<< Added status
         self._initial_led_update() # Update LEDs based on initial screen
+        self.notify_status("Sending initial segment params...") # <<< Added status
         self._send_initial_segment_params()  # sends initial tempo
         # initialize from first segment if available
         song0 = self.song_service.get_current_song()
@@ -161,6 +187,7 @@ class App:
             self.current_tempo = song0.segments[0].tempo
 
         print("App initialization complete.")
+        self.notify_status("Initialization Complete") # <<< Final init status
 
 
     def notify_status(self, status_message):
@@ -892,19 +919,83 @@ class App:
         self.running = False # Ensure the app loop stops if reboot fails
 
     def trigger_service_stop(self):
-        """Initiate systemd service stop for emsys-python and rnbooscquery-emsys."""
-        print("Service stop requested for emsys-python and rnbooscquery-emsys.")
-        self.notify_status("Stopping services...")
-        # NOTE: This requires the script user (pi) to have passwordless sudo configured for systemctl
-        try:
-            # Stop both services
-            subprocess.run(['sudo', 'systemctl', 'stop', 'rnbooscquery-emsys.service', 'emsys-python.service'], check=True)
-            # If the command succeeds, this process will likely be terminated before the next line.
-            self.running = False
-        except Exception as e:
-            print(f"Failed to execute service stop command: {e}")
-            self.notify_status(f"Service stop failed: {e}")
-            # If stop fails, the app continues running.
+        """Stops the related systemd services individually."""
+        services_to_stop = ["rnbooscquery-emsys.service", "emsys-python.service"]
+        self.notify_status(f"Stopping services: {', '.join(services_to_stop)}...")
+        logger.info(f"Service stop requested for {', '.join(services_to_stop)}.")
+
+        all_stopped_successfully = True
+        errors = []
+
+        # Stop RNBO first, then the Python service
+        # This order might be slightly better if RNBO depends on Python,
+        # though systemd handles the reverse dependency on start.
+        # For stopping, it often makes less difference.
+        for service_name in services_to_stop:
+            command = ['sudo', 'systemctl', 'stop', service_name]
+            logger.info(f"Executing: {' '.join(command)}")
+            try:
+                # Use check=False initially to log errors without raising immediately
+                result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=15)
+
+                if result.returncode == 0:
+                    logger.info(f"Successfully issued stop command for {service_name} (or it was inactive).")
+                    if result.stdout: logger.debug(f"Stop {service_name} stdout: {result.stdout.strip()}")
+                    # systemd often prints "Stopped ..." or nothing to stderr on success
+                    if result.stderr: logger.info(f"Stop {service_name} stderr: {result.stderr.strip()}")
+                else:
+                    # Log non-zero exit code as an error, but continue
+                    # Common non-zero codes for 'stop': 5 (inactive) - treat as success for our purpose
+                    if result.returncode == 5 and "inactive" in result.stderr.lower():
+                         logger.info(f"Service {service_name} was already inactive (exit code 5).")
+                         # Treat as success for the overall outcome
+                    else:
+                        all_stopped_successfully = False
+                        error_message = (
+                            f"Command failed for 'systemctl stop {service_name}' "
+                            f"(exit code {result.returncode}). "
+                            f"Stderr: {result.stderr.strip() if result.stderr else 'N/A'}. "
+                            f"Stdout: {result.stdout.strip() if result.stdout else 'N/A'}."
+                        )
+                        logger.error(error_message)
+                        errors.append(error_message)
+                    # Don't raise here, try stopping the other service
+
+            except FileNotFoundError:
+                error_message = f"Error: 'sudo' or 'systemctl' command not found. Cannot stop {service_name}."
+                logger.error(error_message)
+                errors.append(error_message)
+                all_stopped_successfully = False
+                break # If systemctl isn't found, no point continuing
+            except subprocess.TimeoutExpired:
+                error_message = f"Timeout waiting for 'systemctl stop {service_name}' command."
+                logger.error(error_message)
+                errors.append(error_message)
+                all_stopped_successfully = False
+                # Continue to next service
+            except Exception as e:
+                error_message = f"An unexpected error occurred while stopping {service_name}: {e}"
+                logger.error(error_message, exc_info=True) # Log traceback
+                errors.append(error_message)
+                all_stopped_successfully = False
+                # Continue to next service
+
+        if all_stopped_successfully:
+            self.notify_status("Services stopped successfully.")
+            logger.info("All specified services stopped successfully or were already inactive.")
+        else:
+            final_error_summary = "Service stop attempt finished with errors: " + " | ".join(errors)
+            # Show first specific error on screen if available, else generic message
+            first_error = errors[0] if errors else "See logs for details"
+            self.notify_status(f"Service stop failed: {first_error}")
+            logger.error(final_error_summary)
+
+        # Decide what to do after attempting stop.
+        # If running under debugger (not systemd), explicitly stop the Python script's loop.
+        # If running as a service, stopping emsys-python.service should terminate it anyway.
+        if not os.getenv('INVOCATION_ID'): # Check if NOT running under systemd
+             logger.info("Detected running outside systemd, initiating application exit after stop attempt.")
+             self.running = False # Signal the main loop to terminate
 
     def trigger_service_restart(self):
         """Initiate systemd service restart for emsys-python and rnbooscquery-emsys."""
@@ -969,6 +1060,7 @@ class App:
 # Script Entry Point
 def main():
     """Main function."""
+    # Logging is already configured above
     app = None
     try:
         app = App()
@@ -1004,4 +1096,6 @@ def main():
         sys.exit(1)
 
 if __name__ == '__main__':
+    # Setup logging here if you use it globally
+    # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     main()
