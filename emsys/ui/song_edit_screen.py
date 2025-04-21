@@ -36,6 +36,10 @@ from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
                                    MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR,
                                    GREEN, RED) # <<< Added GREEN, RED
 
+# <<< ADD A_BTN_1_CC and A_BTN_9_CC to imports >>>
+from emsys.config.mappings import A_BTN_1_CC, A_BTN_9_CC, FADER_A_CC, FADER_B_CC
+# <<< END ADD >>>
+
 # Define layout constants
 LEFT_MARGIN = 15
 TOP_MARGIN = 15
@@ -195,11 +199,18 @@ class SongEditScreen(BaseScreen):
                 # NO release itself doesn't trigger actions below, so return
                 return
 
-        # --- Handle Fader for Selection ---
-        if cc == mappings.FADER_B_CC:
+        # <<< ADDED: Handle FADER_A_CC for Segment Selection Only >>>
+        if cc == FADER_A_CC:
+            self.multi_select_indices.clear() # Clear multi-select on fader use
+            self._handle_fader_a_segment_selection(value)
+            return # Fader A handled
+        # <<< END ADDED >>>
+
+        # --- Handle Fader B for Contextual Selection ---
+        if cc == FADER_B_CC:
             self.multi_select_indices.clear() # <<< Clear multi-select on fader use
-            self._handle_fader_selection(value)
-            return # Fader handled
+            self._handle_fader_b_contextual_selection(value) # <<< Renamed for clarity
+            return # Fader B handled
 
         # --- Handle Encoder Rotation for Parameter Adjustment ---
         if cc == mappings.KNOB_B8_CC: # Assuming B8 is the primary editing encoder
@@ -213,58 +224,84 @@ class SongEditScreen(BaseScreen):
 
         # --- Process Button Presses (value == 127) ---
         if value == 127:
+            # <<< ADDED: Handle A_BTN_1 and A_BTN_9 for Segment Navigation >>>
+            if cc == A_BTN_1_CC: # Navigate Segment UP (regardless of focus)
+                self.multi_select_indices.clear() # Clear multi-select on direct segment nav
+                self._change_selected_segment(-1)
+                return # Handled
+            elif cc == A_BTN_9_CC: # Navigate Segment DOWN (regardless of focus)
+                self.multi_select_indices.clear() # Clear multi-select on direct segment nav
+                self._change_selected_segment(1)
+                return # Handled
+            # <<< END ADDED >>>
+
             # --- Action Buttons ---
             if cc == mappings.SAVE_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._copy_multiple_segments() # <<< Use multi-copy method
+                    # NO + SAVE in Segment List = Copy Selected Segment(s)
+                    self._copy_multiple_segments()
                 elif not self.no_button_held:
+                    # SAVE = Save Current Song
                     self._save_current_song()
                 return # SAVE CC handled
 
             elif cc == mappings.CREATE_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._paste_multiple_segments() # <<< Use multi-paste method
+                    # NO + CREATE in Segment List = Paste Copied Segment(s)
+                    self._paste_multiple_segments()
                 elif not self.no_button_held:
+                    # CREATE = Add New Segment (or Insert Unique if NO held - handled above?)
+                    # Let's stick to simple CREATE = Add New Segment for now
                     self._add_new_segment()
                 return # CREATE CC handled
 
             elif cc == mappings.DELETE_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._delete_multiple_segments() # <<< Use multi-delete method
+                    # NO + DELETE in Segment List = Delete Selected Segment(s)
+                    self._delete_multiple_segments()
                 elif not self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._delete_current_segment() # Fallback to single delete if NO not held
+                    # DELETE in Segment List = Delete Selected Segment(s) (Same as NO + DELETE)
+                    self._delete_multiple_segments()
                 elif self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                    # DELETE in Parameter Details = Reset/Copy Parameter
                     self._reset_or_copy_parameter()
                 return # DELETE CC handled
 
             # <<< ADDED: Handle RENAME_CC with NO modifier >>>
             elif cc == mappings.RENAME_CC:
                 if self.no_button_held:
+                    # NO + RENAME = Insert New Segment with Unique PGMs
                     self._insert_new_segment_unique_pgm()
                 else:
-                    # Placeholder for future regular RENAME action
-                    self.set_feedback("Rename action (not implemented)", duration=1.0)
+                    # RENAME = (Currently no action, could be used for song rename later)
+                    self.set_feedback("Rename action not implemented yet", duration=1.5)
                 return # RENAME CC handled
             # <<< END ADDED >>>
 
             # --- Navigation Buttons ---
             elif cc == mappings.DOWN_NAV_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._change_selected_segment_multi(1) # <<< Use multi-select navigation
+                    # NO + DOWN in Segment List = Multi-Select Down
+                    self._change_selected_segment_multi(1)
                 elif self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self.multi_select_indices.clear() # <<< Clear multi-select on normal nav
+                    # DOWN in Segment List = Select Next Segment
+                    self.multi_select_indices.clear() # Clear multi-select on single nav
                     self._change_selected_segment(1)
-                else: # Parameter column
+                else: # Parameter Details Focused
+                    # DOWN in Parameter Details = Select Next Parameter
                     self._change_selected_parameter_vertically(1)
                 return # DOWN handled
 
             elif cc == mappings.UP_NAV_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self._change_selected_segment_multi(-1) # <<< Use multi-select navigation
+                    # NO + UP in Segment List = Multi-Select Up
+                    self._change_selected_segment_multi(-1)
                 elif self.focused_column == FocusColumn.SEGMENT_LIST:
-                    self.multi_select_indices.clear() # <<< Clear multi-select on normal nav
+                    # UP in Segment List = Select Previous Segment
+                    self.multi_select_indices.clear() # Clear multi-select on single nav
                     self._change_selected_segment(-1)
-                else: # Parameter column
+                else: # Parameter Details Focused
+                    # UP in Parameter Details = Select Previous Parameter
                     self._change_selected_parameter_vertically(-1)
                 return # UP handled
 
@@ -281,6 +318,7 @@ class SongEditScreen(BaseScreen):
             # --- Parameter Modification Buttons (YES/NO) ---
             elif cc == mappings.YES_NAV_CC:
                 if self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                    # YES in Parameter Details = Increment/Toggle Parameter
                     self._modify_parameter_via_button(1)
                 return # YES handled
 
@@ -288,9 +326,11 @@ class SongEditScreen(BaseScreen):
                 # NO press is tracked above. If it reaches here, it means value is 127.
                 # If parameter column is focused, treat as decrement/toggle.
                 if self.focused_column == FocusColumn.PARAMETER_DETAILS:
+                     # NO in Parameter Details = Decrement/Toggle Parameter
                      self._modify_parameter_via_button(-1)
                 # else:
                     # If segment list focused, NO press (value=127) does nothing here by itself.
+                    # Multi-select is handled by checking self.no_button_held with UP/DOWN/etc.
                 return # NO handled (as a potential parameter modifier)
 
     # --- Helper to update LEDs using the handler ---
@@ -376,8 +416,9 @@ class SongEditScreen(BaseScreen):
             self._update_leds()
 
     # --- Navigation and Selection ---
-    def _handle_fader_selection(self, fader_value: int):
-        """Handles selection changes via the fader using SongService state."""
+    # <<< RENAMED method >>>
+    def _handle_fader_b_contextual_selection(self, fader_value: int):
+        """Handles selection changes via Fader B based on the focused column."""
         # <<< NOTE: Fader clears multi-select (handled in handle_midi) >>>
         current_song = self.song_service.get_current_song()
         if not current_song: return
@@ -404,6 +445,29 @@ class SongEditScreen(BaseScreen):
                 self._adjust_parameter_scroll()
                 self.clear_feedback()
                 self._update_leds()
+    # <<< END RENAMED method >>>
+
+    # <<< ADDED: New method for Fader A >>>
+    def _handle_fader_a_segment_selection(self, fader_value: int):
+        """Handles segment selection changes via Fader A, regardless of focus."""
+        # <<< NOTE: Fader clears multi-select (handled in handle_midi) >>>
+        current_song = self.song_service.get_current_song()
+        if not current_song or not current_song.segments:
+            return # No song or no segments to select
+
+        reversed_value = 127 - fader_value
+        num_items = len(current_song.segments)
+        target_index = max(0, min(num_items - 1, int((reversed_value / 128.0) * num_items)))
+
+        # Only update if the segment index actually changes
+        if target_index != self.selected_segment_index:
+            self.selected_segment_index = target_index
+            self._adjust_segment_scroll()
+            self.clear_feedback()
+            self._update_leds()
+            # Optional: Provide feedback that segment changed even if focus was elsewhere
+            # self.set_feedback(f"Segment {target_index + 1} selected", duration=0.75)
+    # <<< END ADDED >>>
 
     def _navigate_focus(self, direction: int):
         """Change focus between columns."""
