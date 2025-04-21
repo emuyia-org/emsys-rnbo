@@ -6,6 +6,7 @@ Uses SongService for data operations and state.
 """
 import pygame
 import time
+import os
 from datetime import datetime
 from typing import List, Optional, Tuple, Any
 
@@ -54,9 +55,12 @@ class SongManagerScreen(BaseScreen):
         # -------------------------
 
         # --- Fonts ---
-        self.font_large = pygame.font.Font(None, 48)
-        self.font_small = pygame.font.Font(None, 24)
-        self.font = pygame.font.Font(None, 30) # Standard list font size
+        self.font_large = self.get_pixel_font(28)
+        self.font_medium = self.get_pixel_font(22) # Used for playback status
+        self.font_small = self.get_pixel_font(20) # Used for list items
+        self.font_tiny = self.get_pixel_font(16) # Used for scroll arrows, maybe status details
+        self.font = self.font_small # Default font for items
+        self.title_rect = pygame.Rect(0,0,0,0)
 
         # --- State ---
         self.song_list: List[str] = []
@@ -706,7 +710,8 @@ class SongManagerScreen(BaseScreen):
                  pygame.draw.rect(screen, GREY, bg_rect) # Use GREY
 
              # Construct display text
-             prefix = "> " if is_selected else "  "
+             # prefix = "> " if is_selected else "  "
+             prefix = "  " # No prefix for now
              dirty_indicator = "*" if is_dirty else "" # Second asterisk if dirty
              item_text = f"{prefix}{song_name}{dirty_indicator}"
 

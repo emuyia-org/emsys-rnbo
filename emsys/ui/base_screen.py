@@ -1,6 +1,7 @@
 # emsys/ui/base_screen.py
 
 import pygame
+import os
 from emsys.config import settings
 from typing import Optional, Any
 

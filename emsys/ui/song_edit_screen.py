@@ -70,10 +70,10 @@ class SongEditScreen(BaseScreen):
         self.param_editor = ParameterEditor()
 
         # --- Fonts ---
-        self.font_large = self.get_pixel_font(48)
-        self.font_medium = self.get_pixel_font(36) # Used for playback status
-        self.font_small = self.get_pixel_font(32) # Used for list items
-        self.font_tiny = self.get_pixel_font(24) # Used for scroll arrows, maybe status details
+        self.font_large = self.get_pixel_font(28)
+        self.font_medium = self.get_pixel_font(22) # Used for playback status
+        self.font_small = self.get_pixel_font(20) # Used for list items
+        self.font_tiny = self.get_pixel_font(16) # Used for scroll arrows, maybe status details
         self.font = self.font_small # Default font for items
         self.title_rect = pygame.Rect(0,0,0,0)
 
