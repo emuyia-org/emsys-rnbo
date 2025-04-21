@@ -39,6 +39,7 @@ MAX_PROGRAM_MSG = 127
 # Knobs B1-B8 LED Style: CC 25-32
 
 # --- Fader CC ---
+FADER_A_CC = 1 # CC for the fader (Layer B, Fader 9)
 FADER_SELECT_CC = 65 # CC for the fader (Layer B, Fader 9)
 
 # --- Placeholder Knob CCs (Add your actual CCs here later) ---
@@ -64,6 +65,7 @@ KNOB_B8_CC = 81
 # Add any CC number here that represents a continuous control (fader, knob)
 # even if it might send value 127 momentarily.
 NON_REPEATABLE_CCS = {
+    FADER_A_CC,
     FADER_SELECT_CC,
     KNOB_A1_CC,
     KNOB_A2_CC,
