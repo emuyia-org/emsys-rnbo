@@ -49,7 +49,10 @@ from emsys.ui.screen_manager import ScreenManager
 from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
 # from emsys.ui.playback_screen import PlaybackScreen # <<< REMOVE PlaybackScreen import
 # --------------------------
-from emsys.core.song import MIN_TEMPO, MAX_TEMPO # <<< ADD THIS IMPORT
+from emsys.core.song import MIN_TEMPO, MAX_TEMPO
+# <<< ADDED: Import Segment for type hinting >>>
+from emsys.core.song import Segment
+from typing import Optional, Dict, Any, Tuple, List # <<< Added List
 
 # --- Import specific CCs and non-repeatable set ---
 from emsys.config.mappings import (
@@ -165,12 +168,14 @@ class App:
         # Track current tempo for endless encoder
         self.current_tempo: float = 120.0  # will be synced from RNBO outport
         self.next_segment_prepared: bool = False
-        self.prime_action_occurred: bool = False # <<< ADD THIS LINE
-        self.is_initial_cycle_after_play: bool = True # <<< ADD THIS FLAG >>>
+        self.prime_action_occurred: bool = False
+        self.is_initial_cycle_after_play: bool = True
 
         # --- Flags for Segment Transition ---
         self.next_segment_prepared: bool = False
         self.prepared_next_segment_index: Optional[int] = None
+        # <<< ADDED: State for queued segment override >>>
+        self.pending_override_segment_index: Optional[int] = None
         # --- End Flags ---
 
         # <<< ADDED: Hold State >>>
@@ -570,8 +575,82 @@ class App:
         """Resets the flags used for segment transition."""
         self.next_segment_prepared = False
         self.prepared_next_segment_index = None
+        # <<< DO NOT CLEAR pending_override_segment_index here >>>
 
-    # ...rest of the App class...
+    # --- Playback Logic ---
+
+    # <<< NEW METHOD: Load segment immediately (Transport Inactive) >>>
+    def load_segment_immediately(self, segment_index: int):
+        """
+        Stops transport, sets the current segment, resets state, and sends initial params.
+        Used when selecting a segment while transport is inactive.
+        """
+        current_song = self.song_service.get_current_song()
+        if not current_song or not (0 <= segment_index < len(current_song.segments)):
+            logger.error(f"Cannot load segment immediately: Invalid index {segment_index}.")
+            # Optionally provide feedback via notify_status or return False
+            return
+
+        logger.info(f"Loading segment {segment_index + 1} immediately (transport stopped).")
+
+        # 1. Ensure Transport is Stopped (should already be, but double-check)
+        if self.is_playing:
+            logger.warning("load_segment_immediately called while transport was active. Stopping.")
+            self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.Stop", 1)
+            # self.is_playing will update via OSC feedback, but proceed assuming stop
+
+        # 2. Reset Internal Playback State
+        self.current_segment_index = segment_index
+        self.current_repetition = 1
+        self.current_beat_count = 0
+        self.is_initial_cycle_after_play = True # Treat as a fresh start
+
+        # 3. Clear any pending preparation/override flags
+        self._clear_preparation_flags()
+        self.pending_override_segment_index = None
+
+        # 4. Send Parameters for the selected Segment (Tempo, Loop, PGMs)
+        logger.info(f"Sending initial parameters for segment {segment_index + 1}...")
+        self._send_initial_segment_params(segment_index) # Use modified initial send
+
+        # 5. Update Status Display
+        self.update_combined_status()
+
+        # 6. Provide Feedback (optional, could be done by calling screen)
+        self.notify_status(f"Loaded Segment {segment_index + 1}")
+
+    # <<< NEW METHOD: Queue segment override (Transport Active) >>>
+    def queue_segment_override(self, segment_index: int):
+        """
+        Flags a segment to be prepared at the next LoadNowBeat signal, overriding normal sequence.
+        Used when selecting a segment while transport is active.
+        """
+        current_song = self.song_service.get_current_song()
+        if not current_song or not (0 <= segment_index < len(current_song.segments)):
+            logger.error(f"Cannot queue segment override: Invalid index {segment_index}.")
+            # Optionally provide feedback via notify_status or return False
+            return
+
+        logger.info(f"Queuing segment {segment_index + 1} for override at next transition.")
+
+        # 1. Set the pending override index
+        self.pending_override_segment_index = segment_index
+
+        # 2. Clear any existing preparation flags (the override takes precedence)
+        self._clear_preparation_flags()
+
+        # 3. Provide Feedback (optional, could be done by calling screen)
+        self.notify_status(f"Queued Segment {segment_index + 1}")
+        # Update combined status might be good here too
+        self.update_combined_status()
+
+    def _clear_preparation_flags(self):
+        """Resets the flags used for segment transition."""
+        self.next_segment_prepared = False
+        self.prepared_next_segment_index = None
+        # <<< DO NOT CLEAR pending_override_segment_index here >>>
+
+    # ... (rest of App class) ...
 
     def _initial_led_update(self):
         """Send initial LED values via MidiService, potentially based on active screen."""
@@ -616,13 +695,47 @@ class App:
         if not current_song:
             # Clear flags if no song is loaded to prevent stale state
             self._clear_preparation_flags()
+            # <<< ADDED: Clear override flag too >>>
+            self.pending_override_segment_index = None
             return
 
         if outport_name == "Transport.LoadNowBeat":
             # Triggered just before the start of the *next* loop/repetition
-            # This signal is now ONLY for PREPARATION (sending PGMs)
-            print(f"Received LoadNowBeat (Value: {value}) - Current Seg: {self.current_segment_index+1}, Rep: {self.current_repetition}")
-            self._prepare_next_segment_or_rep() # Renamed function call
+            logger.info(f"Received LoadNowBeat (Value: {value}) - Current Seg: {self.current_segment_index+1}, Rep: {self.current_repetition}")
+
+            # <<< --- START MODIFICATION for Override --- >>>
+            override_handled = False
+            if self.pending_override_segment_index is not None:
+                next_segment_index = self.pending_override_segment_index
+                logger.info(f"LoadNowBeat: Handling PENDING OVERRIDE to segment {next_segment_index + 1}")
+
+                # Ensure index is still valid (song structure might have changed?)
+                if 0 <= next_segment_index < len(current_song.segments):
+                    next_segment = current_song.segments[next_segment_index]
+
+                    # Send PREPARATORY PGM messages for the override segment
+                    logger.info(f"Sending OVERRIDE PGM messages for upcoming segment {next_segment_index + 1}: PGM1={next_segment.program_message_1}, PGM2={next_segment.program_message_2}")
+                    self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", next_segment.program_message_1)
+                    self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", next_segment.program_message_2)
+
+                    # Set Preparation Flags for the override segment
+                    logger.info(f"LoadNowBeat: Setting preparation flags for OVERRIDE segment {next_segment_index + 1}.")
+                    self.next_segment_prepared = True
+                    self.prepared_next_segment_index = next_segment_index
+
+                    # Clear the pending override flag *after* successful preparation
+                    self.pending_override_segment_index = None
+                    override_handled = True
+                else:
+                    logger.warning(f"LoadNowBeat: Pending override index {next_segment_index} is invalid. Clearing override.")
+                    self.pending_override_segment_index = None
+                    # Let normal preparation logic run below if override fails
+
+            # If no override was handled, run the normal preparation logic
+            if not override_handled:
+                logger.info("LoadNowBeat: No override pending, running normal preparation.")
+                self._prepare_next_segment_or_rep() # Normal preparation logic
+            # <<< --- END MODIFICATION for Override --- >>>
 
         elif outport_name == "Tin.Toggle":
              try:
@@ -902,27 +1015,28 @@ class App:
 
         # DO NOT SEND PGMs HERE - They were sent on LoadNowBeat
 
-    def _send_initial_segment_params(self):
-        """Sends ALL parameters (Tempo, Loop Length, PGMs) for the very
-           first segment (index 0) when the app starts or song loads."""
+    # <<< MODIFIED: Allow sending initial params for any segment index >>>
+    def _send_initial_segment_params(self, segment_index: int = 0):
+        """Sends ALL parameters (Tempo, Loop Length, PGMs) for the specified
+           segment index. Defaults to index 0."""
         current_song = self.song_service.get_current_song()
-        segment_index = 0 # Always send for the first segment initially
+        # segment_index = 0 # <<< REMOVE THIS LINE >>>
         if not current_song or not current_song.segments:
-            print("Cannot send initial params: No song or segments.")
+            logger.warning("Cannot send initial params: No song or segments.")
             return
         num_segments = len(current_song.segments)
         if not (0 <= segment_index < num_segments):
-             print(f"Error sending initial params: Invalid segment index {segment_index}")
+             logger.error(f"Error sending initial params: Invalid segment index {segment_index}")
              return
 
         segment = current_song.segments[segment_index]
-        print(f"Sending INITIAL params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}, PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
+        logger.info(f"Sending INITIAL params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}, PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
 
         # Send Tempo
         self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
         # Send Loop Length (Adjust path as needed)
         # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
-        print(f"Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
+        # logger.debug(f"Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
 
         # Send PGMs for the initial segment
         self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", segment.program_message_1)

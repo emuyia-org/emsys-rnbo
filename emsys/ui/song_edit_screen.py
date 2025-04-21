@@ -36,8 +36,9 @@ from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
                                    MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR,
                                    GREEN, RED) # <<< Added GREEN, RED
 
-# <<< ADD A_BTN_13_CC to imports >>>
-from emsys.config.mappings import A_BTN_1_CC, A_BTN_9_CC, A_BTN_13_CC, FADER_A_CC, FADER_B_CC
+# <<< ADD A_BTN_12_CC to imports >>>
+from emsys.config.mappings import (A_BTN_1_CC, A_BTN_9_CC, A_BTN_13_CC, FADER_A_CC, FADER_B_CC,
+                                   A_BTN_12_CC) # <<< ADDED A_BTN_12_CC
 # <<< END ADD >>>
 
 # Define layout constants
@@ -177,6 +178,7 @@ class SongEditScreen(BaseScreen):
 
     def handle_midi(self, msg):
         """Handle MIDI messages delegated from the main app."""
+        # ... (existing code for non-CC or text input) ...
         if msg.type != 'control_change':
              return
 
@@ -224,8 +226,22 @@ class SongEditScreen(BaseScreen):
 
         # --- Process Button Presses (value == 127) ---
         if value == 127:
+            # <<< ADDED: Handle A_BTN_12_CC for Load/Queue Segment >>>
+            if cc == A_BTN_12_CC:
+                # Check if STOP button is held (for Reset Song combination in main.py)
+                # We access stop_button_held directly from app state for this check
+                if not self.app.stop_button_held:
+                    self._handle_load_queue_segment()
+                    return # Handled
+                else:
+                    # If STOP is held, let main.py handle the Reset Song combo
+                    # Log that we are ignoring it here
+                    print(f"UI: Ignoring A_BTN_12 press because STOP is held (Reset Song combo).")
+                    pass # Fall through to allow main.py's handler if needed (though it should catch it first)
+            # <<< END ADDED >>>
+
             # <<< ADDED: Handle A_BTN_13_CC for Hold Toggle >>>
-            if cc == A_BTN_13_CC:
+            elif cc == A_BTN_13_CC:
                 self.app.toggle_hold_state() # Call the App's method
                 # Update LEDs and provide feedback based on the new state in App
                 self._update_leds()
@@ -235,7 +251,7 @@ class SongEditScreen(BaseScreen):
             # <<< END ADDED >>>
 
             # <<< ADDED: Handle A_BTN_1 and A_BTN_9 for Segment Navigation >>>
-            if cc == A_BTN_1_CC: # Navigate Segment UP (regardless of focus)
+            elif cc == A_BTN_1_CC: # Navigate Segment UP (regardless of focus)
                 self.multi_select_indices.clear() # Clear multi-select on direct segment nav
                 self._change_selected_segment(-1)
                 return # Handled
@@ -246,7 +262,7 @@ class SongEditScreen(BaseScreen):
             # <<< END ADDED >>>
 
             # --- Action Buttons ---
-            if cc == mappings.SAVE_CC:
+            elif cc == mappings.SAVE_CC:
                 if self.no_button_held and self.focused_column == FocusColumn.SEGMENT_LIST:
                     # NO + SAVE in Segment List = Copy Selected Segment(s)
                     self._copy_multiple_segments()
@@ -487,7 +503,6 @@ class SongEditScreen(BaseScreen):
             self._update_leds()
             # Optional: Provide feedback that segment changed even if focus was elsewhere
             # self.set_feedback(f"Segment {target_index + 1} selected", duration=0.75)
-    # <<< END ADDED >>>
 
     def _navigate_focus(self, direction: int):
         """Change focus between columns."""
@@ -941,6 +956,48 @@ class SongEditScreen(BaseScreen):
         self._adjust_segment_scroll()
         self._ensure_parameter_selection()
         self._update_leds()
+
+    # <<< NEW METHOD: Handle Load/Queue Segment Action >>>
+    def _handle_load_queue_segment(self):
+        """
+        Handles the action for A_BTN_12_CC press (when STOP is not held).
+        Loads the selected segment immediately if stopped, or queues it if playing.
+        """
+        if self.selected_segment_index is None:
+            self.set_feedback("No segment selected", is_error=True)
+            return
+
+        current_song = self.song_service.get_current_song()
+        if not current_song or not (0 <= self.selected_segment_index < len(current_song.segments)):
+            self.set_feedback("Invalid segment selection", is_error=True)
+            return
+
+        segment_index_to_use = self.selected_segment_index
+        segment_num_display = segment_index_to_use + 1
+
+        try:
+            if self.app.is_playing:
+                # Transport is Active: Queue the segment
+                print(f"UI: Requesting queue override for segment {segment_num_display}")
+                self.app.queue_segment_override(segment_index_to_use)
+                # Feedback is handled by the app method now
+                # self.set_feedback(f"Queued Segment {segment_num_display} for next transition", duration=2.0)
+            else:
+                # Transport is Inactive: Load the segment immediately
+                print(f"UI: Requesting immediate load for segment {segment_num_display}")
+                self.app.load_segment_immediately(segment_index_to_use)
+                # Feedback is handled by the app method now
+                # self.set_feedback(f"Loaded Segment {segment_num_display} (Transport Stopped)", duration=2.0)
+
+            # Optional: Update LEDs if the action changes relevant state
+            self._update_leds()
+
+        except Exception as e:
+            error_msg = f"Error loading/queuing segment: {e}"
+            self.set_feedback(error_msg, is_error=True)
+            print(f"Error in _handle_load_queue_segment: {e}")
+            traceback.print_exc()
+    # <<< END NEW METHOD >>>
 
     # --- END Modified/New Helpers ---
 
