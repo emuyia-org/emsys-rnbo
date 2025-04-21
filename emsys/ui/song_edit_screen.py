@@ -36,8 +36,8 @@ from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
                                    MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR,
                                    GREEN, RED) # <<< Added GREEN, RED
 
-# <<< ADD A_BTN_1_CC and A_BTN_9_CC to imports >>>
-from emsys.config.mappings import A_BTN_1_CC, A_BTN_9_CC, FADER_A_CC, FADER_B_CC
+# <<< ADD A_BTN_13_CC to imports >>>
+from emsys.config.mappings import A_BTN_1_CC, A_BTN_9_CC, A_BTN_13_CC, FADER_A_CC, FADER_B_CC
 # <<< END ADD >>>
 
 # Define layout constants
@@ -224,6 +224,16 @@ class SongEditScreen(BaseScreen):
 
         # --- Process Button Presses (value == 127) ---
         if value == 127:
+            # <<< ADDED: Handle A_BTN_13_CC for Hold Toggle >>>
+            if cc == A_BTN_13_CC:
+                self.app.toggle_hold_state() # Call the App's method
+                # Update LEDs and provide feedback based on the new state in App
+                self._update_leds()
+                hold_state_str = "ON" if self.app.hold_active else "OFF"
+                #self.set_feedback(f"Segment Hold {hold_state_str}", duration=1.5)
+                return # Handled
+            # <<< END ADDED >>>
+
             # <<< ADDED: Handle A_BTN_1 and A_BTN_9 for Segment Navigation >>>
             if cc == A_BTN_1_CC: # Navigate Segment UP (regardless of focus)
                 self.multi_select_indices.clear() # Clear multi-select on direct segment nav
@@ -342,6 +352,16 @@ class SongEditScreen(BaseScreen):
             self.selected_segment_index,
             self.selected_parameter_key
         )
+        # <<< ADDED: Update A_BTN_13 LED based on hold state >>>
+        try:
+            # Assuming led_handler has a method like set_button_led
+            # Or send MIDI directly if handler doesn't support it yet
+            hold_led_value = 127 if self.app.hold_active else 0
+            # self.led_handler.set_button_led(A_BTN_13_CC, hold_led_value) # Ideal
+            self.app.send_midi_cc(A_BTN_13_CC + 64, hold_led_value) # Send to corresponding LED CC (often +64 offset)
+        except Exception as e:
+            print(f"Error updating hold LED: {e}")
+        # <<< END ADDED >>>
 
     # --- Parameter Modification ---
     def _modify_parameter(self, direction: int):
@@ -1218,9 +1238,11 @@ class SongEditScreen(BaseScreen):
         # Colors
         play_color = GREEN if play_symbol == ">" else RED
         text_color = WHITE
+        # <<< ADDED: Hold status color >>>
+        hold_color = HIGHLIGHT_COLOR if self.app.hold_active else GREY # Use highlight color when active
 
         # Layout items horizontally
-        padding = 20 # Space between items
+        padding = 15 # Reduced padding slightly
         x_pos = area_rect.left + LEFT_MARGIN
 
         # 1. Play Symbol
@@ -1228,6 +1250,13 @@ class SongEditScreen(BaseScreen):
         play_rect = play_surf.get_rect(left=x_pos, centery=area_rect.centery)
         screen.blit(play_surf, play_rect)
         x_pos = play_rect.right + padding
+
+        # <<< ADDED: Hold Indicator >>>
+        hold_surf = status_font.render("HOLD", True, hold_color)
+        hold_rect = hold_surf.get_rect(left=x_pos, centery=area_rect.centery)
+        screen.blit(hold_surf, hold_rect)
+        x_pos = hold_rect.right + padding
+        # <<< END ADDED >>>
 
         # 2. Segment
         seg_surf = status_font.render(seg_text, True, text_color)
@@ -1247,13 +1276,9 @@ class SongEditScreen(BaseScreen):
         screen.blit(beat_surf, beat_rect)
         x_pos = beat_rect.right + padding
 
-        # 5. Tempo (align to right?) - Or just continue left-to-right
+        # 5. Tempo
         tempo_surf = status_font.render(tempo_text, True, text_color)
-        # Align right example:
-        # tempo_rect = tempo_surf.get_rect(right=area_rect.right - LEFT_MARGIN, centery=area_rect.centery)
-        # Left-to-right:
         tempo_rect = tempo_surf.get_rect(left=x_pos, centery=area_rect.centery)
-        # Ensure it doesn't overflow screen width
         if tempo_rect.right > area_rect.right - LEFT_MARGIN:
              tempo_rect.right = area_rect.right - LEFT_MARGIN
         screen.blit(tempo_surf, tempo_rect)

@@ -55,7 +55,8 @@ from emsys.core.song import MIN_TEMPO, MAX_TEMPO # <<< ADD THIS IMPORT
 from emsys.config.mappings import (
     NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC,
     PLAY_CC, STOP_CC, # <<< Added transport CCs
-    A_BTN_12_CC # <<< ADDED A_BTN_12_CC
+    A_BTN_12_CC, # <<< ADDED A_BTN_12_CC
+    A_BTN_13_CC # <<< ADDED A_BTN_13_CC
 )
 
 # --- Import the utility functions ---
@@ -171,6 +172,11 @@ class App:
         self.next_segment_prepared: bool = False
         self.prepared_next_segment_index: Optional[int] = None
         # --- End Flags ---
+
+        # <<< ADDED: Hold State >>>
+        self.hold_active: bool = False
+        self.progression_inhibited_this_rep: bool = False
+        # <<< END ADDED >>>
 
         # --- RNBO Outport State ---
         self.tin_toggle_state: bool = False # <<< Changed to bool >>>
@@ -671,65 +677,73 @@ class App:
                     current_song = self.song_service.get_current_song()
                     seg_idx_log = self.current_segment_index + 1 if self.current_segment_index is not None else 'N/A'
                     prep_idx_log = self.prepared_next_segment_index + 1 if self.prepared_next_segment_index is not None else 'N/A'
-                    print(f"Beat 0/1 received. State: Playing={self.is_playing}, Seg={seg_idx_log}, Rep={self.current_repetition}, InitialFlag={self.is_initial_cycle_after_play}, Prepared={self.next_segment_prepared} (for {prep_idx_log})")
+                    print(f"Beat 0/1 received. State: Playing={self.is_playing}, Seg={seg_idx_log}, Rep={self.current_repetition}, InitialFlag={self.is_initial_cycle_after_play}, Prepared={self.next_segment_prepared} (for {prep_idx_log}), Hold={self.hold_active}, Inhibit={self.progression_inhibited_this_rep}")
 
-                    activated_new_segment = False
-                    if self.next_segment_prepared and self.prepared_next_segment_index is not None:
-                        # --- Activate the prepared segment ---
+                    activated_new_segment = False # Initialize flag
+
+                    # --- Check for Hold Inhibition FIRST ---
+                    if self.progression_inhibited_this_rep:
+                        print("Beat 0/1: Progression was inhibited this cycle (Hold Active). Clearing prep flags and repeating segment.")
+                        self._clear_preparation_flags()
+                        self.progression_inhibited_this_rep = False # Reset inhibition flag for the *next* cycle
+                        # Repetition count remains unchanged
+                        # Ensure activated_new_segment remains False
+                        pass # Explicitly do nothing else here
+
+                    # --- Handle Segment Activation (if not inhibited) ---
+                    # <<< MODIFIED SEGMENT ACTIVATION BLOCK >>>
+                    elif self.next_segment_prepared and self.prepared_next_segment_index is not None:
                         print(f"Beat 0/1: Activating prepared segment {self.prepared_next_segment_index + 1}.")
                         self.current_segment_index = self.prepared_next_segment_index
                         self.current_repetition = 1 # Start rep 1 of the new segment
                         self._send_segment_activation_params(self.current_segment_index)
                         self._clear_preparation_flags()
-                        self.is_initial_cycle_after_play = True # Set flag for the newly activated segment
+                        # <<< DO NOT SET is_initial_cycle_after_play = True HERE >>>
                         activated_new_segment = True
-                        print(f"Activation complete. Now on Seg {self.current_segment_index + 1}, Rep 1. InitialFlag set.")
+                        print(f"Activation complete. Now on Seg {self.current_segment_index + 1}, Rep 1.")
+                    # <<< END MODIFIED SEGMENT ACTIVATION BLOCK >>>
 
-                    # --- Handle Repetition Increment (if no segment activation occurred) ---
-                    if not activated_new_segment and self.is_playing:
-                        print(f"Beat 0/1: No activation. Handling repetition for segment {self.current_segment_index + 1}.")
+                    # --- Handle Repetition Increment (if no segment activation occurred AND not inhibited) ---
+                    if not activated_new_segment and not self.progression_inhibited_this_rep and self.is_playing:
+                        print(f"Beat 0/1: No activation/inhibition. Handling repetition for segment {self.current_segment_index + 1}.")
                         current_song = self.song_service.get_current_song()
                         if current_song and 0 <= self.current_segment_index < len(current_song.segments):
                             current_segment = current_song.segments[self.current_segment_index]
                             total_repetitions = current_segment.repetitions
                             is_last_segment_in_song = (self.current_segment_index == len(current_song.segments) - 1)
+                            is_last_rep_of_segment = (self.current_repetition >= total_repetitions)
 
+                            # <<< REVISED PRIME/INITIAL/NORMAL LOGIC >>>
                             if self.prime_action_occurred:
                                 print("Prime action occurred, skipping rep increment for this cycle.")
                                 self.prime_action_occurred = False
-                                self.is_initial_cycle_after_play = False # Clear flag after prime cycle completes
+                                # Do not modify is_initial_cycle_after_play here
 
-                            # <<< CORE LOGIC REVISION >>>
                             elif self.is_initial_cycle_after_play:
-                                # This Beat 0/1 signal marks the END of the first cycle (Rep 1).
-                                print("Initial cycle (Rep 1) completed. Clearing InitialFlag.")
+                                # This block ONLY runs for the very first cycle after Play/Reset.
+                                # It consumes the flag without incrementing the counter.
+                                print("Initial cycle after Play/Reset completed. Clearing InitialFlag. Repetition remains 1.")
                                 self.is_initial_cycle_after_play = False
-                                # *** ADD INCREMENT HERE for transition from Rep 1 to Rep 2 ***
-                                # Check if there are more reps to go AFTER rep 1
-                                if self.current_repetition < total_repetitions:
-                                     self.current_repetition += 1
-                                     print(f"Segment {self.current_segment_index + 1} starting repetition {self.current_repetition} (transition from initial).")
-                                # Handle edge case: Rep 1 was the only rep
-                                elif is_last_segment_in_song: # and self.current_repetition == total_repetitions
-                                     print(f"Last segment looping on its single repetition (after initial cycle).")
-                                else: # Rep 1 was the only one, not the last segment
-                                     print(f"Segment {self.current_segment_index + 1} finished its only repetition. Awaiting activation.")
+                                # NO INCREMENT HERE
 
                             else:
-                                # --- Normal Cycle End (Rep 2+ finished) ---
-                                # This Beat 0/1 signal marks the END of Rep 2 or later.
+                                # --- Normal Cycle End ---
+                                # Handles end of Rep 1 for newly activated segments AND end of Rep 2+ for all segments.
                                 print(f"Normal cycle finished (Rep {self.current_repetition}). Checking increment.")
-                                is_looping_last_segment = is_last_segment_in_song and self.current_repetition >= total_repetitions
+                                is_looping_last_segment = is_last_segment_in_song and is_last_rep_of_segment
 
-                                if is_looping_last_segment:
+                                # Check for Hold: If hold is active AND it's the last rep, don't increment
+                                if self.hold_active and is_last_rep_of_segment:
+                                    print(f"Hold active on final repetition ({self.current_repetition}/{total_repetitions}). Repetition held.")
+                                elif is_looping_last_segment:
                                     print(f"Last segment looping on final repetition ({self.current_repetition}). No increment.")
-                                # Check if we are NOT looping and still have reps left
+                                # Check if we are NOT looping/holding and still have reps left
                                 elif self.current_repetition < total_repetitions:
-                                     self.current_repetition += 1
+                                     self.current_repetition += 1 # <<< INCREMENT HAPPENS HERE >>>
                                      print(f"Segment {self.current_segment_index + 1} starting repetition {self.current_repetition}.")
-                                else: # Segment finished its reps, not looping
+                                else: # Segment finished its reps, not looping/holding
                                      print(f"Segment {self.current_segment_index + 1} finished final rep ({self.current_repetition}/{total_repetitions}). Awaiting activation. No increment.")
-                            # <<< END CORE LOGIC REVISION >>>
+                            # <<< END REVISED PRIME/INITIAL/NORMAL LOGIC >>>
 
                         else: # Invalid state (no song or bad index)
                             self.current_repetition = 1
@@ -740,6 +754,8 @@ class App:
                          self.current_repetition = 1
                          # <<< Reset flag to True when stopped, so next Play starts correctly >>>
                          self.is_initial_cycle_after_play = True
+                         # Reset inhibition flag when stopped
+                         self.progression_inhibited_this_rep = False
                          print(f"Stopped on Beat 0/1, repetition reset to 1, InitialFlag reset to True.")
 
                     # Update status display after all Beat 0/1 processing
@@ -750,8 +766,9 @@ class App:
             except Exception as e: # Catch other potential errors
                 print(f"Unexpected error handling Transport.4nCount: {e}")
                 traceback.print_exc() # Print stack trace for debugging
+            # <<< END REPLACEMENT AREA >>>
 
-        # ... potentially handle other outports ...
+        # ... (rest of _handle_rnbo_outport) ...
 
     # --- Playback Logic ---
     def _prepare_next_segment_or_rep(self):
@@ -763,6 +780,7 @@ class App:
                 If it's the *last* segment, it does nothing, allowing it to loop indefinitely.
         If NO: Clears preparation flags.
         Does NOT change self.current_segment_index or self.current_repetition directly.
+        Accounts for self.hold_active state.
         """
         current_song = self.song_service.get_current_song()
         if not current_song or not current_song.segments:
@@ -781,29 +799,41 @@ class App:
         current_segment = current_song.segments[self.current_segment_index]
         total_repetitions = current_segment.repetitions
 
+        # Reset inhibition flag if hold is off (ensures it's clear unless hold actively prevents prep)
+        if not self.hold_active:
+            self.progression_inhibited_this_rep = False
+
         # Check if the repetition that just *finished* was the last one
         is_last_repetition = (self.current_repetition >= total_repetitions)
 
         if is_last_repetition:
             print(f"Segment {self.current_segment_index + 1} finished last repetition ({self.current_repetition}/{total_repetitions}). Preparing next.")
 
-            # --- Check for Auto Stop ---
+            # --- Check for Hold Active ---
+            if self.hold_active:
+                print("HOLD ACTIVE: Segment progression paused. Looping last repetition.")
+                self.progression_inhibited_this_rep = True # Mark that progression was stopped by hold
+                self._clear_preparation_flags() # Ensure no accidental preparation
+                # Update status display immediately
+                self.update_combined_status()
+                return # Stop processing here, do not prepare next segment
+
+            # --- Check for Auto Stop (Only if Hold is OFF) ---
             if current_segment.automatic_transport_interrupt:
                 print(f"Auto-stopping transport after segment {self.current_segment_index + 1}.")
                 self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.Stop", 1)
-                # Don't prepare next segment if stopping. Clear flags.
                 self._clear_preparation_flags()
+                # Update status display immediately
+                self.update_combined_status()
                 return # Stop processing here
 
-            # --- Check if this is the LAST segment in the song ---
+            # --- Check if this is the LAST segment in the song (Only if Hold is OFF) ---
             is_last_segment_in_song = (self.current_segment_index == num_segments - 1)
 
             if is_last_segment_in_song:
                 # --- Last segment finished last rep: Do nothing, let it loop ---
                 print(f"Last segment ({self.current_segment_index + 1}) finished. No transition prepared.")
                 self._clear_preparation_flags() # Ensure flags are clear
-                # DO NOT prepare next segment index or send PGMs
-                # The repetition counter will be handled in the 4nCount handler
             else:
                 # --- Not the last segment, prepare transition to the next one ---
                 next_segment_index = self.current_segment_index + 1 # No modulo needed here
@@ -821,14 +851,11 @@ class App:
                 print(f"LoadNowBeat: Setting preparation flags for segment {next_segment_index + 1}.")
                 self.next_segment_prepared = True
                 self.prepared_next_segment_index = next_segment_index
-                # DO NOT change self.current_segment_index or self.current_repetition here.
 
         else:
             # --- Still within the same segment, finished a repetition but not the last one ---
             print(f"Segment {self.current_segment_index + 1} finished repetition {self.current_repetition}/{total_repetitions}. No segment change prepared.")
-            # Ensure preparation flags are clear if we are just finishing a rep but not the segment
             self._clear_preparation_flags()
-            # DO NOT increment self.current_repetition here. It increments on Beat 1.
 
         # Update status display immediately after LoadNowBeat processing
         self.update_combined_status()
@@ -1152,17 +1179,17 @@ class App:
         self.update_combined_status()
 
         # 5. Provide Feedback (e.g., via status or screen feedback if implemented)
-        self.notify_status("Song Playback Reset to Start")
+        #self.notify_status("Song Playback Reset to Start")
         # Consider adding feedback to the active screen if applicable
         active_screen = self.screen_manager.get_active_screen()
         if active_screen and hasattr(active_screen, 'set_feedback'):
             try:
-                active_screen.set_feedback("Song Reset to Start", duration=1.5)
+                #active_screen.set_feedback("Song Reset to Start", duration=1.5)
+                pass  # Empty try block needs at least a pass statement
             except Exception as e:
                 print(f"Could not set feedback on screen: {e}")
 
     # <<< END NEW METHOD >>>
-
 
     # <<< NEW METHOD to generate playback status components >>>
     def _get_playback_status_components(self) -> Dict[str, Any]:
@@ -1200,6 +1227,21 @@ class App:
             "current_playing_segment_index": current_playing_segment_index
         }
     # <<< END NEW METHOD >>>
+
+    # <<< ADDED: Method to toggle hold state >>>
+    def toggle_hold_state(self):
+        """Toggles the segment progression hold state."""
+        self.hold_active = not self.hold_active
+        status_msg = f"Segment Progression Hold: {'ON' if self.hold_active else 'OFF'}"
+        print(status_msg)
+        self.notify_status(status_msg)
+        # If hold is turned OFF, reset the inhibition flag immediately
+        if not self.hold_active:
+            self.progression_inhibited_this_rep = False
+
+        # Update LEDs/UI (will be handled by screen calling this)
+        self.update_combined_status() # Update systemd status
+    # <<< END ADDED >>>
 
 # Script Entry Point
 def main():
