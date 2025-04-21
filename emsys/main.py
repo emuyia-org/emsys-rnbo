@@ -736,14 +736,13 @@ class App:
             next_segment_index = (self.current_segment_index + 1) % num_segments
             print(f"Preparing transition to segment {next_segment_index + 1}")
 
-            # --- Send PREPARATORY PGM messages for the NEXT segment IF Tin.Toggle is ON ---
+            next_segment = current_song.segments[next_segment_index]
+            print(f"Sending PREPARATORY PGM messages for upcoming segment {next_segment_index + 1}: PGM1={next_segment.program_message_1}, PGM2={next_segment.program_message_2}")
+            self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", next_segment.program_message_1)
+            self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", next_segment.program_message_2)
+
             if self.tin_toggle_state: # Check the boolean state directly
-                next_segment = current_song.segments[next_segment_index]
-                print(f"Tin.Toggle is ON. Sending PREPARATORY PGM messages for upcoming segment {next_segment_index + 1}: PGM1={next_segment.program_message_1}, PGM2={next_segment.program_message_2}")
-                self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", next_segment.program_message_1)
-                self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", next_segment.program_message_2)
-            else:
-                print("Tin.Toggle is OFF. Skipping preparatory PGM messages.")
+                print(f"Tin.Toggle is ON. Not implemented yet.")
 
             # --- Set Preparation Flags ---
             print(f"LoadNowBeat: Setting preparation flags for segment {next_segment_index + 1}.")
