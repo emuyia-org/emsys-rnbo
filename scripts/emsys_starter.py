@@ -24,7 +24,7 @@ if config_path not in sys.path:
     sys.path.insert(0, config_path)
 
 try:
-    from config import settings, mappings
+    from emsys.config import settings, mappings
     MIDI_DEVICE_NAME = settings.MIDI_DEVICE_NAME
     START_BUTTON_CC = mappings.YES_NAV_CC # CC 89
 except ImportError:

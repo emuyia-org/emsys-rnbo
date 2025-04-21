@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__) # Optional: Get logger for main.py itself
 # --- End Logging Config ---
 
-# Add the project root directory to the path to enable absolute imports
+# Add the project root directory to the path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -57,8 +57,8 @@ from emsys.config.mappings import (
     PLAY_CC, STOP_CC # <<< Added transport CCs
 )
 
-# --- Import the utility function ---
-from emsys.utils.system import start_rnbo_service_if_needed # Corrected import path
+# --- Import the utility functions ---
+from emsys.utils.system import start_rnbo_service_if_needed, stop_rnbo_service # <<< Import stop function
 
 # Main Application Class
 class App:
@@ -67,6 +67,7 @@ class App:
     def __init__(self):
         """Initialize Pygame, services, and application state."""
         print("Initializing App...")
+        logger.info("App initialization started.")
 
         # <<< MOVE TYPE HINTS FOR SERVICES HERE >>>
         self.osc_service: Optional[OSCService] = None
@@ -83,7 +84,7 @@ class App:
 
         self.notifier = sdnotify.SystemdNotifier() # Now assign the instance
         self.notify_status("Initializing Pygame...")
-
+        logger.info("Initializing Pygame...")
         pygame.init()
         pygame.font.init() # Font init needed for screens/widgets
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -93,28 +94,35 @@ class App:
         self.running = False
 
         # --- Instantiate Services ---
-        # Now assign instances to the pre-declared attributes
-        self.notify_status("Initializing MIDI Service...") # <<< Added status
+        self.notify_status("Initializing MIDI Service...")
+        logger.info("Initializing MIDI Service...")
         self.midi_service = MidiService(status_callback=self.notify_status)
-        print("MidiService instantiated.") # <<< Added print
+        logger.info("MidiService instantiated.")
+        print("MidiService instantiated.")
 
-        # --- Attempt to start RNBO service (if running directly) --- <<< ADD THIS BLOCK
-        # This happens *after* MidiService is initialized, giving it priority for the device.
+        # --- Attempt to start RNBO service (if running directly) --- <<< MOVED BLOCK >>>
+        # This now happens *after* MidiService is initialized.
         # The function checks if it's running under systemd and skips if so.
-        self.notify_status("Checking/Starting RNBO Service...")
-        start_rnbo_service_if_needed()
+        self.notify_status("Checking/Starting RNBO Service (if run directly)...")
+        logger.info("Checking/Starting RNBO Service (if run directly)...")
+        start_rnbo_service_if_needed() # <<< MOVED HERE
         # --- End RNBO service start attempt ---
 
-        self.notify_status("Initializing Song Service...") # <<< Added status
+        self.notify_status("Initializing Song Service...")
+        logger.info("Initializing Song Service...")
         print("Instantiating SongService...")
         self.song_service = SongService(status_callback=self.notify_status)
+        logger.info("SongService instantiated.")
         print("SongService instantiated.")
-        self.notify_status("Initializing OSC Service...") # <<< Added status
+
+        self.notify_status("Initializing OSC Service...")
+        logger.info("Initializing OSC Service...")
         print("Instantiating OSCService...")
         self.osc_service = OSCService(
             status_callback=self.notify_status,
             rnbo_outport_callback=self._handle_rnbo_outport
         )
+        logger.info("OSCService instantiated.")
         print("OSCService instantiated.")
         # --- Log initial song state after SongService init ---
         initial_song_name = self.song_service.get_current_song_name()
@@ -187,7 +195,8 @@ class App:
             self.current_tempo = song0.segments[0].tempo
 
         print("App initialization complete.")
-        self.notify_status("Initialization Complete") # <<< Final init status
+        logger.info("App initialization complete.") # <<< Added logging
+        self.notify_status("Initialization Complete")
 
 
     def notify_status(self, status_message):
@@ -214,8 +223,12 @@ class App:
         """Main application loop."""
         self.running = True
         self.notify_status("Application Running") # Initial running status
+        logger.info("Application loop starting.")
         # self.update_combined_status() # <<< Moved initial call inside loop
+        # --- Signal READY *after* all init but *before* entering the loop ---
+        logger.info("Signalling systemd: READY=1")
         self.notifier.notify("READY=1")
+        # --- End Signal ---
         print("Application loop started.")
 
         while self.running:
@@ -312,6 +325,7 @@ class App:
             pygame.display.flip()
             self.clock.tick(FPS)
 
+        logger.info("Application loop finished.")
         print("Application loop finished.")
         self.cleanup()
 
@@ -850,6 +864,7 @@ class App:
     def cleanup(self):
         """Clean up resources before exiting."""
         print("Cleaning up application...")
+        logger.info("Cleanup started.")
         self.notify_status("Application Shutting Down")
 
         # Stop transport before quitting
@@ -868,24 +883,41 @@ class App:
         # Save the last song preference (handled by SongService internally now)
         # self.song_service._save_last_song_preference(self.song_service.get_current_song_name())
 
+        # --- Stop RNBO Service --- <<< ADD THIS BLOCK
+        logger.info("Attempting to stop RNBO service...")
+        stop_rnbo_service()
+        # --- End Stop RNBO Service ---
+
         # Cleanup active screen
         self.screen_manager.cleanup_active_screen()
 
         # Cleanup MIDI service
         self._initial_led_update() # Re-use to turn off LEDs
         time.sleep(0.1)
-        self.midi_service.close_ports()
 
-        # Cleanup OSC service # <<< ENSURE THIS IS CALLED >>>
+        if self.midi_service:
+            logger.info("Stopping MIDI Service...")
+            self.midi_service.close_ports()
+
+        # Cleanup OSC service
         if self.osc_service:
+            logger.info("Stopping OSC Service...")
             self.osc_service.stop()
+
+        # Cleanup Song service (if it has resources like open files)
+        if self.song_service:
+             # Assuming SongService might have cleanup tasks in the future
+             # self.song_service.cleanup() # Example placeholder
+             pass
 
         # Quit Pygame
         pygame.font.quit()
         pygame.quit()
         print("Pygame quit.")
+        logger.info("Pygame quit.")
         self.notifier.notify("STOPPING=1")
         print("Cleanup finished.")
+        logger.info("Cleanup finished.")
 
     # --- System Control Methods ---
     def trigger_shutdown(self):
@@ -1096,6 +1128,4 @@ def main():
         sys.exit(1)
 
 if __name__ == '__main__':
-    # Setup logging here if you use it globally
-    # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     main()
