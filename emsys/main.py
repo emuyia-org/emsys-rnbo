@@ -164,6 +164,7 @@ class App:
         self.current_tempo: float = 120.0  # will be synced from RNBO outport
         self.next_segment_prepared: bool = False
         self.prime_action_occurred: bool = False # <<< ADD THIS LINE
+        self.is_initial_cycle_after_play: bool = True # <<< ADD THIS FLAG >>>
 
         # --- Flags for Segment Transition ---
         self.next_segment_prepared: bool = False
@@ -612,9 +613,14 @@ class App:
                     self.is_playing = new_is_playing # <<< Update primary state >>>
                     print(f"Transport Status changed: {'Playing' if self.is_playing else 'Stopped'}")
                     if not self.is_playing:
+                        # <<< Reset the initial cycle flag when stopping >>>
+                        self.is_initial_cycle_after_play = True
                         # Reset counters if stopping (unless Prime logic handles it)
                         # self._reset_playback_state() # <<< REMOVED: Don't reset on stop/pause >>>
                         pass
+                    else:
+                        # <<< Reset the flag when starting play too, to handle restarts >>>
+                        self.is_initial_cycle_after_play = True
                     self.update_combined_status() # Update status display
                     # self._update_transport_leds() # <<< REMOVED Call >>>
             except (ValueError, TypeError):
@@ -658,6 +664,7 @@ class App:
                         self._send_segment_activation_params(self.current_segment_index)
                         # Clear the flags now that activation is done
                         self._clear_preparation_flags()
+                        self.is_initial_cycle_after_play = True # <<< Reset flag for new segment's first cycle >>>
                         print(f"Activation complete. Now on Seg {self.current_segment_index + 1}, Rep 1.")
                     else:
                         # --- No segment activation, means the current segment continues ---
@@ -670,17 +677,26 @@ class App:
                                 if self.prime_action_occurred:
                                     print("Prime action occurred, skipping rep increment for this cycle.")
                                     self.prime_action_occurred = False # Reset the flag
-                                else:
+                                    # Reset flag after prime action completes its first cycle
+                                    self.is_initial_cycle_after_play = False # <<< ADDED Reset after prime cycle >>>
+                                # <<< MODIFY INCREMENT LOGIC >>>
+                                elif not self.is_initial_cycle_after_play: # Only increment if NOT the first cycle
                                     self.current_repetition += 1
                                     print(f"Segment {self.current_segment_index + 1} starting repetition {self.current_repetition}.")
-                                # <<< END CHECK >>>
+                                else:
+                                    print("Initial cycle after play/segment change, skipping rep increment.")
+                                    # Now that the initial cycle has been processed, set flag to False
+                                    self.is_initial_cycle_after_play = False
+                                # <<< END MODIFY >>>
                              else:
                                  # If stopped on beat 1, reset rep to 1 for consistency when restarting
                                  self.current_repetition = 1
+                                 # Flag is reset by Transport.Status handler
                                  print(f"Stopped on Beat 0/1, repetition reset to 1.")
                         else:
                              # Reset if state is invalid
                              self.current_repetition = 1
+                             self.is_initial_cycle_after_play = True # <<< Reset flag >>>
                              print(f"Invalid state on Beat 0/1, repetition reset to 1.")
 
                 # Update status display after processing beat count changes
