@@ -54,7 +54,8 @@ from emsys.core.song import MIN_TEMPO, MAX_TEMPO # <<< ADD THIS IMPORT
 # --- Import specific CCs and non-repeatable set ---
 from emsys.config.mappings import (
     NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC,
-    PLAY_CC, STOP_CC # <<< Added transport CCs
+    PLAY_CC, STOP_CC, # <<< Added transport CCs
+    A_BTN_12_CC # <<< ADDED A_BTN_12_CC
 )
 
 # --- Import the utility functions ---
@@ -415,6 +416,18 @@ class App:
                      if control in self.pressed_buttons: del self.pressed_buttons[control]
                 return # Handled
 
+            # <<< ADDED: Handle Reset Song Combination (STOP held + A_BTN_12 press) >>>
+            elif control == A_BTN_12_CC and value == 127:
+                if self.stop_button_held:
+                    print(f"DEBUG: Reset Song combination detected (STOP held + A_BTN_12 pressed)")
+                    self._reset_song_playback()
+                    # Prevent this button press from being processed further or repeated
+                    if control in self.pressed_buttons:
+                        del self.pressed_buttons[control]
+                    return # Reset action handled
+                # If STOP is not held, let it fall through to normal button handling below
+            # <<< END ADDED >>>
+
             # --- Handle Specific Controls (e.g., Knobs) FIRST ---
             if control == KNOB_A1_CC:
                 # endless encoder: adjust BPM step=1
@@ -444,6 +457,13 @@ class App:
                 # Check if it was PLAY/STOP press, already handled above
                 if control in [PLAY_CC, STOP_CC]:
                     return # Already handled
+
+                # <<< ADDED: Check if it was A_BTN_12 (already handled if STOP was held) >>>
+                if control == A_BTN_12_CC:
+                    # If we reach here, STOP was *not* held during the press.
+                    # Let it proceed to normal button handling (repeat tracking / dispatch).
+                    pass
+                # <<< END ADDED >>>
 
                 # If it's a non-repeatable button, dispatch immediately and stop
                 if control in NON_REPEATABLE_CCS:
@@ -1103,6 +1123,46 @@ class App:
             self.current_segment_index = 0
         self.current_repetition = 1
         self.current_beat_count = 0 # <<< RESET Beat Count >>>
+        self._clear_preparation_flags() # <<< ADDED: Clear prep flags on reset >>>
+        self.is_initial_cycle_after_play = True # <<< ADDED: Reset initial cycle flag >>>
+
+    # <<< NEW METHOD: Reset Song Playback >>>
+    def _reset_song_playback(self):
+        """
+        Stops playback, resets state to the beginning of segment 0,
+        and sends initial parameters to RNBO.
+        """
+        print("--- Resetting Song Playback ---")
+        logger.info("Resetting song playback requested.")
+
+        # 1. Stop Transport if playing
+        if self.is_playing:
+            print("Stopping transport before reset...")
+            self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.Stop", 1)
+            # Note: self.is_playing will be updated via OSC feedback
+
+        # 2. Reset Internal Playback State to Segment 0
+        self._reset_playback_state(reset_segment=True)
+
+        # 3. Send Parameters for Segment 0
+        print("Sending initial parameters for segment 0...")
+        self._send_initial_segment_params()
+
+        # 4. Update Status Display
+        self.update_combined_status()
+
+        # 5. Provide Feedback (e.g., via status or screen feedback if implemented)
+        self.notify_status("Song Playback Reset to Start")
+        # Consider adding feedback to the active screen if applicable
+        active_screen = self.screen_manager.get_active_screen()
+        if active_screen and hasattr(active_screen, 'set_feedback'):
+            try:
+                active_screen.set_feedback("Song Reset to Start", duration=1.5)
+            except Exception as e:
+                print(f"Could not set feedback on screen: {e}")
+
+    # <<< END NEW METHOD >>>
+
 
     # <<< NEW METHOD to generate playback status components >>>
     def _get_playback_status_components(self) -> Dict[str, Any]:
