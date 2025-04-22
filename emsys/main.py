@@ -162,7 +162,7 @@ class App:
         # --- Playback State ---
         self.is_playing: bool = False
         self.current_segment_index: int = 0
-        self.current_repetition: int = 1
+        self.current_repetition: int = 0
         self.current_beat_count: int = 0
         self.stop_button_held: bool = False
         # Track current tempo for endless encoder
@@ -176,6 +176,8 @@ class App:
         self.prepared_next_segment_index: Optional[int] = None
         # <<< ADDED: State for queued segment override >>>
         self.pending_override_segment_index: Optional[int] = None
+        # <<< ADDED: State for manually queued segment deferred due to existing preparation >>>
+        self.queued_manual_segment_index: Optional[int] = None
         # --- End Flags ---
 
         # <<< ADDED: Hold State >>>
@@ -572,10 +574,11 @@ class App:
                     state['last_repeat_time'] = current_time
 
     def _clear_preparation_flags(self):
-        """Resets the flags used for segment transition."""
+        """Resets ONLY the flags indicating immediate preparation state."""
         self.next_segment_prepared = False
         self.prepared_next_segment_index = None
-        # <<< DO NOT CLEAR pending_override_segment_index here >>>
+        # <<< REMOVE THIS LINE >>>
+        # self.queued_manual_segment_index = None
 
     # --- Playback Logic ---
 
@@ -605,9 +608,10 @@ class App:
         self.current_beat_count = 0
         self.is_initial_cycle_after_play = True # Treat as a fresh start
 
-        # 3. Clear any pending preparation/override flags
-        self._clear_preparation_flags()
-        self.pending_override_segment_index = None
+        # 3. Clear ALL pending preparation/override/deferred flags
+        self._clear_preparation_flags() # Clears prep flags ONLY now
+        self.pending_override_segment_index = None # Clear immediate override
+        self.queued_manual_segment_index = None # <<< ADD THIS LINE: Explicitly clear deferred queue >>>
 
         # 4. Send Parameters for the selected Segment (Tempo, Loop, PGMs)
         logger.info(f"Sending initial parameters for segment {segment_index + 1}...")
@@ -623,7 +627,8 @@ class App:
     def queue_segment_override(self, segment_index: int):
         """
         Flags a segment to be prepared at the next LoadNowBeat signal, overriding normal sequence.
-        Used when selecting a segment while transport is active.
+        If preparation for the *current* upcoming transition has already happened (PGMs sent),
+        this manual request is deferred until the *following* transition.
         """
         current_song = self.song_service.get_current_song()
         if not current_song or not (0 <= segment_index < len(current_song.segments)):
@@ -631,24 +636,37 @@ class App:
             # Optionally provide feedback via notify_status or return False
             return
 
-        logger.info(f"Queuing segment {segment_index + 1} for override at next transition.")
+        # <<< START MODIFICATION >>>
+        if self.next_segment_prepared:
+            # PGMs for the *next* sequential/override segment have already been sent.
+            # We must honor that transition. Queue the manual request for the *following* transition.
+            logger.info(f"Preparation already occurred for segment {self.prepared_next_segment_index + 1 if self.prepared_next_segment_index is not None else '?'}. Deferring manual queue for segment {segment_index + 1}.")
+            self.queued_manual_segment_index = segment_index
+            # DO NOT clear existing preparation flags (self.next_segment_prepared, self.prepared_next_segment_index).
+            # Clear any *previous* immediate override request, as the deferred one takes precedence for the *next* cycle.
+            self.pending_override_segment_index = None
+        else:
+            # No preparation has happened yet for the upcoming transition.
+            # Set this manual request as the pending override for the *immediate* next transition.
+            logger.info(f"No preparation yet. Queuing segment {segment_index + 1} for immediate override.")
+            self.pending_override_segment_index = segment_index
+            # Clear any deferred queue, as the immediate override takes precedence now.
+            self.queued_manual_segment_index = None
+            # Clear preparation flags (should be clear anyway, but good practice)
+            # self._clear_preparation_flags() # No need to call this, flags are already false.
 
-        # 1. Set the pending override index
-        self.pending_override_segment_index = segment_index
-
-        # 2. Clear any existing preparation flags (the override takes precedence)
-        self._clear_preparation_flags()
-
-        # 3. Provide Feedback (optional, could be done by calling screen)
+        # Provide Feedback (optional, could be done by calling screen)
         self.notify_status(f"Queued Segment {segment_index + 1}")
         # Update combined status might be good here too
         self.update_combined_status()
+        # <<< END MODIFICATION >>>
 
     def _clear_preparation_flags(self):
-        """Resets the flags used for segment transition."""
+        """Resets ONLY the flags indicating immediate preparation state."""
         self.next_segment_prepared = False
         self.prepared_next_segment_index = None
-        # <<< DO NOT CLEAR pending_override_segment_index here >>>
+        # <<< REMOVE THIS LINE >>>
+        # self.queued_manual_segment_index = None
 
     # ... (rest of App class) ...
 
@@ -703,9 +721,21 @@ class App:
             # Triggered just before the start of the *next* loop/repetition
             logger.info(f"Received LoadNowBeat (Value: {value}) - Current Seg: {self.current_segment_index+1}, Rep: {self.current_repetition}")
 
+            # <<< --- START MODIFICATION for Deferred Manual Queue --- >>>
+            # Check if a manual queue was deferred from the *previous* cycle
+            if self.queued_manual_segment_index is not None:
+                logger.info(f"LoadNowBeat: Promoting deferred manual queue for segment {self.queued_manual_segment_index + 1} to pending override.")
+                # Promote the deferred queue to be the override for *this* cycle
+                self.pending_override_segment_index = self.queued_manual_segment_index
+                self.queued_manual_segment_index = None # Clear the deferred slot
+            # <<< --- END MODIFICATION --- >>>
+
+
             # <<< --- START MODIFICATION for Override --- >>>
+            # Now, proceed with the existing override/preparation logic
             override_handled = False
             if self.pending_override_segment_index is not None:
+                # This now handles both immediate overrides and promoted deferred overrides.
                 next_segment_index = self.pending_override_segment_index
                 logger.info(f"LoadNowBeat: Handling PENDING OVERRIDE to segment {next_segment_index + 1}")
 
@@ -724,7 +754,7 @@ class App:
                     self.prepared_next_segment_index = next_segment_index
 
                     # Clear the pending override flag *after* successful preparation
-                    self.pending_override_segment_index = None
+                    self.pending_override_segment_index = None # <<< This stays the same
                     override_handled = True
                 else:
                     logger.warning(f"LoadNowBeat: Pending override index {next_segment_index} is invalid. Clearing override.")
@@ -925,20 +955,22 @@ class App:
             # --- Check for Hold Active ---
             if self.hold_active:
                 print("HOLD ACTIVE: Segment progression paused. Looping last repetition.")
-                self.progression_inhibited_this_rep = True # Mark that progression was stopped by hold
+                self.progression_inhibited_this_rep = True
                 self._clear_preparation_flags() # Ensure no accidental preparation
-                # Update status display immediately
+                self.pending_override_segment_index = None # <<< ADD: Clear any immediate override too >>>
+                self.queued_manual_segment_index = None # <<< ADD: Clear deferred queue when hold starts >>>
                 self.update_combined_status()
-                return # Stop processing here, do not prepare next segment
+                return
 
             # --- Check for Auto Stop (Only if Hold is OFF) ---
             if current_segment.automatic_transport_interrupt:
                 print(f"Auto-stopping transport after segment {self.current_segment_index + 1}.")
                 self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.Stop", 1)
                 self._clear_preparation_flags()
-                # Update status display immediately
+                self.pending_override_segment_index = None # <<< ADD: Clear any immediate override too >>>
+                self.queued_manual_segment_index = None # <<< ADD: Clear deferred queue on auto-stop >>>
                 self.update_combined_status()
-                return # Stop processing here
+                return
 
             # --- Check if this is the LAST segment in the song (Only if Hold is OFF) ---
             is_last_segment_in_song = (self.current_segment_index == num_segments - 1)
@@ -947,6 +979,8 @@ class App:
                 # --- Last segment finished last rep: Do nothing, let it loop ---
                 print(f"Last segment ({self.current_segment_index + 1}) finished. No transition prepared.")
                 self._clear_preparation_flags() # Ensure flags are clear
+                self.pending_override_segment_index = None # <<< ADD: Clear any immediate override too >>>
+                self.queued_manual_segment_index = None # <<< ADD: Clear deferred queue when looping last segment >>>
             else:
                 # --- Not the last segment, prepare transition to the next one ---
                 next_segment_index = self.current_segment_index + 1 # No modulo needed here
@@ -969,6 +1003,7 @@ class App:
             # --- Still within the same segment, finished a repetition but not the last one ---
             print(f"Segment {self.current_segment_index + 1} finished repetition {self.current_repetition}/{total_repetitions}. No segment change prepared.")
             self._clear_preparation_flags()
+            # DO NOT clear pending_override or queued_manual here, they might be needed for the *next* cycle's LoadNowBeat
 
         # Update status display immediately after LoadNowBeat processing
         self.update_combined_status()
@@ -1263,9 +1298,11 @@ class App:
         if reset_segment:
             self.current_segment_index = 0
         self.current_repetition = 1
-        self.current_beat_count = 0 # <<< RESET Beat Count >>>
-        self._clear_preparation_flags() # <<< ADDED: Clear prep flags on reset >>>
-        self.is_initial_cycle_after_play = True # <<< ADDED: Reset initial cycle flag >>>
+        self.current_beat_count = 0
+        self._clear_preparation_flags() # Clears prep flags ONLY now
+        self.pending_override_segment_index = None # <<< ADD THIS LINE: Clear immediate override >>>
+        self.queued_manual_segment_index = None # <<< ADD THIS LINE: Explicitly clear deferred queue >>>
+        self.is_initial_cycle_after_play = True
 
     # <<< NEW METHOD: Reset Song Playback >>>
     def _reset_song_playback(self):
