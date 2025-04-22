@@ -1412,7 +1412,6 @@ class App:
         self.queued_manual_segment_index = None # <<< ADD THIS LINE: Explicitly clear deferred queue >>>
         self.is_initial_cycle_after_play = True
 
-    # <<< NEW METHOD: Reset Song Playback >>>
     def _reset_song_playback(self):
         """
         Stops playback, resets state to the beginning of segment 0,
@@ -1425,10 +1424,17 @@ class App:
         if self.is_playing:
             print("Stopping transport before reset...")
             self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.Stop", 1)
-            # Note: self.is_playing will be updated via OSC feedback
 
         # 2. Reset Internal Playback State to Segment 0
         self._reset_playback_state(reset_segment=True)
+
+        # 2.1 Reset local beat count immediately
+        self.current_beat_count = 0
+
+        # 2.2 Send OSC to *also* reset the RNBO beat counter (you must add this param in your patch)
+        self.osc_service.send_rnbo_param(
+            f"{self.transport_base_path}/clock/Transport.ResetAllCounters", 1
+        )
 
         # 3. Send Parameters for Segment 0
         print("Sending initial parameters for segment 0...")
@@ -1436,17 +1442,6 @@ class App:
 
         # 4. Update Status Display
         self.update_combined_status()
-
-        # 5. Provide Feedback (e.g., via status or screen feedback if implemented)
-        #self.notify_status("Song Playback Reset to Start")
-        # Consider adding feedback to the active screen if applicable
-        active_screen = self.screen_manager.get_active_screen()
-        if active_screen and hasattr(active_screen, 'set_feedback'):
-            try:
-                #active_screen.set_feedback("Song Reset to Start", duration=1.5)
-                pass  # Empty try block needs at least a pass statement
-            except Exception as e:
-                print(f"Could not set feedback on screen: {e}")
 
     # <<< END NEW METHOD >>>
 
