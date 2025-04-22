@@ -156,14 +156,6 @@ class App:
         self.last_midi_message_str = None
         self.pressed_buttons: Dict[int, Dict[str, Any]] = {}
 
-        # <<< REMOVE THESE REDUNDANT DECLARATIONS >>>
-        # self.osc_service: Optional[OSCService] = None
-        # self.screen_manager: Optional[ScreenManager] = None
-        # self.song_service: Optional[SongService] = None
-        # self.midi_service: Optional[MidiService] = None
-        # self.notifier: Optional[sdnotify.SystemdNotifier] = None
-        # <<< END REMOVAL >>>
-
         # --- Playback State ---
         self.is_playing: bool = False
         self.current_segment_index: int = 0
@@ -213,6 +205,15 @@ class App:
         song0 = self.song_service.get_current_song()
         if song0 and song0.segments:
             self.current_tempo = song0.segments[0].tempo
+        
+        # <<< ADDED: Call reset playback state AFTER services are initialized >>>
+        self.notify_status("Resetting initial playback state...")
+        logger.info("Resetting initial playback state...")
+        print("Resetting initial playback state...")
+        self._reset_playback_state(reset_segment=True) # Reset segment index too
+        logger.info("Initial playback state reset.")
+        print("Initial playback state reset.")
+        # <<< END ADDED >>>
 
         print("App initialization complete.")
         logger.info("App initialization complete.") # <<< Added logging
