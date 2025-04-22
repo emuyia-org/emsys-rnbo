@@ -9,6 +9,11 @@ from typing import Optional, List, Any, Tuple
 import os
 import traceback
 import math
+import logging # Ensure logging is imported
+import json    # Ensure json is imported at the top
+
+logger = logging.getLogger(__name__) # Ensure logger is initialized
+
 
 # Use absolute imports
 from emsys.core.song import Song, Segment
@@ -230,29 +235,69 @@ class SongService:
 
     def rename_song_file(self, old_basename: str, new_basename: str) -> Tuple[bool, str]:
         """
-        Renames a song file on disk.
+        Renames a song file on disk AND updates the 'name' field within the song data.
         If the renamed song was the current song, updates the current song's name.
         """
         self._status_callback(f"Attempting to rename '{old_basename}' to '{new_basename}'...")
-        success = file_io.rename_song(old_basename, new_basename)
-        if success:
-            # Check if the renamed song was the currently loaded one
-            if self.current_song and self.last_loaded_song_name == old_basename:
-                 self.current_song.name = new_basename # Update name in memory
-                 self.last_loaded_song_name = new_basename # Update tracking name
-                 self._save_last_song_preference(new_basename) # Update preference
-                 msg = f"Renamed to '{new_basename}' and updated current song."
-                 self._status_callback(msg)
-                 return True, msg
-            else:
-                 msg = f"Successfully renamed '{old_basename}' to '{new_basename}'."
-                 self._status_callback(msg)
-                 return True, msg
-        else:
-            msg = f"Failed to rename '{old_basename}' to '{new_basename}'."
+
+        # 1. Rename the file first
+        rename_success = file_io.rename_song(old_basename, new_basename)
+
+        if not rename_success:
+            # file_io.rename_song should have logged/printed the error
+            msg = f"Failed to rename file '{old_basename}' to '{new_basename}'."
             self._status_callback(msg)
             return False, msg
 
+        # 2. If file rename succeeded, load the song from the NEW path
+        logger.info(f"Service: File renamed. Loading '{new_basename}' to update internal name.")
+        song_to_update = file_io.load_song(new_basename)
+
+        if not song_to_update:
+            # This is bad - rename succeeded but we can't load the renamed file.
+            # Maybe try to rename back? For now, report error.
+            msg = f"Error: Renamed file to '{new_basename}' but failed to reload it to update content."
+            logger.error(msg)
+            self._status_callback(msg)
+            # Consider attempting to rename back to old_basename here as a recovery step.
+            # file_io.rename_song(new_basename, old_basename) # Example recovery attempt
+            return False, msg
+
+        # 3. Update the name *within* the loaded song object
+        logger.info(f"Service: Loaded song '{song_to_update.name}'. Setting internal name to '{new_basename}'.")
+        song_to_update.name = new_basename
+        song_to_update.dirty = True # Mark it dirty to force saving the name change
+
+        # 4. Save the song object back to the NEW path (overwriting the renamed file)
+        logger.info(f"Service: Saving song with updated internal name to '{new_basename}'.")
+        save_success = file_io.save_song(song_to_update) # Save with the new name
+
+        if not save_success:
+            # file_io.save_song logs its own errors
+            msg = f"Error: Renamed file to '{new_basename}' but failed to save updated content."
+            logger.error(msg)
+            self._status_callback(msg)
+            # File exists with new name but old content. Not ideal.
+            return False, msg
+
+        logger.info(f"Service: Successfully updated internal name and saved '{new_basename}'.")
+
+        # 5. Update current song state if necessary (as before)
+        if self.current_song and self.last_loaded_song_name == old_basename:
+             # The current song object might be the same one we just loaded and saved,
+             # or it might be a different instance if it wasn't loaded recently.
+             # Safest is to ensure the current_song reference has the correct name.
+             self.current_song.name = new_basename
+             self.last_loaded_song_name = new_basename # Update tracking name
+             self._save_last_song_preference(new_basename) # Update preference
+             msg = f"Renamed to '{new_basename}' and updated current song."
+             self._status_callback(msg)
+             return True, msg
+        else:
+             # Renamed song wasn't the current one, just report success
+             msg = f"Successfully renamed '{old_basename}' to '{new_basename}'."
+             self._status_callback(msg)
+             return True, msg
 
     def delete_song_file(self, basename: str) -> Tuple[bool, str]:
         """
@@ -288,28 +333,46 @@ class SongService:
         Returns:
             A tuple (success: bool, message: str).
         """
+        logger.info(f"Service: Starting duplication from '{original_basename}' to '{new_basename}'.") # <<< ADD Log
         self._status_callback(f"Attempting to duplicate '{original_basename}' as '{new_basename}'...")
 
         # Check if the new name already exists
         if new_basename in self.list_song_names():
             msg = f"Cannot duplicate: Name '{new_basename}' already exists."
+            logger.error(msg) # <<< ADD Log
             self._status_callback(msg)
             return False, msg
 
         # Load the original song data
+        logger.info(f"Service: Loading original song '{original_basename}' for duplication.") # <<< ADD Log
         original_song = file_io.load_song(original_basename)
         if not original_song:
             msg = f"Cannot duplicate: Failed to load original song '{original_basename}'."
+            logger.error(msg) # <<< ADD Log
             self._status_callback(msg)
             return False, msg
+        logger.info(f"Service: Original song '{original_basename}' loaded successfully.") # <<< ADD Log
 
         try:
             # Create a new Song object for the duplicate
-            # Important: Create a new instance, don't modify the original if it might be loaded
-            # Use the loaded data but change the name
+            logger.info("Service: Creating new Song object from original's dict.") # <<< ADD Log
             duplicate_song = Song.from_dict(original_song.to_dict()) # Create from dict to ensure clean state
+            logger.info(f"Service: Initial name of duplicate object: '{duplicate_song.name}'") # <<< ADD Log
+
+            # Set the new name
             duplicate_song.name = new_basename # Set the new name
+            logger.info(f"Service: Name attribute of duplicate object set to: '{duplicate_song.name}'") # <<< ADD Log
+
             duplicate_song.dirty = True # Mark the new duplicate as needing saving
+
+            # <<< ADD Log: Check name and dict just before saving >>>
+            try:
+                dict_to_save = duplicate_song.to_dict()
+                logger.info(f"Service: BEFORE save_song - Object name: '{duplicate_song.name}', Dict name: '{dict_to_save.get('name')}'")
+                logger.debug(f"Service: BEFORE save_song - Full dict: {json.dumps(dict_to_save)}")
+            except Exception as log_err:
+                logger.error(f"Service: Error logging dict before save: {log_err}")
+            # <<< END Log >>>
 
             # Save the duplicated song
             save_success = file_io.save_song(duplicate_song)
@@ -317,15 +380,18 @@ class SongService:
             if save_success:
                 # file_io.save_song resets dirty flag on the saved object
                 msg = f"Successfully duplicated '{original_basename}' to '{new_basename}'."
+                logger.info(f"Service: {msg}") # <<< ADD Log
                 self._status_callback(msg)
                 return True, msg
             else:
                 # file_io.save_song prints its own error
                 msg = f"Failed to save duplicated song '{new_basename}'."
+                logger.error(f"Service: {msg} (file_io.save_song returned False)") # <<< ADD Log
                 self._status_callback(msg)
                 return False, msg
         except Exception as e:
             msg = f"Error during duplication of '{original_basename}': {e}"
+            logger.exception(f"Service: {msg}") # <<< Use logger.exception
             self._status_callback(msg)
             traceback.print_exc()
             return False, msg
@@ -467,3 +533,24 @@ class SongService:
                 print(f"SongService: Error reading preference file for get_preferred_song_name: {e}")
                 return None
         return None
+
+
+# --- Helper Function ---
+def _format_duration(total_seconds: float) -> str:
+    """Formats total seconds into 'Xhr Xm Xs' string."""
+    if total_seconds < 0:
+        return "??hr ??m ??s"
+    total_seconds = math.ceil(total_seconds) # Round up to nearest second
+    
+    seconds = total_seconds % 60
+    total_minutes = total_seconds // 60
+    minutes = total_minutes % 60
+    hours = total_minutes // 60
+    
+    if hours > 0:
+        return f"{hours}hr {minutes}m {seconds}s"
+    elif minutes > 0: # If less than an hour but more than 0 minutes
+        return f"{minutes}m {seconds}s"
+    else: # If less than a minute
+        return f"{seconds}s"
+# --- End Helper ---

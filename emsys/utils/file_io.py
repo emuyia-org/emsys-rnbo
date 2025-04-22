@@ -3,15 +3,19 @@
 Utility functions for handling Song file input/output using JSON.
 """
 
+import logging
 import json
 import os
 import re
+import shutil
 from dataclasses import asdict, is_dataclass
 from typing import List, Optional, Dict, Any
 
 # Updated to use absolute import
 from emsys.core.song import Song, Segment
 from emsys.config import settings
+
+logger = logging.getLogger(__name__)
 
 # --- Configuration ---
 
@@ -93,27 +97,35 @@ def save_song(song: Song, directory: str = SONGS_DIR) -> bool:
         True if saving was successful, False otherwise.
     """
     if not song or not song.name:
+        logger.error("Save failed: Cannot save song with invalid name or None song object.")
         print("Error: Cannot save song with invalid name.")
         return False
 
     # Use the song's name directly for the filename (as done in load/list)
     filename_base = song.name
     filename = os.path.join(directory, f"{filename_base}{SONG_EXTENSION}")
+    logger.info(f"Attempting to save song '{song.name}' to '{filename}'. Dirty: {song.dirty}")
 
     try:
         data = song.to_dict()
+        logger.debug(f"Song data to save for '{song.name}': {json.dumps(data)}")
         with open(filename, 'w') as f:
-            json.dump(data, f, indent=4)
-        print(f"Song '{song.name}' saved to {filename}")
-        song.dirty = False # Reset dirty flag after successful save
+            json.dump(data, f, indent=4) # Use indent for readability if checking files manually
+        logger.info(f"Successfully saved song '{song.name}' to {filename}. Segments: {len(song.segments)}")
+        # Reset dirty flag ONLY if save was truly successful
+        song.dirty = False
+        song.clear_segment_dirty_flags() # Ensure segment flags are also cleared
         return True
     except TypeError as e:
+        logger.exception(f"Save failed: Error serializing song '{song.name}' to {filename}: {e}")
         print(f"Error serializing song '{song.name}': {e}")
         return False
     except IOError as e:
+        logger.exception(f"Save failed: Error writing song file '{filename}': {e}")
         print(f"Error writing song file '{filename}': {e}")
         return False
     except Exception as e:
+        logger.exception(f"Save failed: An unexpected error occurred saving song '{song.name}' to {filename}: {e}")
         print(f"An unexpected error occurred saving song '{song.name}': {e}")
         return False
 
@@ -129,34 +141,42 @@ def load_song(basename: str, directory: str = SONGS_DIR) -> Optional[Song]:
         The loaded Song object, or None if loading fails.
     """
     filename = os.path.join(directory, f"{basename}{SONG_EXTENSION}")
+    logger.info(f"Attempting to load song '{basename}' from '{filename}'") # <<< Log attempt
     if not os.path.exists(filename):
+        logger.error(f"Load failed: Song file not found: {filename}") # <<< Log error
         print(f"Error: Song file not found: {filename}")
         return None
     try:
         with open(filename, 'r') as f:
             data = json.load(f)
-        song = Song.from_dict(data)
-        # Ensure the loaded song's name matches the filename basename
-        # This is important because the filename is the source of truth for listing/loading
-        if song.name != basename:
-             print(f"Warning: Song name in file ('{song.name}') differs from filename ('{basename}'). Using filename.")
-             song.name = basename
-        song.dirty = False # Ensure loaded song starts clean (already done in from_dict, but explicit here is fine)
-        print(f"Song '{basename}' loaded successfully.")
-        return song
+        logger.debug(f"Raw data loaded for '{basename}': {json.dumps(data)}") # <<< Log raw data (DEBUG level)
+        loaded_song = Song.from_dict(data)
+        # Ensure the loaded song's name matches the basename requested,
+        # otherwise the file might be inconsistent.
+        if loaded_song.name != basename:
+             logger.warning(f"Loaded song name '{loaded_song.name}' does not match requested basename '{basename}' in file '{filename}'. Using loaded name.")
+             # Decide if you want to force the name or log warning. Here we log and proceed.
+        logger.info(f"Successfully loaded song '{loaded_song.name}'. Segments: {len(loaded_song.segments)}") # <<< Log success and segment count
+        return loaded_song
+
     except json.JSONDecodeError as e:
+        logger.exception(f"Load failed: Error decoding JSON from '{filename}': {e}") # <<< Log exception
         print(f"Error decoding JSON from '{filename}': {e}")
         return None
     except KeyError as e:
-        print(f"Error loading song '{basename}': Missing key {e}")
+        logger.exception(f"Load failed: Missing key {e} in song data from '{filename}'") # <<< Log exception
+        print(f"Error: Missing key {e} in song data from '{filename}'")
         return None
     except TypeError as e:
-        print(f"Error processing song data from '{filename}': {e}")
+        logger.exception(f"Load failed: Type error processing song data from '{filename}': {e}") # <<< Log exception
+        print(f"Error: Type error processing song data from '{filename}': {e}")
         return None
     except IOError as e:
+        logger.exception(f"Load failed: Error reading song file '{filename}': {e}") # <<< Log exception
         print(f"Error reading song file '{filename}': {e}")
         return None
     except Exception as e:
+        logger.exception(f"Load failed: An unexpected error occurred loading song '{basename}' from '{filename}': {e}") # <<< Log exception
         print(f"An unexpected error occurred loading song '{basename}': {e}")
         return None
 
