@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 758.0, 204.0, 959.0, 632.0 ],
+		"rect" : [ 244.0, 297.0, 959.0, 632.0 ],
 		"openinpresentation" : 1,
 		"gridsize" : [ 15.0, 15.0 ],
 		"boxes" : [ 			{
@@ -19,7 +19,7 @@
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 322.0, 544.0, 171.0, 22.0 ],
+					"patching_rect" : [ 321.0, 563.0, 171.0, 22.0 ],
 					"text" : "print emsys-midiout @popup 1"
 				}
 
@@ -30,7 +30,7 @@
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 353.0, 515.0, 170.0, 22.0 ],
+					"patching_rect" : [ 352.0, 534.0, 170.0, 22.0 ],
 					"text" : "print emsys-outport @popup 1"
 				}
 
@@ -612,7 +612,7 @@
 						}
 ,
 						"classnamespace" : "rnbo",
-						"rect" : [ 58.0, 152.0, 867.0, 489.0 ],
+						"rect" : [ 837.0, 175.0, 867.0, 489.0 ],
 						"default_fontname" : "Lato",
 						"gridsize" : [ 15.0, 15.0 ],
 						"title" : "emsys",
@@ -628,9 +628,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"exposevoiceparams" : 0,
 										"notecontroller" : 0,
-										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"voicecontrol" : "simple"
 									}
 ,
 									"rnbo_serial" : 1,
@@ -870,8 +870,8 @@
 									"patching_rect" : [ 66.0, 19.0, 35.0, 23.0 ],
 									"rnbo_classname" : "in~",
 									"rnbo_extra_attributes" : 									{
-										"comment" : "",
-										"meta" : ""
+										"meta" : "",
+										"comment" : ""
 									}
 ,
 									"rnbo_serial" : 1,
@@ -966,8 +966,8 @@
 									"patching_rect" : [ 30.0, 19.0, 35.0, 23.0 ],
 									"rnbo_classname" : "in~",
 									"rnbo_extra_attributes" : 									{
-										"comment" : "",
-										"meta" : ""
+										"meta" : "",
+										"comment" : ""
 									}
 ,
 									"rnbo_serial" : 2,
@@ -1061,8 +1061,8 @@
 									"patching_rect" : [ 161.0, 19.0, 43.0, 23.0 ],
 									"rnbo_classname" : "out~",
 									"rnbo_extra_attributes" : 									{
-										"comment" : "",
-										"meta" : ""
+										"meta" : "",
+										"comment" : ""
 									}
 ,
 									"rnbo_serial" : 1,
@@ -1157,8 +1157,8 @@
 									"patching_rect" : [ 116.0, 19.0, 43.0, 23.0 ],
 									"rnbo_classname" : "out~",
 									"rnbo_extra_attributes" : 									{
-										"comment" : "",
-										"meta" : ""
+										"meta" : "",
+										"comment" : ""
 									}
 ,
 									"rnbo_serial" : 2,
@@ -1256,9 +1256,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"exposevoiceparams" : 0,
 										"notecontroller" : 0,
-										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"voicecontrol" : "simple"
 									}
 ,
 									"rnbo_serial" : 2,
@@ -1667,9 +1667,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"exposevoiceparams" : 0,
 										"notecontroller" : 0,
-										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"voicecontrol" : "simple"
 									}
 ,
 									"rnbo_serial" : 3,
@@ -1889,9 +1889,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"exposevoiceparams" : 0,
 										"notecontroller" : 0,
-										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0
+										"voicecontrol" : "simple"
 									}
 ,
 									"rnbo_serial" : 4,
@@ -3332,14 +3332,8 @@
 					"presentation" : 1,
 					"presentation_rect" : [ 3.0, 1.0, 112.0, 22.0 ],
 					"rnboattrcache" : 					{
-						"p_obj-6/transport/Transport.Stop" : 						{
-							"label" : "Transport.Stop",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
-						"p_obj-6/transport/Transport.Continue" : 						{
-							"label" : "Transport.Continue",
+						"p_obj-6/tempo/Transport.TempoRamp" : 						{
+							"label" : "Transport.TempoRamp",
 							"isEnum" : 0,
 							"parsestring" : ""
 						}
@@ -3350,20 +3344,32 @@
 							"parsestring" : ""
 						}
 ,
+						"p_obj-6/tempo/Transport.Tempo" : 						{
+							"label" : "Transport.Tempo",
+							"isEnum" : 0,
+							"parsestring" : ""
+						}
+,
+						"p_obj-10/Set.PGM2" : 						{
+							"label" : "Set.PGM2",
+							"isEnum" : 0,
+							"parsestring" : ""
+						}
+,
+						"p_obj-6/transport/Transport.Stop" : 						{
+							"label" : "Transport.Stop",
+							"isEnum" : 0,
+							"parsestring" : ""
+						}
+,
 						"p_obj-6/transport/Transport.Prime" : 						{
 							"label" : "Transport.Prime",
 							"isEnum" : 0,
 							"parsestring" : ""
 						}
 ,
-						"p_obj-6/tempo/Transport.TempoRamp" : 						{
-							"label" : "Transport.TempoRamp",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
-						"p_obj-6/tempo/Transport.Tempo" : 						{
-							"label" : "Transport.Tempo",
+						"p_obj-6/transport/Transport.Continue" : 						{
+							"label" : "Transport.Continue",
 							"isEnum" : 0,
 							"parsestring" : ""
 						}
@@ -3374,8 +3380,8 @@
 							"parsestring" : ""
 						}
 ,
-						"p_obj-10/Set.PGM2" : 						{
-							"label" : "Set.PGM2",
+						"p_obj-6/clock/Transport.ResetAllCounters" : 						{
+							"label" : "Transport.ResetAllCounters",
 							"isEnum" : 0,
 							"parsestring" : ""
 						}
@@ -3448,6 +3454,9 @@
 										}
 ,
 										"clock" : 										{
+											"Transport.ResetAllCounters" : 											{
+												"value" : 0.0
+											}
 
 										}
 ,
@@ -3524,6 +3533,9 @@
 													}
 ,
 													"clock" : 													{
+														"Transport.ResetAllCounters" : 														{
+															"value" : 0.0
+														}
 
 													}
 ,
@@ -3672,20 +3684,6 @@
 				"patchline" : 				{
 					"destination" : [ "obj-4", 0 ],
 					"source" : [ "obj-39", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
-					"destination" : [ "obj-19", 0 ],
-					"source" : [ "obj-4", 3 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
-					"destination" : [ "obj-20", 0 ],
-					"source" : [ "obj-4", 2 ]
 				}
 
 			}

@@ -1118,7 +1118,7 @@ class App:
         self.update_combined_status()
 
     def _send_segment_params(self, segment_index: int):
-        """Sends the Tempo, Loop Length, and Repetitions for the given segment index to RNBO."""
+        """Sends the Tempo Ramp, Tempo, Loop Length, Repetitions, and PGMs for the given segment index to RNBO."""
         current_song = self.song_service.get_current_song()
         if not current_song or not current_song.segments: return
         num_segments = len(current_song.segments)
@@ -1127,18 +1127,23 @@ class App:
             return
 
         segment = current_song.segments[segment_index]
-        print(f"Sending params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}, Reps={segment.repetitions}")
+        print(f"Sending params for segment {segment_index + 1}: Ramp={segment.tempo_ramp}, Tempo={segment.tempo}, Loop={segment.loop_length}, Reps={segment.repetitions}")
 
-        # Tempo path is correct: p_obj-6/tempo/Transport.Tempo
-        self.osc_service.send_rnbo_param("p_obj-6/tempo/Transport.Tempo", float(segment.tempo))
+        # Send Tempo Ramp FIRST
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.TempoRamp", float(segment.tempo_ramp))
+        # Send Tempo
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
 
         # PGM paths are correct: p_obj-10/Set.PGM1, p_obj-10/Set.PGM2
         print(f"Sending initial PGM for segment {segment_index + 1}: PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
-        self.osc_service.send_rnbo_param("p_obj-10/Set.PGM1", segment.program_message_1)
-        self.osc_service.send_rnbo_param("p_obj-10/Set.PGM2", segment.program_message_2)
+        self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", segment.program_message_1)
+        self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", segment.program_message_2)
+
+        # Note: Loop Length and Repetitions are not sent here by default,
+        # as their OSC paths might not be defined or needed in this context.
 
     def _send_segment_activation_params(self, segment_index: int):
-        """Sends the Tempo and Loop Length for the given segment index to RNBO.
+        """Sends the Tempo Ramp, Tempo and Loop Length for the given segment index to RNBO.
            Called when a segment becomes active (on Beat 1). Does NOT send PGMs."""
         current_song = self.song_service.get_current_song()
         if not current_song or not current_song.segments: return
@@ -1148,20 +1153,22 @@ class App:
             return
 
         segment = current_song.segments[segment_index]
-        print(f"Sending ACTIVATION params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}")
+        print(f"Sending ACTIVATION params for segment {segment_index + 1}: Ramp={segment.tempo_ramp}, Tempo={segment.tempo}, Loop={segment.loop_length}")
 
+        # Send Tempo Ramp FIRST
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.TempoRamp", float(segment.tempo_ramp))
         # Send Tempo
         self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
         # Send Loop Length (Assuming path exists - replace with actual path if different)
         # Example path, adjust as needed:
         # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
-        print(f"Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
+        print(f"Tempo Ramp and Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
 
         # DO NOT SEND PGMs HERE - They were sent on LoadNowBeat
 
     # <<< MODIFIED: Allow sending initial params for any segment index >>>
     def _send_initial_segment_params(self, segment_index: int = 0):
-        """Sends ALL parameters (Tempo, Loop Length, PGMs) for the specified
+        """Sends ALL parameters (Tempo Ramp, Tempo, Loop Length, PGMs) for the specified
            segment index. Defaults to index 0."""
         current_song = self.song_service.get_current_song()
         # segment_index = 0 # <<< REMOVE THIS LINE >>>
@@ -1174,8 +1181,10 @@ class App:
              return
 
         segment = current_song.segments[segment_index]
-        logger.info(f"Sending INITIAL params for segment {segment_index + 1}: Tempo={segment.tempo}, Loop={segment.loop_length}, PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
+        logger.info(f"Sending INITIAL params for segment {segment_index + 1}: Ramp={segment.tempo_ramp}, Tempo={segment.tempo}, Loop={segment.loop_length}, PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
 
+        # Send Tempo Ramp FIRST
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.TempoRamp", float(segment.tempo_ramp))
         # Send Tempo
         self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
         # Send Loop Length (Adjust path as needed)

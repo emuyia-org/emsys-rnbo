@@ -13,7 +13,7 @@ from typing import List, Optional, Dict, Any, Set # <<< Added Set
 # You might want to define these here or import from config if they become more widely used
 MIN_TEMPO = 30.0
 MAX_TEMPO = 300.0
-MIN_RAMP = 0.0
+MIN_RAMP = 5.0
 MAX_RAMP = 300.0
 MIN_LOOP_LENGTH = 8
 MAX_LOOP_LENGTH = 128
@@ -32,7 +32,7 @@ class Segment:
     program_message_1: int = 0          # MIDI Program Change 1 (0-127)
     program_message_2: int = 0          # MIDI Program Change 2 (0-127)
     tempo: float = 120.0                # Tempo in Beats Per Minute (30.0-300.0)
-    tempo_ramp: float = 0.0             # Time in seconds to ramp to this tempo from previous (0.0-300.0). 0 = instant.
+    tempo_ramp: float = 5.0             # Time in seconds to ramp to this tempo from previous (0.0-300.0). 0 = instant.
     loop_length: int = 16               # Length of the loop in beats (8-128)
     repetitions: int = 1                # Number of times to repeat this segment (1-128)
     automatic_transport_interrupt: bool = False # Pause playback after this segment finishes? (True/False)
