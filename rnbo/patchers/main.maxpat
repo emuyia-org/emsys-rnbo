@@ -37,20 +37,6 @@
 			}
 , 			{
 				"box" : 				{
-					"code" : "/*\r\nList of current RNBO parameters:\r\n```\r\n# only one possible value (1 is equivalent to triggering a bang in the RNBO patch)\r\np_obj-6/transport/Transport.Prime\r\np_obj-6/transport/Transport.Continue\r\np_obj-6/transport/Transport.Stop\r\n\r\n# 30-300\r\np_obj-6/tempo/Transport.Tempo\r\n\r\n# 0-127\r\np_obj-10/Set.PGM1\r\np_obj-10/Set.PGM2\r\n\r\n# 0-1 (toggle)\r\np_obj-9/Tin.Toggle\r\n```\r\nList of current RNBO outports:\r\n```\r\nTin.Toggle\r\nSet.PGM1\r\nSet.PGM2\r\nTransport.Status\r\nTransport.4nCount\r\nTransport.LoadNowBeat\r\nTransport.TempoRamp\r\nTransport.Tempo\r\n```\r\n*/",
-					"fontface" : 0,
-					"fontname" : "<Monospaced>",
-					"fontsize" : 12.0,
-					"id" : "obj-15",
-					"maxclass" : "codebox",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 16.0, 584.0, 669.0, 438.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
 					"automation" : "TIN",
 					"automationon" : "TIN",
 					"fontsize" : 14.0,
@@ -642,9 +628,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0,
-										"notecontroller" : 0
+										"exposevoiceparams" : 0
 									}
 ,
 									"rnbo_serial" : 1,
@@ -884,8 +870,8 @@
 									"patching_rect" : [ 66.0, 19.0, 35.0, 23.0 ],
 									"rnbo_classname" : "in~",
 									"rnbo_extra_attributes" : 									{
-										"meta" : "",
-										"comment" : ""
+										"comment" : "",
+										"meta" : ""
 									}
 ,
 									"rnbo_serial" : 1,
@@ -980,8 +966,8 @@
 									"patching_rect" : [ 30.0, 19.0, 35.0, 23.0 ],
 									"rnbo_classname" : "in~",
 									"rnbo_extra_attributes" : 									{
-										"meta" : "",
-										"comment" : ""
+										"comment" : "",
+										"meta" : ""
 									}
 ,
 									"rnbo_serial" : 2,
@@ -1075,8 +1061,8 @@
 									"patching_rect" : [ 161.0, 19.0, 43.0, 23.0 ],
 									"rnbo_classname" : "out~",
 									"rnbo_extra_attributes" : 									{
-										"meta" : "",
-										"comment" : ""
+										"comment" : "",
+										"meta" : ""
 									}
 ,
 									"rnbo_serial" : 1,
@@ -1171,8 +1157,8 @@
 									"patching_rect" : [ 116.0, 19.0, 43.0, 23.0 ],
 									"rnbo_classname" : "out~",
 									"rnbo_extra_attributes" : 									{
-										"meta" : "",
-										"comment" : ""
+										"comment" : "",
+										"meta" : ""
 									}
 ,
 									"rnbo_serial" : 2,
@@ -1270,9 +1256,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0,
-										"notecontroller" : 0
+										"exposevoiceparams" : 0
 									}
 ,
 									"rnbo_serial" : 2,
@@ -1681,9 +1667,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0,
-										"notecontroller" : 0
+										"exposevoiceparams" : 0
 									}
 ,
 									"rnbo_serial" : 3,
@@ -1903,9 +1889,9 @@
 										"polyphony" : -1.0,
 										"args" : [  ],
 										"receivemode" : "local",
+										"notecontroller" : 0,
 										"voicecontrol" : "simple",
-										"exposevoiceparams" : 0,
-										"notecontroller" : 0
+										"exposevoiceparams" : 0
 									}
 ,
 									"rnbo_serial" : 4,
@@ -3339,21 +3325,15 @@
 							}
  ],
 						"lines" : [  ],
-						"originid" : "pat-54"
+						"originid" : "pat-8"
 					}
 ,
 					"patching_rect" : [ 260.0, 484.0, 112.0, 22.0 ],
 					"presentation" : 1,
 					"presentation_rect" : [ 3.0, 1.0, 112.0, 22.0 ],
 					"rnboattrcache" : 					{
-						"p_obj-6/transport/Transport.Prime" : 						{
-							"label" : "Transport.Prime",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
-						"p_obj-6/tempo/Transport.Tempo" : 						{
-							"label" : "Transport.Tempo",
+						"p_obj-6/transport/Transport.Stop" : 						{
+							"label" : "Transport.Stop",
 							"isEnum" : 0,
 							"parsestring" : ""
 						}
@@ -3364,34 +3344,40 @@
 							"parsestring" : ""
 						}
 ,
-						"p_obj-6/tempo/Transport.TempoRamp" : 						{
-							"label" : "Transport.TempoRamp",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
-						"p_obj-6/transport/Transport.Stop" : 						{
-							"label" : "Transport.Stop",
-							"isEnum" : 0,
-							"parsestring" : ""
-						}
-,
 						"p_obj-9/Tin.Toggle" : 						{
 							"label" : "Tin.Toggle",
 							"isEnum" : 0,
 							"parsestring" : ""
 						}
 ,
+						"p_obj-6/transport/Transport.Prime" : 						{
+							"label" : "Transport.Prime",
+							"isEnum" : 0,
+							"parsestring" : ""
+						}
+,
+						"p_obj-6/tempo/Transport.TempoRamp" : 						{
+							"label" : "Transport.TempoRamp",
+							"isEnum" : 0,
+							"parsestring" : ""
+						}
+,
+						"p_obj-6/tempo/Transport.Tempo" : 						{
+							"label" : "Transport.Tempo",
+							"isEnum" : 0,
+							"parsestring" : ""
+						}
+,
 						"p_obj-10/Set.PGM1" : 						{
 							"label" : "Set.PGM1",
-							"isEnum" : 1,
-							"parsestring" : "\"A01\" \"A02\" \"A03\" \"A04\" \"A05\" \"A06\" \"A07\" \"A08\" \"A09\" \"A10\" \"A11\" \"A12\" \"A13\" \"A14\" \"A15\" \"A16\" \"B01\" \"B02\" \"B03\" \"B04\" \"B05\" \"B06\" \"B07\" \"B08\" \"B09\" \"B10\" \"B11\" \"B12\" \"B13\" \"B14\" \"B15\" \"B16\" \"C01\" \"C02\" \"C03\" \"C04\" \"C05\" \"C06\" \"C07\" \"C08\" \"C09\" \"C10\" \"C11\" \"C12\" \"C13\" \"C14\" \"C15\" \"C16\" \"D01\" \"D02\" \"D03\" \"D04\" \"D05\" \"D06\" \"D07\" \"D08\" \"D09\" \"D10\" \"D11\" \"D12\" \"D13\" \"D14\" \"D15\" \"D16\" \"E01\" \"E02\" \"E03\" \"E04\" \"E05\" \"E06\" \"E07\" \"E08\" \"E09\" \"E10\" \"E11\" \"E12\" \"E13\" \"E14\" \"E15\" \"E16\" \"F01\" \"F02\" \"F03\" \"F04\" \"F05\" \"F06\" \"F07\" \"F08\" \"F09\" \"F10\" \"F11\" \"F12\" \"F13\" \"F14\" \"F15\" \"F16\" \"G01\" \"G02\" \"G03\" \"G04\" \"G05\" \"G06\" \"G07\" \"G08\" \"G09\" \"G10\" \"G11\" \"G12\" \"G13\" \"G14\" \"G15\" \"G16\" \"H01\" \"H02\" \"H03\" \"H04\" \"H05\" \"H06\" \"H07\" \"H08\" \"H09\" \"H10\" \"H11\" \"H12\" \"H13\" \"H14\" \"H15\" \"H16\""
+							"isEnum" : 0,
+							"parsestring" : ""
 						}
 ,
 						"p_obj-10/Set.PGM2" : 						{
 							"label" : "Set.PGM2",
-							"isEnum" : 1,
-							"parsestring" : "\"A01\" \"A02\" \"A03\" \"A04\" \"A05\" \"A06\" \"A07\" \"A08\" \"A09\" \"A10\" \"A11\" \"A12\" \"A13\" \"A14\" \"A15\" \"A16\" \"B01\" \"B02\" \"B03\" \"B04\" \"B05\" \"B06\" \"B07\" \"B08\" \"B09\" \"B10\" \"B11\" \"B12\" \"B13\" \"B14\" \"B15\" \"B16\" \"C01\" \"C02\" \"C03\" \"C04\" \"C05\" \"C06\" \"C07\" \"C08\" \"C09\" \"C10\" \"C11\" \"C12\" \"C13\" \"C14\" \"C15\" \"C16\" \"D01\" \"D02\" \"D03\" \"D04\" \"D05\" \"D06\" \"D07\" \"D08\" \"D09\" \"D10\" \"D11\" \"D12\" \"D13\" \"D14\" \"D15\" \"D16\" \"E01\" \"E02\" \"E03\" \"E04\" \"E05\" \"E06\" \"E07\" \"E08\" \"E09\" \"E10\" \"E11\" \"E12\" \"E13\" \"E14\" \"E15\" \"E16\" \"F01\" \"F02\" \"F03\" \"F04\" \"F05\" \"F06\" \"F07\" \"F08\" \"F09\" \"F10\" \"F11\" \"F12\" \"F13\" \"F14\" \"F15\" \"F16\" \"G01\" \"G02\" \"G03\" \"G04\" \"G05\" \"G06\" \"G07\" \"G08\" \"G09\" \"G10\" \"G11\" \"G12\" \"G13\" \"G14\" \"G15\" \"G16\" \"H01\" \"H02\" \"H03\" \"H04\" \"H05\" \"H06\" \"H07\" \"H08\" \"H09\" \"H10\" \"H11\" \"H12\" \"H13\" \"H14\" \"H15\" \"H16\""
+							"isEnum" : 0,
+							"parsestring" : ""
 						}
 
 					}
@@ -3816,7 +3802,7 @@
 
 			}
  ],
-		"originid" : "pat-52",
+		"originid" : "pat-6",
 		"parameters" : 		{
 			"obj-10" : [ "pgm2", "pgm2", 0 ],
 			"obj-18" : [ "transport interrupt", "transport interrupt", 0 ],
