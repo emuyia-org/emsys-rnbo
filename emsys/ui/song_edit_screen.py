@@ -53,6 +53,11 @@ LIST_TOP_PADDING = 10
 # <<< NEW: Height reserved for playback status at the bottom >>>
 PLAYBACK_STATUS_AREA_HEIGHT = 50 # Adjust as needed
 
+# <<< ADDED: Flashing constants >>>
+FLASH_INTERVAL_MS = 300 # How often the flash state toggles (milliseconds)
+QUEUED_FLASH_COLOR = BLUE # Color to use for flashing queued segment
+# <<< END ADDED >>>
+
 # Helper to convert program change value to display format (can stay here or move to utils)
 def value_to_elektron_format(value: int) -> str:
     """Converts a MIDI program change value (0-127) to Elektron format (A01-H16)."""
@@ -95,8 +100,11 @@ class SongEditScreen(BaseScreen):
         self.no_button_held: bool = False
         # <<< MODIFIED: copied_segment_data can now be a list for multi-copy >>>
         self.copied_segment_data: Optional[List[Dict[str, Any]]] = None
-        # <<< ADDED: State for multi-selection >>>
         self.multi_select_indices: Set[int] = set()
+        # <<< ADDED: Flashing state >>>
+        self.flash_on: bool = False
+        self.last_flash_toggle_time: float = 0.0
+        # <<< END ADDED >>>
         # -----------------------------------------
 
         # Define parameter order and display names (kept here for drawing)
@@ -171,10 +179,19 @@ class SongEditScreen(BaseScreen):
         self.feedback_message = None
 
     def update(self):
-        """Update screen state, like clearing timed feedback."""
+        """Update screen state, like clearing timed feedback and handling flashing."""
         super().update()
-        if self.feedback_message and (time.time() - self.feedback_message[1] > self.feedback_duration):
+        current_time = time.time()
+
+        # --- Clear Timed Feedback ---
+        if self.feedback_message and (current_time - self.feedback_message[1] > self.feedback_duration):
             self.clear_feedback()
+
+        # --- Update Flashing State ---
+        if (current_time - self.last_flash_toggle_time) * 1000 >= FLASH_INTERVAL_MS:
+            self.flash_on = not self.flash_on
+            self.last_flash_toggle_time = current_time
+        # --- End Flashing Update ---
 
     def handle_midi(self, msg):
         """Handle MIDI messages delegated from the main app."""
@@ -560,7 +577,7 @@ class SongEditScreen(BaseScreen):
         self.clear_feedback()
         self._update_leds() # Update LEDs if needed
         # Provide feedback about multi-selection
-        self.set_feedback(f"Multi-select: {len(self.multi_select_indices)} segments", duration=1.0)
+        #self.set_feedback(f"Multi-select: {len(self.multi_select_indices)} segments", duration=1.0)
     # <<< END NEW METHOD >>>
 
     def _change_selected_parameter_vertically(self, direction: int):
@@ -1111,7 +1128,7 @@ class SongEditScreen(BaseScreen):
     # <<< Updated signature and logic >>>
     def _draw_segment_list(self, screen, area_rect: pygame.Rect, current_song,
                            play_symbol: Optional[str], current_playing_segment_index: Optional[int]):
-        """Draws the scrollable segment list, highlighting multi-select and playback."""
+        """Draws the scrollable segment list, highlighting multi-select, playback, and queued segments."""
         if not current_song:
              no_song_surf = self.font.render("No Song Loaded", True, ERROR_COLOR)
              no_song_rect = no_song_surf.get_rect(center=area_rect.center)
@@ -1123,12 +1140,12 @@ class SongEditScreen(BaseScreen):
             screen.blit(no_seg_surf, no_seg_rect)
             return
 
-        max_visible = self._get_max_visible_segments() # <<< REMOVED area_rect argument
+        max_visible = self._get_max_visible_segments()
         num_segments = len(current_song.segments)
         start_index = self.segment_scroll_offset
         end_index = min(start_index + max_visible, num_segments)
 
-        # Draw scroll arrows if needed
+        # Draw scroll arrows
         if self.segment_scroll_offset > 0:
             self._draw_scroll_arrow(screen, area_rect, 'up')
         if end_index < num_segments:
@@ -1139,59 +1156,72 @@ class SongEditScreen(BaseScreen):
             segment = current_song.segments[i]
             is_selected_anchor = (i == self.selected_segment_index)
             is_multi_selected = (i in self.multi_select_indices)
-            is_playing = (i == current_playing_segment_index) # <<< Check if this segment is playing
-            is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST) # <<< Check focus
+            is_playing = (i == current_playing_segment_index)
+            is_focused = (self.focused_column == FocusColumn.SEGMENT_LIST)
+
+            # <<< ADDED: Check if segment is queued >>>
+            is_queued_override = (i == self.app.pending_override_segment_index)
+            is_queued_normal = (self.app.next_segment_prepared and i == self.app.prepared_next_segment_index)
+            is_queued = is_queued_override or is_queued_normal
+            # <<< END ADDED >>>
 
             # Determine background color and text color
             bg_color = None
             text_color = WHITE # Default text color
 
-            if is_focused:
+            # <<< MODIFIED: Prioritize flashing highlight >>>
+            if is_queued and self.flash_on:
+                bg_color = QUEUED_FLASH_COLOR
+                text_color = BLACK # Make text visible on flash background
+            # <<< END MODIFIED >>>
+            elif is_focused: # Apply normal focus/selection highlights if not flashing
                 if is_selected_anchor and is_multi_selected:
-                    bg_color = MULTI_SELECT_ANCHOR_COLOR
-                    text_color = BLACK # Ensure readability
+                    bg_color = MULTI_SELECT_ANCHOR_COLOR # Anchor in multi-select (focused)
+                    text_color = BLACK
                 elif is_multi_selected:
-                    bg_color = MULTI_SELECT_COLOR
-                    text_color = BLACK # Ensure readability
-                elif is_selected_anchor: # Single selection or anchor before multi-select starts
-                    bg_color = GREY # <<< Use GREY for focused single select background
-                    text_color = HIGHLIGHT_COLOR # <<< Use HIGHLIGHT_COLOR for focused single select text
+                    bg_color = MULTI_SELECT_COLOR # Part of multi-select (focused)
+                    text_color = BLACK
+                elif is_selected_anchor:
+                    bg_color = GREY # Single selection (focused)
+                    text_color = HIGHLIGHT_COLOR
             else: # Not focused
                 if is_selected_anchor and is_multi_selected:
-                    # Indicate anchor even when not focused (subtly)
-                    text_color = MULTI_SELECT_ANCHOR_COLOR # Use the color itself for text
+                    #bg_color = MULTI_SELECT_ANCHOR_COLOR # Anchor in multi-select (unfocused) - Use same color?
+                    text_color = MULTI_SELECT_ANCHOR_COLOR
                 elif is_multi_selected:
-                    # Indicate multi-select even when not focused
-                    text_color = MULTI_SELECT_COLOR # Use the color itself for text
+                    #bg_color = MULTI_SELECT_COLOR # Part of multi-select (unfocused) - Use same color?
+                    text_color = MULTI_SELECT_COLOR
                 elif is_selected_anchor:
-                    # Indicate single selection when not focused
-                    text_color = HIGHLIGHT_COLOR # <<< Use HIGHLIGHT_COLOR for non-focused selected text
+                    #bg_color = GREY # Single selection (unfocused)
+                    text_color = HIGHLIGHT_COLOR # Keep text white on grey
 
             # Draw background highlight if needed
             if bg_color:
                 pygame.draw.rect(screen, bg_color, (area_rect.left + 1, text_y, area_rect.width - 2, LINE_HEIGHT))
 
-            # <<< Draw Play Symbol if playing >>>
+            # Draw Play Symbol if playing
             play_symbol_surf = None
             play_symbol_rect = None
             if is_playing and play_symbol:
                 play_color = GREEN if play_symbol == ">" else RED
+                # Ensure play symbol is visible on flash background
+                if is_queued and self.flash_on:
+                     play_color = WHITE if play_color == BLACK else play_color # Adjust if needed
                 play_symbol_surf = self.font.render(play_symbol, True, play_color)
                 play_symbol_rect = play_symbol_surf.get_rect(left=area_rect.left + 5, centery=text_y + LINE_HEIGHT // 2)
                 screen.blit(play_symbol_surf, play_symbol_rect)
 
+
             # Segment Text (adjust x based on play symbol)
             text_x = area_rect.left + 5
             if play_symbol_rect:
-                text_x = play_symbol_rect.right + 5 # Add padding after symbol
+                text_x = play_symbol_rect.right + 5
 
-            dirty_flag = "*" if segment.dirty else "" # <<< ADD dirty flag check
+            dirty_flag = "*" if segment.dirty else ""
             seg_num_str = f"{i + 1:02d}"
-            # Use Elektron format for display in list as well (like old version)
             prog1_str = value_to_elektron_format(segment.program_message_1)
             prog2_str = value_to_elektron_format(segment.program_message_2)
-            # seg_text = f"{i + 1:02d}: Seg {i + 1}" # Basic name
-            seg_text = f"{seg_num_str}{dirty_flag} {prog1_str}/{prog2_str}" # <<< Combine number, dirty flag, and PGM values
+            seg_text = f"{seg_num_str}{dirty_flag} {prog1_str}/{prog2_str}"
 
             seg_surf = self.font.render(seg_text, True, text_color) # Use determined text_color
             seg_rect = seg_surf.get_rect(left=text_x, centery=text_y + LINE_HEIGHT // 2)
