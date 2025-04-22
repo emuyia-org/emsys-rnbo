@@ -116,7 +116,12 @@ class App:
         self.notify_status("Initializing Song Service...")
         logger.info("Initializing Song Service...")
         print("Instantiating SongService...")
-        self.song_service = SongService(status_callback=self.notify_status)
+        # <<< Pass the callback method to SongService >>>
+        # Ensure _handle_segment_list_change is defined below in the class
+        self.song_service = SongService(
+            status_callback=self.notify_status,
+            index_update_callback=self._handle_segment_list_change # <<< THIS IS THE KEY CHANGE HERE
+        )
         logger.info("SongService instantiated.")
         print("SongService instantiated.")
 
@@ -668,7 +673,110 @@ class App:
         # <<< REMOVE THIS LINE >>>
         # self.queued_manual_segment_index = None
 
-    # ... (rest of App class) ...
+    # <<< --- ADD THIS METHOD DEFINITION INSIDE THE App CLASS --- >>>
+    # <<< Make sure indentation matches other methods like run() or cleanup() >>>
+    def _handle_segment_list_change(self, operation: str, index: int):
+        """
+        Adjusts internal playback indices when SongService reports
+        a segment list modification (add/remove).
+        """
+        logger.info(f"Segment list change reported: operation='{operation}', index={index}")
+        current_song = self.song_service.get_current_song()
+        num_segments = len(current_song.segments) if current_song else 0
+
+        # --- Adjust current_segment_index ---
+        # Check bounds after potential adjustment
+        if self.current_segment_index is not None: # Only adjust if an index is set
+            original_index = self.current_segment_index
+            adjusted = False
+            if operation == 'add':
+                if index <= self.current_segment_index:
+                    self.current_segment_index += 1
+                    adjusted = True
+            elif operation == 'remove':
+                if index == self.current_segment_index:
+                    logger.warning(f"Currently playing segment (index {index}) was removed. Resetting playback state.")
+                    self._reset_playback_state(reset_segment=True) # Reset to segment 0
+                    # Early exit as state is reset
+                    self.update_combined_status()
+                    return
+                elif index < self.current_segment_index:
+                    self.current_segment_index -= 1
+                    adjusted = True
+
+            if adjusted:
+                 logger.debug(f"Adjusting current_segment_index: {original_index} -> {self.current_segment_index} (due to {operation} at {index})")
+                 # Validate index bounds after adjustment
+                 if num_segments > 0: # Only check bounds if there are segments left
+                     if not (0 <= self.current_segment_index < num_segments):
+                         logger.warning(f"Adjusted current_segment_index ({self.current_segment_index}) is out of bounds (0-{num_segments-1}). Clamping.")
+                         self.current_segment_index = max(0, min(self.current_segment_index, num_segments - 1))
+                 elif num_segments == 0:
+                     logger.warning("Segment list empty after adjustment. Setting current_segment_index to 0.")
+                     self.current_segment_index = 0 # Or None? Let's stick to 0 for now.
+
+
+        # --- Adjust prepared_next_segment_index ---
+        if self.prepared_next_segment_index is not None:
+            original_index = self.prepared_next_segment_index
+            adjusted = False
+            if operation == 'add':
+                if index <= self.prepared_next_segment_index:
+                    self.prepared_next_segment_index += 1
+                    adjusted = True
+            elif operation == 'remove':
+                if index == self.prepared_next_segment_index:
+                    logger.warning(f"Prepared next segment (index {index}) was removed. Clearing preparation.")
+                    self._clear_preparation_flags() # Clear prep state
+                    # Note: prepared_next_segment_index is cleared by the above call
+                elif index < self.prepared_next_segment_index:
+                    self.prepared_next_segment_index -= 1
+                    adjusted = True
+            if adjusted and self.prepared_next_segment_index is not None: # Check if not cleared
+                 logger.debug(f"Adjusting prepared_next_segment_index: {original_index} -> {self.prepared_next_segment_index}")
+                 # Optional: Add bounds check if needed
+
+        # --- Adjust pending_override_segment_index ---
+        if self.pending_override_segment_index is not None:
+            original_index = self.pending_override_segment_index
+            adjusted = False
+            if operation == 'add':
+                if index <= self.pending_override_segment_index:
+                    self.pending_override_segment_index += 1
+                    adjusted = True
+            elif operation == 'remove':
+                if index == self.pending_override_segment_index:
+                    logger.warning(f"Pending override segment (index {index}) was removed. Clearing override.")
+                    self.pending_override_segment_index = None # Clear override
+                elif index < self.pending_override_segment_index:
+                    self.pending_override_segment_index -= 1
+                    adjusted = True
+            if adjusted and self.pending_override_segment_index is not None: # Check if not cleared
+                 logger.debug(f"Adjusting pending_override_segment_index: {original_index} -> {self.pending_override_segment_index}")
+                 # Optional: Add bounds check if needed
+
+        # --- Adjust queued_manual_segment_index ---
+        if self.queued_manual_segment_index is not None:
+            original_index = self.queued_manual_segment_index
+            adjusted = False
+            if operation == 'add':
+                if index <= self.queued_manual_segment_index:
+                    self.queued_manual_segment_index += 1
+                    adjusted = True
+            elif operation == 'remove':
+                if index == self.queued_manual_segment_index:
+                    logger.warning(f"Queued manual segment (index {index}) was removed. Clearing queue.")
+                    self.queued_manual_segment_index = None # Clear queue
+                elif index < self.queued_manual_segment_index:
+                    self.queued_manual_segment_index -= 1
+                    adjusted = True
+            if adjusted and self.queued_manual_segment_index is not None: # Check if not cleared
+                 logger.debug(f"Adjusting queued_manual_segment_index: {original_index} -> {self.queued_manual_segment_index}")
+                 # Optional: Add bounds check if needed
+
+        # Update status display after adjustments
+        self.update_combined_status()
+    # <<< --- END METHOD DEFINITION --- >>>
 
     def _initial_led_update(self):
         """Send initial LED values via MidiService, potentially based on active screen."""

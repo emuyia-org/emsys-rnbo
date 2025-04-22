@@ -5,7 +5,7 @@ Service layer for managing Song objects, including loading, saving,
 and modification operations, centralizing song state management.
 """
 
-from typing import Optional, List, Any, Tuple
+from typing import Optional, List, Any, Tuple, Callable
 import os
 import traceback
 import math
@@ -44,11 +44,14 @@ def _format_duration(total_seconds: float) -> str:
 class SongService:
     """Manages the lifecycle and state of the current song."""
 
-    def __init__(self, status_callback=None):
+    def __init__(self, status_callback: Optional[Callable[[str], None]] = None,
+                 index_update_callback: Optional[Callable[[str, int], None]] = None):
         """Initialize the SongService."""
         self.current_song: Optional[Song] = None
         self.last_loaded_song_name: Optional[str] = None # Store the name used for loading/saving
         self._status_callback = status_callback if status_callback else lambda msg: print(f"SongService Status: {msg}")
+        # <<< Store the index update callback >>>
+        self._index_update_callback = index_update_callback
         self._initialize_with_last_song() # Load preference and attempt load
 
     # --- Current Song State Management ---
@@ -404,10 +407,20 @@ class SongService:
         if not self.current_song:
             return False, "No current song loaded."
         try:
+            actual_index = index if index is not None else len(self.current_song.segments) # Determine insertion index
             self.current_song.add_segment(segment, index)
             # Add segment marks song as dirty
-            msg = f"Added segment at index {index if index is not None else len(self.current_song.segments)}."
+            msg = f"Added segment at index {actual_index}." # Use actual_index for message
             # self._status_callback(msg) # Maybe too noisy for segment edits?
+
+            # <<< Call the index update callback >>>
+            if self._index_update_callback:
+                try:
+                    self._index_update_callback('add', actual_index)
+                except Exception as cb_err:
+                    logger.error(f"Error in index_update_callback during add: {cb_err}", exc_info=True)
+            # <<< End callback call >>>
+
             return True, msg
         except (TypeError, IndexError, Exception) as e:
             msg = f"Error adding segment: {e}"
@@ -420,10 +433,21 @@ class SongService:
         if not self.current_song:
             return False, "No current song loaded."
         try:
+            # Store index before removal
+            removed_index = index
             self.current_song.remove_segment(index)
             # Remove segment marks song as dirty
-            msg = f"Removed segment at index {index}."
+            msg = f"Removed segment at index {removed_index}."
             # self._status_callback(msg)
+
+            # <<< Call the index update callback >>>
+            if self._index_update_callback:
+                try:
+                    self._index_update_callback('remove', removed_index)
+                except Exception as cb_err:
+                    logger.error(f"Error in index_update_callback during remove: {cb_err}", exc_info=True)
+            # <<< End callback call >>>
+
             return True, msg
         except (IndexError, Exception) as e:
             msg = f"Error removing segment: {e}"
