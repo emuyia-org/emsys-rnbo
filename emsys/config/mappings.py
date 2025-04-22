@@ -144,22 +144,6 @@ NON_REPEATABLE_CCS = {
 # --- Button Name Mapping ---
 # Dictionary to map CC numbers to user-friendly button/encoder push names
 button_map = {
-    # Layer B Nav/Edit Buttons
-    NEXT_CC: "NEXT",
-    PREV_CC: "PREV",
-    UP_NAV_CC: "UP",
-    DOWN_NAV_CC: "DOWN",
-    LEFT_NAV_CC: "LEFT",
-    RIGHT_NAV_CC: "RIGHT",
-    YES_NAV_CC: "YES",
-    NO_NAV_CC: "NO",
-    RENAME_CC: "RENAME",
-    SAVE_CC: "SAVE",
-    DELETE_CC: "DELETE",
-    CREATE_CC: "CREATE",
-    # Layer A Transport Buttons
-    PLAY_CC: "PLAY",
-    STOP_CC: "STOP",
     # Layer A Encoder Pushes
     A_ENC_PUSH_1_CC: "A_ENC_PUSH_1",
     A_ENC_PUSH_2_CC: "A_ENC_PUSH_2",
@@ -213,4 +197,21 @@ button_map = {
     B_BTN_15_CC: "B_BTN_15",
     B_BTN_16_CC: "B_BTN_16",
     # Fader CCs are not typically mapped as "buttons"
+
+    # Layer B Nav/Edit Buttons
+    NEXT_CC: "NEXT",
+    PREV_CC: "PREV",
+    UP_NAV_CC: "UP",
+    DOWN_NAV_CC: "DOWN",
+    LEFT_NAV_CC: "LEFT",
+    RIGHT_NAV_CC: "RIGHT",
+    YES_NAV_CC: "YES",
+    NO_NAV_CC: "NO",
+    RENAME_CC: "RENAME",
+    SAVE_CC: "SAVE",
+    DELETE_CC: "DELETE",
+    CREATE_CC: "CREATE",
+    # Layer A Transport Buttons
+    PLAY_CC: "PLAY",
+    STOP_CC: "STOP",
 }
