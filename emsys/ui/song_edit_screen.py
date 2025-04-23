@@ -38,7 +38,7 @@ from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
 
 # <<< ADD A_BTN_12_CC to imports >>>
 from emsys.config.mappings import (A_BTN_1_CC, A_BTN_9_CC, A_BTN_13_CC, FADER_A_CC, FADER_B_CC,
-                                   A_BTN_12_CC) # <<< ADDED A_BTN_12_CC
+                                   A_BTN_12_CC, A_BTN_6_CC)
 # <<< END ADD >>>
 
 # Define layout constants
@@ -98,13 +98,11 @@ class SongEditScreen(BaseScreen):
         self.feedback_duration: float = 2.0
         self.text_input_widget = TextInputWidget(app)
         self.no_button_held: bool = False
-        # <<< MODIFIED: copied_segment_data can now be a list for multi-copy >>>
+        self.a_btn_6_held: bool = False
         self.copied_segment_data: Optional[List[Dict[str, Any]]] = None
         self.multi_select_indices: Set[int] = set()
-        # <<< ADDED: Flashing state >>>
         self.flash_on: bool = False
         self.last_flash_toggle_time: float = 0.0
-        # <<< END ADDED >>>
         # -----------------------------------------
 
         # Define parameter order and display names (kept here for drawing)
@@ -148,8 +146,9 @@ class SongEditScreen(BaseScreen):
         self.clear_feedback()
         self.text_input_widget.cancel()
         self.no_button_held = False
+        self.a_btn_6_held = False
         self.copied_segment_data = None
-        self.multi_select_indices.clear() # <<< ADDED: Clear multi-select
+        self.multi_select_indices.clear()
 
         if not current_song:
             self.set_feedback("No song loaded!", is_error=True, duration=5.0)
@@ -163,8 +162,9 @@ class SongEditScreen(BaseScreen):
         self.text_input_widget.cancel()
         self.clear_feedback()
         self.no_button_held = False
+        self.a_btn_6_held = False
         self.copied_segment_data = None
-        self.multi_select_indices.clear() # <<< ADDED: Clear multi-select
+        self.multi_select_indices.clear()
         # Optionally turn off specific LEDs here using led_handler if needed
 
     def set_feedback(self, message: str, is_error: bool = False, duration: Optional[float] = None):
@@ -195,7 +195,6 @@ class SongEditScreen(BaseScreen):
 
     def handle_midi(self, msg):
         """Handle MIDI messages delegated from the main app."""
-        # ... (existing code for non-CC or text input) ...
         if msg.type != 'control_change':
              return
 
@@ -204,7 +203,6 @@ class SongEditScreen(BaseScreen):
 
         # --- Handle Text Input Mode FIRST (if ever used) ---
         if self.text_input_widget.is_active:
-            # ... (text input handling logic - currently none needed here)
             return
 
         # --- Track NO Button State ---
@@ -217,22 +215,28 @@ class SongEditScreen(BaseScreen):
                 self.multi_select_indices.clear() # <<< Clear multi-select on NO release
                 # NO release itself doesn't trigger actions below, so return
                 return
+        
+        if cc == mappings.A_BTN_6_CC:
+            if value == 127:
+                self.a_btn_6_held = True
+            elif value == 0:
+                self.a_btn_6_held = False
+            # A_BTN_6 press/release doesn't trigger actions below by itself
+            return
 
-        # <<< ADDED: Handle FADER_A_CC for Segment Selection Only >>>
         if cc == FADER_A_CC:
             self.multi_select_indices.clear() # Clear multi-select on fader use
             self._handle_fader_a_segment_selection(value)
             return # Fader A handled
-        # <<< END ADDED >>>
 
         # --- Handle Fader B for Contextual Selection ---
         if cc == FADER_B_CC:
             self.multi_select_indices.clear() # <<< Clear multi-select on fader use
-            self._handle_fader_b_contextual_selection(value) # <<< Renamed for clarity
+            self._handle_fader_b_contextual_selection(value)
             return # Fader B handled
 
         # --- Handle Encoder Rotation for Parameter Adjustment ---
-        if cc == mappings.KNOB_B8_CC: # Assuming B8 is the primary editing encoder
+        if cc == mappings.KNOB_B8_CC:
             direction = 0
             if 1 <= value <= 63: direction = 1
             elif 65 <= value <= 127: direction = -1
@@ -243,7 +247,6 @@ class SongEditScreen(BaseScreen):
 
         # --- Process Button Presses (value == 127) ---
         if value == 127:
-            # <<< ADDED: Handle A_BTN_12_CC for Load/Queue Segment >>>
             if cc == A_BTN_12_CC:
                 # Check if STOP button is held (for Reset Song combination in main.py)
                 # We access stop_button_held directly from app state for this check
@@ -266,6 +269,23 @@ class SongEditScreen(BaseScreen):
                 #self.set_feedback(f"Segment Hold {hold_state_str}", duration=1.5)
                 return # Handled
             # <<< END ADDED >>>
+
+            # <<< MODIFIED: Handle A_BTN_1 and A_BTN_9 for Segment Navigation / Select Playing >>>
+            elif cc == A_BTN_1_CC: # Navigate Segment UP or Select Playing
+                if self.a_btn_6_held:
+                    self._select_currently_playing_segment() # <<< CALL HELPER
+                else:
+                    self.multi_select_indices.clear() # Clear multi-select on direct segment nav
+                    self._change_selected_segment(-1) # Normal UP navigation
+                return # Handled
+            elif cc == A_BTN_9_CC: # Navigate Segment DOWN or Select Playing
+                if self.a_btn_6_held:
+                    self._select_currently_playing_segment() # <<< CALL HELPER
+                else:
+                    self.multi_select_indices.clear() # Clear multi-select on direct segment nav
+                    self._change_selected_segment(1) # Normal DOWN navigation
+                return # Handled
+            # <<< END MODIFIED >>>
 
             # <<< ADDED: Handle A_BTN_1 and A_BTN_9 for Segment Navigation >>>
             elif cc == A_BTN_1_CC: # Navigate Segment UP (regardless of focus)
@@ -631,6 +651,27 @@ class SongEditScreen(BaseScreen):
         elif current_param_index < self.parameter_scroll_offset:
             self.parameter_scroll_offset = current_param_index
         self.parameter_scroll_offset = max(0, min(self.parameter_scroll_offset, num_params - max_visible))
+
+    def _select_currently_playing_segment(self):
+        """Sets the selected segment index to the currently playing segment."""
+        current_playing_index = self.app.current_segment_index # Get index directly from App state
+
+        if current_playing_index is None:
+            self.set_feedback("Nothing is currently playing", duration=1.5)
+            return
+
+        current_song = self.song_service.get_current_song()
+        if not current_song or not (0 <= current_playing_index < len(current_song.segments)):
+            self.set_feedback("Playing segment index is invalid", is_error=True)
+            return
+
+        if self.selected_segment_index != current_playing_index:
+            self.selected_segment_index = current_playing_index
+            self.multi_select_indices.clear() # Clear multi-select
+            self._adjust_segment_scroll()
+            self._ensure_parameter_selection() # Ensure a param is selected if focus moves
+            self._update_leds()
+            self.set_feedback(f"Selected playing segment {current_playing_index + 1}", duration=1.0)
 
     # --- Song/Segment Actions ---
     def _save_current_song(self):
