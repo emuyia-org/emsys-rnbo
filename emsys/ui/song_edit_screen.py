@@ -34,10 +34,10 @@ from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
                                    BLACK, WHITE, GREY, BLUE, FOCUS_BORDER_COLOR,
                                    FEEDBACK_AREA_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT,
                                    MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR,
-                                   GREEN, RED, YELLOW, CYAN)
+                                   GREEN, RED, YELLOW, CYAN, ORANGE)
 
 # <<< ADD A_BTN_12_CC to imports >>>
-from emsys.config.mappings import (A_BTN_1_CC, A_BTN_9_CC, A_BTN_13_CC, FADER_A_CC, FADER_B_CC,
+from emsys.config.mappings import (A_BTN_1_CC, A_BTN_9_CC, A_BTN_5_CC, FADER_A_CC, FADER_B_CC,
                                    A_BTN_12_CC, A_BTN_6_CC)
 # <<< END ADD >>>
 
@@ -260,8 +260,8 @@ class SongEditScreen(BaseScreen):
                     pass # Fall through to allow main.py's handler if needed (though it should catch it first)
             # <<< END ADDED >>>
 
-            # <<< ADDED: Handle A_BTN_13_CC for Hold Toggle >>>
-            elif cc == A_BTN_13_CC:
+            # <<< ADDED: Handle A_BTN_5_CC for Hold Toggle >>>
+            elif cc == A_BTN_5_CC:
                 self.app.toggle_hold_state() # Call the App's method
                 # Update LEDs and provide feedback based on the new state in App
                 self._update_leds()
@@ -405,13 +405,13 @@ class SongEditScreen(BaseScreen):
             self.selected_segment_index,
             self.selected_parameter_key
         )
-        # <<< ADDED: Update A_BTN_13 LED based on hold state >>>
+        # <<< ADDED: Update A_BTN_5 LED based on hold state >>>
         try:
             # Assuming led_handler has a method like set_button_led
             # Or send MIDI directly if handler doesn't support it yet
             hold_led_value = 127 if self.app.hold_active else 0
-            # self.led_handler.set_button_led(A_BTN_13_CC, hold_led_value) # Ideal
-            self.app.send_midi_cc(A_BTN_13_CC + 64, hold_led_value) # Send to corresponding LED CC (often +64 offset)
+            # self.led_handler.set_button_led(A_BTN_5_CC, hold_led_value) # Ideal
+            self.app.send_midi_cc(A_BTN_5_CC + 64, hold_led_value) # Send to corresponding LED CC (often +64 offset)
         except Exception as e:
             print(f"Error updating hold LED: {e}")
         # <<< END ADDED >>>
@@ -1425,13 +1425,34 @@ class SongEditScreen(BaseScreen):
         surface.blit(play_surf, play_rect)
         current_x = play_rect.right + 15 # Add spacing
 
-        # HOLD Indicator
+        # --- HOLD and TIN Indicators (Stacked) ---
+        hold_tin_x = current_x # Starting X for this block
         hold_text = "HOLD"
+        tin_text = "TIN"
+
+        # Calculate vertical positions for stacked text
+        indicator_spacing = 2 # Small vertical space between HOLD and TIN
+        total_indicator_height = font.get_height() + small_font.get_height() + indicator_spacing
+        indicator_block_top = status_area_y + (PLAYBACK_STATUS_AREA_HEIGHT - total_indicator_height) // 2
+
+        y_pos_hold = indicator_block_top
+        y_pos_tin = y_pos_hold + font.get_height() + indicator_spacing
+
+        # Draw HOLD Indicator
         hold_color = CYAN if self.app.hold_active else GREY
         hold_surf = font.render(hold_text, True, hold_color)
-        hold_rect = hold_surf.get_rect(left=current_x, centery=y_pos)
+        hold_rect = hold_surf.get_rect(left=hold_tin_x, top=y_pos_hold)
         surface.blit(hold_surf, hold_rect)
+
+        # Draw TIN Indicator
+        tin_color = ORANGE if self.app.tin_toggle_state else GREY # <<< Use ORANGE and check state
+        tin_surf = small_font.render(tin_text, True, tin_color) # Use smaller font
+        tin_rect = tin_surf.get_rect(left=hold_tin_x, top=y_pos_tin) # Align left with HOLD
+        surface.blit(tin_surf, tin_rect)
+
+        # Update current_x based on the widest indicator (HOLD in this case)
         current_x = hold_rect.right + 15
+        # --- End HOLD and TIN Indicators ---
 
         # <<< RESTORED: Draw Segment Info >>>
         seg_surf = font.render(seg_text, True, WHITE)

@@ -16,7 +16,7 @@ PARAM_STEPS = {
     'program_message_1': 1,
     'program_message_2': 1,
     'tempo': 1.0,
-    'tempo_ramp': 0.5,
+    'tempo_ramp': 1.0,
     'loop_length': 1,
     'repetitions': 1,
     'automatic_transport_interrupt': 1, # Step for toggling boolean

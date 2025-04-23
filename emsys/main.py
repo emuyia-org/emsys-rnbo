@@ -1,12 +1,5 @@
 # emsys/main.py
 # -*- coding: utf-8 -*-
-"""
-Main entry point for the Emsys Python Application. V3 (Refactored with SongService)
-
-Initializes Pygame, MIDI service, Song Service, Screen manager, and runs the main event loop.
-Handles exit via MIDI CC 47. Includes MIDI device auto-reconnection via MidiService.
-Implements universal button hold-repeat for MIDI CC messages.
-"""
 import pygame
 import sys
 import os
@@ -14,13 +7,11 @@ import time
 import traceback
 import sdnotify
 import subprocess
-import logging # <<< ADD logging import
+import logging
 from typing import Optional, Dict, Any, Tuple
 
-# --- Configure Logging Early --- <<< ADD THIS BLOCK
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__) # Optional: Get logger for main.py itself
-# --- End Logging Config ---
+logger = logging.getLogger(__name__)
 
 # Add the project root directory to the path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,23 +34,22 @@ BUTTON_REPEAT_INTERVAL_S = getattr(settings_module, 'BUTTON_REPEAT_INTERVAL_MS',
 
 # --- Refactored Imports ---
 from emsys.services.midi_service import MidiService
-from emsys.services.song_service import SongService # <<< ADDED SongService
-from emsys.services.osc_service import OSCService # <<< ADDED OSCService
+from emsys.services.song_service import SongService
+from emsys.services.osc_service import OSCService
 from emsys.ui.screen_manager import ScreenManager
-from emsys.ui.base_screen import BaseScreen  # Import BaseScreen
-# from emsys.ui.playback_screen import PlaybackScreen # <<< REMOVE PlaybackScreen import
+from emsys.ui.base_screen import BaseScreen
 # --------------------------
 from emsys.core.song import MIN_TEMPO, MAX_TEMPO
-# <<< ADDED: Import Segment for type hinting >>>
 from emsys.core.song import Segment
-from typing import Optional, Dict, Any, Tuple, List # <<< Added List
+from typing import Optional, Dict, Any, Tuple, List
 
 # --- Import specific CCs and non-repeatable set ---
 from emsys.config.mappings import (
     NEXT_CC, PREV_CC, NON_REPEATABLE_CCS, KNOB_A1_CC,
-    PLAY_CC, STOP_CC, # <<< Added transport CCs
-    A_BTN_12_CC, # <<< ADDED A_BTN_12_CC
-    A_BTN_13_CC # <<< ADDED A_BTN_13_CC
+    PLAY_CC, STOP_CC,
+    A_BTN_12_CC,
+    A_BTN_13_CC,
+    A_BTN_5_CC
 )
 
 # --- Import the utility functions ---
@@ -74,20 +64,18 @@ class App:
         print("Initializing App...")
         logger.info("App initialization started.")
 
-        # <<< MOVE TYPE HINTS FOR SERVICES HERE >>>
         self.osc_service: Optional[OSCService] = None
         self.screen_manager: Optional[ScreenManager] = None
         self.song_service: Optional[SongService] = None
         self.midi_service: Optional[MidiService] = None
         self.notifier: Optional[sdnotify.SystemdNotifier] = None
-        # <<< END MOVE >>>
 
         # Add this for status notification rate limiting
         self.last_status_notification_time = 0
         self.status_notification_interval = 2.0  # seconds between status updates
         self.last_status_message = ""
 
-        self.notifier = sdnotify.SystemdNotifier() # Now assign the instance
+        self.notifier = sdnotify.SystemdNotifier()
         self.notify_status("Initializing Pygame...")
         logger.info("Initializing Pygame...")
         pygame.init()
@@ -451,6 +439,19 @@ class App:
                 # If STOP is not held, let it fall through to normal button handling below
             # <<< END ADDED >>>
 
+            # <<< ADDED: Handle Manual Tin.Toggle (A_BTN_13_CC) >>>
+            elif control == A_BTN_13_CC and value == 127:
+                logger.info(f"Manual Tin.Toggle requested (A_BTN_13 pressed). Current state: {self.tin_toggle_state}")
+                # Send the opposite value via OSC
+                new_tin_value = 0 if self.tin_toggle_state else 1
+                self.osc_service.send_rnbo_param(f"p_obj-9/Tin.Toggle", new_tin_value)
+                # Do not update self.tin_toggle_state here; wait for OSC feedback.
+                # Prevent button repeat logic from handling this press further
+                if control in self.pressed_buttons:
+                    del self.pressed_buttons[control]
+                return # Manual toggle handled
+            # <<< END ADDED >>>
+
             # --- Handle Specific Controls (e.g., Knobs) FIRST ---
             if control == KNOB_A1_CC:
                 # endless encoder: adjust BPM step=1
@@ -487,6 +488,12 @@ class App:
                     # Let it proceed to normal button handling (repeat tracking / dispatch).
                     pass
                 # <<< END ADDED >>>
+
+                # <<< ADDED: Check if it was A_BTN_13 (already handled if value was 127) >>>
+                if control == A_BTN_13_CC:
+                    # If we reach here, it means value was not 127 (shouldn't happen with current logic)
+                    # or it's a repeat signal, which we don't want for the toggle.
+                    return # Ignore repeats or non-press values for toggle
 
                 # If it's a non-repeatable button, dispatch immediately and stop
                 if control in NON_REPEATABLE_CCS:
@@ -1121,13 +1128,14 @@ class App:
                 next_segment_index = self.current_segment_index + 1 # No modulo needed here
                 print(f"Preparing transition to segment {next_segment_index + 1}")
 
+                if current_segment.automatic_transport_interrupt:
+                    logger.info(f"Segment {self.current_segment_index + 1} has Auto Pause ON. Setting Tin.Toggle = 1.")
+                    self.osc_service.send_rnbo_param(f"p_obj-9/Tin.Toggle", 1)
+
                 next_segment = current_song.segments[next_segment_index]
                 print(f"Sending PREPARATORY PGM messages for upcoming segment {next_segment_index + 1}: PGM1={next_segment.program_message_1}, PGM2={next_segment.program_message_2}")
                 self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", next_segment.program_message_1)
                 self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", next_segment.program_message_2)
-
-                if self.tin_toggle_state: # Check the boolean state directly
-                    print(f"Tin.Toggle is ON. Not implemented yet.")
 
                 # --- Set Preparation Flags ---
                 print(f"LoadNowBeat: Setting preparation flags for segment {next_segment_index + 1}.")
