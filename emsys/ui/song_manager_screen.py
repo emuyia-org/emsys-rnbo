@@ -281,13 +281,6 @@ class SongManagerScreen(BaseScreen):
             basename_to_load = self.song_list[self.selected_index]
             current_song_name = self.song_service.get_current_song_name() # <<< Use SongService
 
-            if current_song_name == basename_to_load:
-                self.set_feedback(f"'{basename_to_load}' is already loaded.")
-                # <<< REMOVED: Attempt to switch to edit screen >>>
-                # edit_screen = self.app.screen_manager.screens[2] # Assuming Edit is 3rd screen
-                # if edit_screen: self.app.set_active_screen(edit_screen)
-                return # <<< ADDED: Stop processing here if already loaded
-
             if self.song_service.is_current_song_dirty(): # <<< Use SongService
                  self.prompts.activate(PromptType.UNSAVED_LOAD, data=basename_to_load)
                  self.set_feedback(f"'{current_song_name}' has unsaved changes!", is_error=True)
