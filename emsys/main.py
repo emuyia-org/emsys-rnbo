@@ -163,7 +163,8 @@ class App:
         self.current_beat_count: int = 0
         self.stop_button_held: bool = False
         # Track current tempo for endless encoder
-        self.current_tempo: float = 120.0  # will be synced from RNBO outport
+        self.current_tempo: float = 120.0
+        self.actual_rnbo_tempo: float = 120.0
         self.next_segment_prepared: bool = False
         self.prime_action_occurred: bool = False
         self.is_initial_cycle_after_play: bool = True
@@ -322,7 +323,7 @@ class App:
             self.screen.fill(BLACK)
             if active_screen and hasattr(active_screen, 'draw'):
                 try:
-                    # <<< Pass detailed playback components to draw >>>
+                    # <<< MODIFIED: Pass detailed playback components to draw >>>
                     active_screen.draw(
                         screen_surface=self.screen,
                         midi_status=midi_status,
@@ -334,14 +335,17 @@ class App:
                         seg_text=playback_components['seg_text'],
                         rep_text=playback_components['rep_text'],
                         beat_text=playback_components['beat_text'],
-                        tempo_text=playback_components['tempo_text'],
+                        # <<< MODIFIED: Pass both tempo strings >>>
+                        actual_tempo_text=playback_components['actual_tempo_text'],
+                        target_tempo_text=playback_components['target_tempo_text'],
+                        # <<< END MODIFIED >>>
                         current_playing_segment_index=playback_components['current_playing_segment_index']
                     )
+                    # <<< END MODIFIED >>>
 
                 except Exception as e:
                     print(f"Error during screen {active_screen.__class__.__name__} draw: {e}")
                     traceback.print_exc()
-
 
             pygame.display.flip()
             self.clock.tick(FPS)
@@ -839,7 +843,6 @@ class App:
                 self.queued_manual_segment_index = None # Clear the deferred slot
             # <<< --- END MODIFICATION --- >>>
 
-
             # <<< --- START MODIFICATION for Override --- >>>
             # Now, proceed with the existing override/preparation logic
             override_handled = False
@@ -904,18 +907,31 @@ class App:
             except (ValueError, TypeError):
                  print(f"Warning: Could not parse Transport.Status value: {value}")
 
-        # <<< ADD Tempo Handling >>>
+        # <<< MODIFIED Tempo Handling >>>
         elif outport_name == "Transport.Tempo":
             try:
                 new_tempo = float(value)
-                if new_tempo != self.current_tempo:
-                    self.current_tempo = new_tempo
-                    print(f"Tempo updated via OSC: {self.current_tempo:.1f}")
+                # <<< Update ONLY the ACTUAL RNBO tempo state >>>
+                if new_tempo != self.actual_rnbo_tempo:
+                    self.actual_rnbo_tempo = new_tempo
+                    # logger.debug(f"Actual RNBO Tempo updated via OSC: {self.actual_rnbo_tempo:.1f}") # Optional debug log
                     # Optionally update status immediately if needed
-                    # self.update_combined_status()
+                    # self.update_combined_status() # Status is updated in main loop anyway
+
+                # <<< REMOVED: Block that aligned self.current_tempo >>>
+                # # <<< ALSO update the TARGET tempo state if it differs significantly >>>
+                # # This keeps the target tempo aligned unless actively being changed by user/ramp
+                # # Add a small tolerance to avoid flapping due to float precision
+                # tolerance = 0.01
+                # if abs(new_tempo - self.current_tempo) > tolerance:
+                #     # Check if a ramp is active? For now, just update if different.
+                #     # logger.debug(f"Aligning target tempo self.current_tempo ({self.current_tempo:.1f}) to actual ({new_tempo:.1f})") # Optional debug log
+                #     self.current_tempo = new_tempo
+                # <<< END REMOVED Block >>>
+
             except (ValueError, TypeError):
-                print(f"Warning: Could not parse Transport.Tempo value: {value}")
-        # <<< END Tempo Handling >>>
+                logger.warning(f"Could not parse Transport.Tempo value: {value}")
+        # <<< END MODIFIED Tempo Handling >>>
 
         # <<< Beat Count Handling >>>
         elif outport_name == "Transport.4nCount":
@@ -1162,6 +1178,10 @@ class App:
         # Send Loop Length (Assuming path exists - replace with actual path if different)
         # Example path, adjust as needed:
         # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
+        
+        self.current_tempo = float(segment.tempo)
+        logger.debug(f"Updated self.current_tempo to {self.current_tempo:.1f} from segment activation.")
+
         print(f"Tempo Ramp and Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
 
         # DO NOT SEND PGMs HERE - They were sent on LoadNowBeat
@@ -1191,12 +1211,15 @@ class App:
         # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
         # logger.debug(f"Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
 
+        self.current_tempo = float(segment.tempo)
+        logger.debug(f"Updated self.current_tempo to {self.current_tempo:.1f} from initial segment params.")
+
         # Send PGMs for the initial segment
         self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", segment.program_message_1)
         self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", segment.program_message_2)
 
         # Update internal tempo state as well
-        self.current_tempo = segment.tempo
+        #self.current_tempo = segment.tempo
 
     # --- Status Update ---
     def update_combined_status(self, playback_components: Optional[Dict[str, Any]] = None):
@@ -1219,7 +1242,9 @@ class App:
             pb_seg = playback_components['seg_text'].replace("Seg: ", "")
             pb_rep = playback_components['rep_text'].replace("Rep: ", "")
             pb_beat = playback_components['beat_text'].replace("Beat: ", "B")
-            pb_tempo = playback_components['tempo_text'].replace("Tempo: ", "T")
+            # <<< MODIFIED: Use actual_tempo_text and adjust label >>>
+            pb_tempo = playback_components['actual_tempo_text'].replace("Actual: ", "T")
+            # <<< END MODIFIED >>>
             playback_status_str = f"| {pb_symbol} {pb_seg} {pb_rep} {pb_beat} {pb_tempo}"
 
         # Combine for systemd status
@@ -1461,12 +1486,13 @@ class App:
         current_song = self.song_service.get_current_song()
         num_segments = len(current_song.segments) if current_song and current_song.segments else 0
 
-        play_symbol = ">" if self.is_playing else "||"
-        tempo_text = f"Tempo: {self.current_tempo:.1f}" # Use internal tempo state
+        play_symbol = "▶" if self.is_playing else "■"
+        actual_tempo_text = f"Actual: {self.actual_rnbo_tempo:.1f}" # Tempo from RNBO outport
+        target_tempo_text = f"Target: {self.current_tempo:.1f}" # Internal/Target tempo state
 
         seg_text = "Seg: -/-"
         rep_text = "Rep: -/-"
-        beat_text = f"Beat: {self.current_beat_count + 1}" # Display 1-based beat count
+        beat_text = f"Beat: {self.current_beat_count + 1}/-" # Display 1-based beat count
 
         current_playing_segment_index = None # Default to None
 
@@ -1475,20 +1501,24 @@ class App:
             total_repetitions = current_segment.repetitions
             seg_text = f"Seg: {self.current_segment_index + 1}/{num_segments}"
             rep_text = f"Rep: {self.current_repetition}/{total_repetitions}"
+            beat_text = f"Beat: {self.current_beat_count + 1}/{current_segment.loop_length}" # Display 1-based beat count
             current_playing_segment_index = self.current_segment_index # Set the index if valid
         else:
             # Handle cases where there's no song or index is invalid
             seg_text = f"Seg: -/{num_segments}" if num_segments > 0 else "Seg: -/-"
             rep_text = "Rep: -/-"
-            # beat_text remains as calculated above or default
+            beat_text = f"Beat: {self.current_beat_count + 1}/-" # Display 1-based beat count
 
         return {
             "play_symbol": play_symbol,
             "seg_text": seg_text,
             "rep_text": rep_text,
             "beat_text": beat_text,
-            "tempo_text": tempo_text,
+            "actual_tempo_text": actual_tempo_text,
+            "target_tempo_text": target_tempo_text,
+            # <<< ADDED Missing Key >>>
             "current_playing_segment_index": current_playing_segment_index
+            # <<< END ADDED >>>
         }
     # <<< END NEW METHOD >>>
 

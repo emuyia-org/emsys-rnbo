@@ -710,7 +710,7 @@ class SongManagerScreen(BaseScreen):
                  pygame.draw.rect(screen, GREY, bg_rect) # Use GREY
 
              # Construct display text
-             # prefix = "> " if is_selected else "  "
+             # prefix = "▶" if is_selected else "  "
              prefix = "  " # No prefix for now
              dirty_indicator = "*" if is_dirty else "" # Second asterisk if dirty
              item_text = f"{prefix}{song_name}{dirty_indicator}"

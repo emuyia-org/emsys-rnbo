@@ -34,7 +34,7 @@ from emsys.config.settings import (ERROR_COLOR, FEEDBACK_COLOR, HIGHLIGHT_COLOR,
                                    BLACK, WHITE, GREY, BLUE, FOCUS_BORDER_COLOR,
                                    FEEDBACK_AREA_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT,
                                    MULTI_SELECT_COLOR, MULTI_SELECT_ANCHOR_COLOR,
-                                   GREEN, RED) # <<< Added GREEN, RED
+                                   GREEN, RED, YELLOW, CYAN)
 
 # <<< ADD A_BTN_12_CC to imports >>>
 from emsys.config.mappings import (A_BTN_1_CC, A_BTN_9_CC, A_BTN_13_CC, FADER_A_CC, FADER_B_CC,
@@ -51,7 +51,7 @@ PARAM_AREA_X = LEFT_MARGIN + SEGMENT_LIST_WIDTH + 15
 COLUMN_BORDER_WIDTH = 2
 LIST_TOP_PADDING = 10
 # <<< NEW: Height reserved for playback status at the bottom >>>
-PLAYBACK_STATUS_AREA_HEIGHT = 50 # Adjust as needed
+PLAYBACK_STATUS_AREA_HEIGHT = 65 # Adjust as needed
 
 # <<< ADDED: Flashing constants >>>
 FLASH_INTERVAL_MS = 300 # How often the flash state toggles (milliseconds)
@@ -1051,25 +1051,73 @@ class SongEditScreen(BaseScreen):
     # --- Drawing Methods ---
     # <<< Updated draw signature to match BaseScreen >>>
     def draw(self, screen_surface: pygame.Surface,
-             midi_status: Optional[str] = None,
-             song_status: Optional[str] = None,
-             duration_status: Optional[str] = None,
-             osc_status: Optional[str] = None,
-             play_symbol: Optional[str] = None,
-             seg_text: Optional[str] = None,
-             rep_text: Optional[str] = None,
-             beat_text: Optional[str] = None,
-             tempo_text: Optional[str] = None,
-             current_playing_segment_index: Optional[int] = None):
-        """Draw the song editing screen content, including playback status."""
+             midi_status: str, song_status: str, duration_status: str, osc_status: str,
+             play_symbol: str, seg_text: str, rep_text: str, beat_text: str,
+             actual_tempo_text: str, target_tempo_text: str,
+             current_playing_segment_index: Optional[int]):
+        """Draws the song edit screen, including status bars."""
+        # <<< Use surface dimensions >>>
+        screen_width = screen_surface.get_width()
+        screen_height = screen_surface.get_height()
+
+        # --- Get Current Song ---
+        current_song = self.song_service.get_current_song() # Fetch current song
+
+        # --- Calculate layout areas ---
+        list_area_top = TOP_MARGIN + LIST_TOP_PADDING # Assuming no title drawn here
+
+        # <<< Correct calculation using screen_height >>>
+        available_list_height = screen_height - list_area_top - FEEDBACK_AREA_HEIGHT - PLAYBACK_STATUS_AREA_HEIGHT
+        available_list_height = max(0, available_list_height) # Ensure non-negative
+
+        seg_list_rect = pygame.Rect(LEFT_MARGIN, list_area_top, SEGMENT_LIST_WIDTH, available_list_height)
+        param_detail_rect = pygame.Rect(PARAM_AREA_X, list_area_top,
+                                        screen_width - PARAM_AREA_X - LEFT_MARGIN, available_list_height)
+
+        # --- Draw Column Borders ---
+        # <<< Correct border height calculation >>>
+        border_bottom_y = screen_height - FEEDBACK_AREA_HEIGHT - PLAYBACK_STATUS_AREA_HEIGHT - 5
+        pygame.draw.line(screen_surface, GREY,
+                         (LEFT_MARGIN + SEGMENT_LIST_WIDTH, TOP_MARGIN),
+                         (LEFT_MARGIN + SEGMENT_LIST_WIDTH, border_bottom_y),
+                         COLUMN_BORDER_WIDTH)
+
+        # --- Draw Segment List ---
+        self._draw_segment_list(
+            screen=screen_surface,
+            area_rect=seg_list_rect, # Pass calculated rect
+            current_song=current_song,
+            play_symbol=play_symbol,
+            current_playing_segment_index=current_playing_segment_index
+        )
+
+        # --- Draw Parameter Area ---
+        self._draw_parameter_details(
+            screen=screen_surface,
+            area_rect=param_detail_rect, # Pass calculated rect
+            current_song=current_song
+        )
+
+        # --- Draw Column Focus Borders ---
+        if self.focused_column == FocusColumn.SEGMENT_LIST:
+            pygame.draw.rect(screen_surface, FOCUS_BORDER_COLOR, seg_list_rect, COLUMN_BORDER_WIDTH)
+            pygame.draw.rect(screen_surface, GREY, param_detail_rect, COLUMN_BORDER_WIDTH) # Use GREY for non-focused border
+        else: # Parameter Details Focused
+            pygame.draw.rect(screen_surface, GREY, seg_list_rect, COLUMN_BORDER_WIDTH) # Use GREY for non-focused border
+            pygame.draw.rect(screen_surface, FOCUS_BORDER_COLOR, param_detail_rect, COLUMN_BORDER_WIDTH)
+
+        # --- Draw Feedback Area ---
+        self._draw_feedback(screen_surface) # Draws above playback status
+
+        # --- Draw Playback Status Bar (Bottom) ---
+        # <<< Call the corrected drawing function >>>
+        self._draw_playback_status(screen_surface, play_symbol, seg_text, rep_text, beat_text,
+                                   actual_tempo_text, target_tempo_text)
+
+        # --- Draw Text Input Widget (if active) ---
         if self.text_input_widget.is_active:
             self.text_input_widget.draw(screen_surface)
-        else:
-            # Pass all status info down
-            self._draw_normal_content(screen_surface, midi_status, song_status, duration_status, osc_status,
-                                      play_symbol, seg_text, rep_text, beat_text, tempo_text,
-                                      current_playing_segment_index)
-            self._draw_feedback(screen_surface) # Feedback drawn on top of status
+
 
     # <<< Updated signature >>>
     def _draw_normal_content(self, screen_surface: pygame.Surface,
@@ -1081,7 +1129,8 @@ class SongEditScreen(BaseScreen):
                              seg_text: Optional[str] = None,
                              rep_text: Optional[str] = None,
                              beat_text: Optional[str] = None,
-                             tempo_text: Optional[str] = None,
+                             actual_tempo_text: Optional[str] = None,
+                             target_tempo_text: Optional[str] = None,
                              current_playing_segment_index: Optional[int] = None):
         """Draws the main content: title, segments, parameters, and playback status."""
         current_song = self.song_service.get_current_song()
@@ -1121,8 +1170,8 @@ class SongEditScreen(BaseScreen):
             0, screen_surface.get_height() - FEEDBACK_AREA_HEIGHT - PLAYBACK_STATUS_AREA_HEIGHT,
             screen_surface.get_width(), PLAYBACK_STATUS_AREA_HEIGHT
         )
-        self._draw_playback_status(screen_surface, playback_area_rect,
-                                   play_symbol, seg_text, rep_text, beat_text, tempo_text)
+        self._draw_playback_status(screen_surface, play_symbol, seg_text, rep_text, beat_text,
+                                   actual_tempo_text, target_tempo_text)
 
 
     # <<< Updated signature and logic >>>
@@ -1203,7 +1252,7 @@ class SongEditScreen(BaseScreen):
             play_symbol_surf = None
             play_symbol_rect = None
             if is_playing and play_symbol:
-                play_color = GREEN if play_symbol == ">" else RED
+                play_color = GREEN if play_symbol == "▶" else RED
                 # Ensure play symbol is visible on flash background
                 if is_queued and self.flash_on:
                      play_color = WHITE if play_color == BLACK else play_color # Adjust if needed
@@ -1302,75 +1351,86 @@ class SongEditScreen(BaseScreen):
             print(f"Error drawing parameters: {e}")
             traceback.print_exc()
 
-    # <<< NEW METHOD to draw playback status >>>
-    def _draw_playback_status(self, screen, area_rect: pygame.Rect,
-                              play_symbol: Optional[str], seg_text: Optional[str],
-                              rep_text: Optional[str], beat_text: Optional[str],
-                              tempo_text: Optional[str]):
-        """Draws the playback status information in the specified area."""
-        # Optional: Draw a faint background or separator line
-        # pygame.draw.rect(screen, GREY, area_rect, 1) # Example border
-        pygame.draw.line(screen, GREY, area_rect.topleft, area_rect.topright, 1)
 
-        # Use a slightly smaller font for status details
-        status_font = self.font_medium # Or self.font_small
+    def _draw_playback_status(self, surface: pygame.Surface,
+                              play_symbol: str, seg_text: str, rep_text: str, beat_text: str,
+                              actual_tempo_text: str, target_tempo_text: str):
+        """Draws the playback status bar correctly at the bottom."""
+        # <<< Use surface dimensions >>>
+        screen_width = surface.get_width()
+        screen_height = surface.get_height()
 
-        # Defaults
-        play_symbol = play_symbol or "?"
-        seg_text = seg_text or "Seg: -/-"
-        rep_text = rep_text or "Rep: -/-"
-        beat_text = beat_text or "Beat: -"
-        tempo_text = tempo_text or "Tempo: -"
+        # <<< Correct Y position calculation >>>
+        status_area_y = screen_height - PLAYBACK_STATUS_AREA_HEIGHT
+        status_area_rect = pygame.Rect(0, status_area_y, screen_width, PLAYBACK_STATUS_AREA_HEIGHT)
 
-        # Colors
-        play_color = GREEN if play_symbol == ">" else RED
-        text_color = WHITE
-        # <<< ADDED: Hold status color >>>
-        hold_color = HIGHLIGHT_COLOR if self.app.hold_active else GREY # Use highlight color when active
+        # Draw background and border
+        pygame.draw.rect(surface, BLACK, status_area_rect) # Fill with black
+        pygame.draw.rect(surface, GREY, status_area_rect, 1) # Optional border
 
-        # Layout items horizontally
-        padding = 15 # Reduced padding slightly
-        x_pos = area_rect.left + LEFT_MARGIN
+        font = self.font_small
+        small_font = self.font_tiny
+        padding = 10
+        # Vertical centering within the bar
+        content_height = font.get_height()
+        y_pos = status_area_y + (PLAYBACK_STATUS_AREA_HEIGHT - content_height) // 2
 
-        # 1. Play Symbol
-        play_surf = self.font_large.render(play_symbol, True, play_color)
-        play_rect = play_surf.get_rect(left=x_pos, centery=area_rect.centery)
-        screen.blit(play_surf, play_rect)
-        x_pos = play_rect.right + padding
+        # --- Draw Left-Aligned Elements ---
+        current_x = padding
 
-        # <<< ADDED: Hold Indicator >>>
-        hold_surf = status_font.render("HOLD", True, hold_color)
-        hold_rect = hold_surf.get_rect(left=x_pos, centery=area_rect.centery)
-        screen.blit(hold_surf, hold_rect)
-        x_pos = hold_rect.right + padding
-        # <<< END ADDED >>>
+        # Play Symbol
+        play_surf = font.render(play_symbol, True, WHITE)
+        play_rect = play_surf.get_rect(left=current_x, centery=y_pos)
+        surface.blit(play_surf, play_rect)
+        current_x = play_rect.right + 15 # Add spacing
 
-        # 2. Segment
-        seg_surf = status_font.render(seg_text, True, text_color)
-        seg_rect = seg_surf.get_rect(left=x_pos, centery=area_rect.centery)
-        screen.blit(seg_surf, seg_rect)
-        x_pos = seg_rect.right + padding
+        # HOLD Indicator
+        hold_text = "HOLD"
+        hold_color = CYAN if self.app.hold_active else GREY
+        hold_surf = font.render(hold_text, True, hold_color)
+        hold_rect = hold_surf.get_rect(left=current_x, centery=y_pos)
+        surface.blit(hold_surf, hold_rect)
+        current_x = hold_rect.right + 15
 
-        # 3. Repetition
-        rep_surf = status_font.render(rep_text, True, text_color)
-        rep_rect = rep_surf.get_rect(left=x_pos, centery=area_rect.centery)
-        screen.blit(rep_surf, rep_rect)
-        x_pos = rep_rect.right + padding
+        # <<< RESTORED: Draw Segment Info >>>
+        seg_surf = font.render(seg_text, True, WHITE)
+        seg_rect = seg_surf.get_rect(left=current_x, centery=y_pos)
+        surface.blit(seg_surf, seg_rect)
+        current_x = seg_rect.right + 15
+        # <<< END RESTORED >>>
 
-        # 4. Beat
-        beat_surf = status_font.render(beat_text, True, text_color)
-        beat_rect = beat_surf.get_rect(left=x_pos, centery=area_rect.centery)
-        screen.blit(beat_surf, beat_rect)
-        x_pos = beat_rect.right + padding
+        # <<< RESTORED: Draw Repetition Info >>>
+        rep_surf = font.render(rep_text, True, WHITE)
+        rep_rect = rep_surf.get_rect(left=current_x, centery=y_pos)
+        surface.blit(rep_surf, rep_rect)
+        current_x = rep_rect.right + 15
+        # <<< END RESTORED >>>
 
-        # 5. Tempo
-        tempo_surf = status_font.render(tempo_text, True, text_color)
-        tempo_rect = tempo_surf.get_rect(left=x_pos, centery=area_rect.centery)
-        if tempo_rect.right > area_rect.right - LEFT_MARGIN:
-             tempo_rect.right = area_rect.right - LEFT_MARGIN
-        screen.blit(tempo_surf, tempo_rect)
+        # <<< RESTORED: Draw Beat Count Info >>>
+        beat_surf = font.render(beat_text, True, WHITE)
+        beat_rect = beat_surf.get_rect(left=current_x, centery=y_pos)
+        surface.blit(beat_surf, beat_rect)
+        # current_x = beat_rect.right + 15 # Update if more items are added to the left
+        # <<< END RESTORED >>>
 
-    # <<< END NEW METHOD >>>
+        # --- Draw Right-Aligned Tempo Block ---
+        tempo_right_align_x = screen_width - padding # Right edge for alignment
+
+        actual_tempo_surf = font.render(actual_tempo_text, True, WHITE)
+        target_tempo_surf = font.render(target_tempo_text, True, WHITE)
+
+        # Calculate vertical position for the tempo block (centered within the bar)
+        tempo_block_height = actual_tempo_surf.get_height() + target_tempo_surf.get_height() + 2
+        tempo_block_top = status_area_y + (PLAYBACK_STATUS_AREA_HEIGHT - tempo_block_height) // 2
+
+        # Position tempo text, aligned to the right edge
+        actual_tempo_rect = actual_tempo_surf.get_rect(right=tempo_right_align_x, top=tempo_block_top)
+        target_tempo_rect = target_tempo_surf.get_rect(right=tempo_right_align_x, top=actual_tempo_rect.bottom + 2)
+
+        # Draw tempo info
+        surface.blit(actual_tempo_surf, actual_tempo_rect)
+        surface.blit(target_tempo_surf, target_tempo_rect)
+
 
     def _draw_feedback(self, screen):
         """Draws the feedback message at the bottom (now above playback status)."""

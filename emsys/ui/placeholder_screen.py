@@ -121,7 +121,8 @@ class PlaceholderScreen(BaseScreen):
              seg_text: Optional[str] = None,
              rep_text: Optional[str] = None,
              beat_text: Optional[str] = None,
-             tempo_text: Optional[str] = None,
+             actual_tempo_text: Optional[str] = None,
+             target_tempo_text: Optional[str] = None,
              current_playing_segment_index: Optional[int] = None):
         # <<< END MODIFIED >>>
         # <<< ADDED: Get screen dimensions from the passed surface >>>
