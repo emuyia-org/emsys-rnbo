@@ -621,17 +621,27 @@ class App:
         # 3. Clear ALL pending preparation/override/deferred flags
         self._clear_preparation_flags() # Clears prep flags ONLY now
         self.pending_override_segment_index = None # Clear immediate override
-        self.queued_manual_segment_index = None # <<< ADD THIS LINE: Explicitly clear deferred queue >>>
+        self.queued_manual_segment_index = None # Explicitly clear deferred queue
+
+        # <<< REMOVED SkipTempoRamp send from here >>>
 
         # 4. Send Parameters for the selected Segment (Tempo, Loop, PGMs)
         logger.info(f"Sending initial parameters for segment {segment_index + 1}...")
         self._send_initial_segment_params(segment_index) # Use modified initial send
+
+        # <<< ADDED: Send SkipTempoRamp = 1.0 AFTER other params >>>
+        #logger.info(f"Sending SkipTempoRamp = 1 for immediate load.")
+        # Send as 1
+        #self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.SkipTempoRamp", 1)
+        # <<< END ADDED >>>
+
 
         # 5. Update Status Display
         self.update_combined_status()
 
         # 6. Provide Feedback (optional, could be done by calling screen)
         self.notify_status(f"Loaded Segment {segment_index + 1}")
+
 
     # <<< NEW METHOD: Queue segment override (Transport Active) >>>
     def queue_segment_override(self, segment_index: int):
@@ -908,7 +918,7 @@ class App:
                  print(f"Warning: Could not parse Transport.Status value: {value}")
 
         # <<< MODIFIED Tempo Handling >>>
-        elif outport_name == "Transport.Tempo":
+        elif outport_name == "Transport.TransportTempo":
             try:
                 new_tempo = float(value)
                 # <<< Update ONLY the ACTUAL RNBO tempo state >>>
@@ -930,7 +940,7 @@ class App:
                 # <<< END REMOVED Block >>>
 
             except (ValueError, TypeError):
-                logger.warning(f"Could not parse Transport.Tempo value: {value}")
+                logger.warning(f"Could not parse Transport.TransportTempo value: {value}")
         # <<< END MODIFIED Tempo Handling >>>
 
         # <<< Beat Count Handling >>>
@@ -1203,12 +1213,12 @@ class App:
         segment = current_song.segments[segment_index]
         logger.info(f"Sending INITIAL params for segment {segment_index + 1}: Ramp={segment.tempo_ramp}, Tempo={segment.tempo}, Loop={segment.loop_length}, PGM1={segment.program_message_1}, PGM2={segment.program_message_2}")
 
-        # Send Tempo Ramp FIRST
+        # Send Tempo Ramp FIRST (after skip potentially)
         self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.TempoRamp", float(segment.tempo_ramp))
         # Send Tempo
         self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
         # Send Loop Length (Adjust path as needed)
-        # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/clock/Transport.BarLength", int(segment.loop_length))
         # logger.debug(f"Tempo sent. Loop Length ({segment.loop_length}) sending needs correct OSC path.") # Placeholder reminder
 
         self.current_tempo = float(segment.tempo)
@@ -1217,9 +1227,6 @@ class App:
         # Send PGMs for the initial segment
         self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM1", segment.program_message_1)
         self.osc_service.send_rnbo_param(f"{self.set_base_path}/Set.PGM2", segment.program_message_2)
-
-        # Update internal tempo state as well
-        #self.current_tempo = segment.tempo
 
     # --- Status Update ---
     def update_combined_status(self, playback_components: Optional[Dict[str, Any]] = None):

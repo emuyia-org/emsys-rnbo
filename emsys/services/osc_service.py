@@ -115,7 +115,7 @@ class OSCService:
             "Transport.Status",
             "Transport.4nCount",
             "Transport.LoadNowBeat",
-            "Transport.Tempo",
+            "Transport.TransportTempo",
             "Transport.TempoRamp",
             "Set.PGM1",
             "Set.PGM2",
