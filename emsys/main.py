@@ -1187,7 +1187,7 @@ class App:
         self.osc_service.send_rnbo_param(f"{self.transport_base_path}/tempo/Transport.Tempo", float(segment.tempo))
         # Send Loop Length (Assuming path exists - replace with actual path if different)
         # Example path, adjust as needed:
-        # self.osc_service.send_rnbo_param(f"{self.transport_base_path}/transport/Transport.LoopLength", int(segment.loop_length))
+        self.osc_service.send_rnbo_param(f"{self.transport_base_path}/clock/Transport.BarLength", int(segment.loop_length))
         
         self.current_tempo = float(segment.tempo)
         logger.debug(f"Updated self.current_tempo to {self.current_tempo:.1f} from segment activation.")
